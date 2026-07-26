@@ -129,8 +129,22 @@ export const CART = {
   get outPk() { return DSP.backEmf(this.Bl, this.vRef); },
   get outRms() { return this.outPk / Math.SQRT2; },   // ≈ 2.85e-4 V = 0.285 mV
   loadOhm: 100,
+  srcOhm: 10,                   // CHOSEN: coil dc resistance of a low-output MC
   vtfN: 0.0196,                 // 2.0 g vertical tracking force, in newtons
+  /**
+   * Loading loss. The cartridge is a source with `srcOhm` driving `loadOhm`, so
+   * the phono input never sees the open-circuit voltage:
+   *     loss = 20·log10(loadOhm / (srcOhm + loadOhm)) = −0.83 dB
+   * This row was in the phono chapter's ladder but not in CHAIN's solve, so the
+   * phono and preamp chapters disagreed by exactly that 0.83 dB.
+   */
+  get loadLossDb() { return DSP.dB(this.loadOhm / (this.srcOhm + this.loadOhm)); },
+  /** Voltage actually presented to the phono input. */
+  get atInputRms() { return this.outRms * DSP.undB(this.loadLossDb); },
 };
+
+/** Tonearm wiring. One gauge, quoted once. */
+export const TONEARM = { litzMm2: 0.030, lenM: 1.2 };
 
 export const TT = {
   rpm: 100 / 3,                 // 33⅓
@@ -154,7 +168,10 @@ export const DIGITAL = { fs: 192000, bits: 24, fsCd: 44100, bitsCd: 16, osr: 64,
 // ---------------------------------------------------------------------------
 // Room and seat
 // ---------------------------------------------------------------------------
-export const ROOM = { L: 7.4, W: 9.0, H: 3.1, rt60: 0.42 };
+/** Axis names match LAYOUT.room exactly: W across, D away from the listener,
+ *  H floor to ceiling. (These were L/W/D-swapped against LAYOUT and two stages
+ *  read them as different axes.) */
+export const ROOM = { W: 7.4, D: 9.0, H: 3.1, rt60: 0.42 };
 
 /**
  * The chain, end to end. Every stage that quotes a gain must take it from here
@@ -166,7 +183,10 @@ export const ROOM = { L: 7.4, W: 9.0, H: 3.1, rt60: 0.42 };
 export const CHAIN = (() => {
   const vCart = CART.outRms;
   const vTerm = Math.sqrt(1.0 * SPEAKER.nominalZ);          // 2.8284 V rms = 1 W
-  const total = DSP.dB(vTerm / vCart);
-  const vol = total - PHONO.gainDb - PREAMP.gainDb - AMP.gainDb;   // negative
-  return { vCart, vTerm, totalDb: total, volumeDb: vol };
+  const loadDb = CART.loadLossDb;                              // −0.83 dB
+  const total = DSP.dB(vTerm / vCart);                         // cartridge → posts
+  // The ladder must account for the loading loss, or the chapter that shows it
+  // and the chapter that does not will disagree by 0.83 dB.
+  const vol = total - loadDb - PHONO.gainDb - PREAMP.gainDb - AMP.gainDb;
+  return { vCart, vTerm, totalDb: total, loadLossDb: loadDb, volumeDb: vol };
 })();

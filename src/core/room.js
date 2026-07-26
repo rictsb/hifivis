@@ -57,13 +57,47 @@ function seamlessBackdrop() {
   g.computeVertexNormals();
 
   const mat = new THREE.MeshPhysicalMaterial({
-    color: 0x14161a, metalness: 0, roughness: 0.90, envMapIntensity: 0.7,
-    side: THREE.DoubleSide,
+    color: 0xffffff, map: cycGradient(), metalness: 0, roughness: 0.90,
+    envMapIntensity: 0.7, side: THREE.DoubleSide,
   });
   const m = new THREE.Mesh(g, mat);
   m.position.y = -0.0015;              // sit a hair under the polished floor
   m.receiveShadow = true;
   return m;
+}
+
+/**
+ * The lit sweep. v runs 0 at the front of the floor to 1 at the top of the
+ * wall; the pool sits just behind the equipment and falls away above and in
+ * front, with a gentle horizontal vignette so the sweep has a centre.
+ */
+function cycGradient(w = 256, h = 256) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  const img = g.createImageData(w, h);
+  const d = img.data;
+  for (let y = 0; y < h; y++) {
+    const v = y / (h - 1);
+    // pool centred at v = 0.52 (just above the gear), asymmetric falloff
+    const t = (v - 0.52) / (v < 0.52 ? 0.34 : 0.42);
+    const pool = Math.exp(-t * t * 1.15);
+    for (let x = 0; x < w; x++) {
+      const u = (x / (w - 1)) * 2 - 1;
+      const side = 1 - 0.34 * u * u;                 // soft horizontal vignette
+      const lum = 0.055 + 0.235 * pool * side;
+      const i = (y * w + x) * 4;
+      d[i] = (lum * 246) | 0;
+      d[i + 1] = (lum * 250) | 0;
+      d[i + 2] = (lum * 255) | 0;
+      d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  return t;
 }
 
 function floor() {
@@ -217,14 +251,14 @@ export function buildRoom(scene) {
 
   // Foreground wash: without this the floor between camera and system falls to
   // pure black and the frame loses its bottom third.
-  const fore = new THREE.SpotLight(0xdCE6F2, 15, 14, Math.PI * 0.42, 0.96, 1.35);
+  const fore = new THREE.SpotLight(0xdCE6F2, 6, 14, Math.PI * 0.46, 0.99, 1.35);
   fore.position.set(1.4, 3.6, 5.6);
   fore.target.position.set(-0.2, 0.0, 0.4);
   fore.castShadow = false;
   scene.add(fore, fore.target);
 
   // A soft overhead pool that grazes the top surfaces and pools on the floor.
-  const pool = new THREE.SpotLight(0xffe9cf, 22, 12, Math.PI * 0.30, 0.92, 1.6);
+  const pool = new THREE.SpotLight(0xffe9cf, 9, 12, Math.PI * 0.34, 0.98, 1.6);
   pool.position.set(-0.6, 4.4, 0.9);
   pool.target.position.set(-0.15, 0.2, -2.6);
   pool.castShadow = false;

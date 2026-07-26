@@ -23,8 +23,22 @@ import * as THREE from 'three';
 
 // --- soft-edged emitter texture ---------------------------------------------
 let _diffuse = null;
-/** Softbox diffusion: hot centre, gentle falloff, fast ramp at the very edge. */
-function diffusionMap(size = 128, feather = 0.30, centre = 1.0, edge = 0.55) {
+/**
+ * Softbox diffusion.
+ *
+ * The first version of this used `min(u, v)` — an L∞ metric — so its level sets
+ * were SQUARES, and it held a flat plateau across most of the panel. Anything
+ * with a clearcoat therefore mirrored the source as a rectangle with corners,
+ * and every specular event in the render was either that blown plateau or
+ * nothing. That is why the histogram was bimodal with no mid-grey.
+ *
+ * A real softbox has a diffusion panel that is brightest near the middle and
+ * falls off continuously to the frame — elliptical level sets, no plateau, no
+ * corners. Mirrored in a cabinet cheek that reads as a long unbroken gradient
+ * running from soft white, through several stops of grey, into the flag: the
+ * ramp a product render lives in.
+ */
+function diffusionMap(size = 256) {
   if (_diffuse) return _diffuse;
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -33,14 +47,16 @@ function diffusionMap(size = 128, feather = 0.30, centre = 1.0, edge = 0.55) {
   const d = img.data;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      // distance from the edge, normalised 0 (edge) .. 1 (centre)
-      const u = Math.min(x, size - 1 - x) / (size * 0.5);
-      const v = Math.min(y, size - 1 - y) / (size * 0.5);
-      const e = Math.min(u, v);
-      const ramp = Math.min(1, e / feather);
-      const soft = ramp * ramp * (3 - 2 * ramp);          // smoothstep to zero at the rim
-      const body = edge + (centre - edge) * Math.min(1, e * 1.35); // gentle centre hotspot
-      const val = Math.max(0, Math.min(1, soft * body));
+      // normalised position, −1 … +1, centre at 0
+      const u = (x / (size - 1)) * 2 - 1;
+      const v = (y / (size - 1)) * 2 - 1;
+      // L2 (elliptical) radius, 1.0 at the mid-edge. On a stretched plane this
+      // becomes an ellipse in world space — exactly a strip softbox's falloff.
+      const r = Math.min(1, Math.hypot(u, v) * 0.86);
+      // continuous ramp, no plateau: bright core, long tail, hard zero at rim
+      const core = Math.pow(1 - r, 1.30);
+      const rim = 1 - Math.pow(r, 6);          // guarantees 0 at the very edge
+      const val = Math.max(0, Math.min(1, core * rim));
       const i = (y * size + x) * 4;
       d[i] = d[i + 1] = d[i + 2] = (val * 255) | 0;
       d[i + 3] = 255;
@@ -105,27 +121,27 @@ export function buildEnvScene() {
 
   // BEAUTY: the big frontal source, just above and slightly camera-left of the
   // lens axis. This is the light that actually fills a brushed fascia.
-  const beauty = box(11, 6.5, 0xfff4e6, 4.6);
+  const beauty = box(11, 6.5, 0xfff4e6, 8.4);
   beauty.position.set(-1.6, 4.1, 5.0);
   beauty.lookAt(0, 0.85, -2.4);
   s.add(beauty);
 
   // FRONT STRIP: wide, shallow, in front and low. On a vertical brushed panel
   // this draws the long horizontal streak that says "machined aluminium".
-  const frontStrip = box(18, 2.60, 0xf2f6ff, 3.4);
+  const frontStrip = box(18, 2.60, 0xf2f6ff, 6.2);
   frontStrip.position.set(0.4, 2.35, 4.2);
   frontStrip.rotation.x = -0.14;
   s.add(frontStrip);
 
   // FRONT-LEFT WRAP: broad, dim, low — keeps the left cheeks of every chassis
   // from falling into the shadow side entirely.
-  const wrapL = box(7, 5, 0xd8e4f4, 1.9);
+  const wrapL = box(7, 5, 0xd8e4f4, 3.5);
   wrapL.position.set(-6.4, 1.9, 3.0);
   wrapL.lookAt(0, 0.9, -2.4);
   s.add(wrapL);
 
   // FRONT-RIGHT WRAP: tighter and warmer, opposite side.
-  const wrapR = box(5.5, 4.2, 0xffe6c8, 1.5);
+  const wrapR = box(5.5, 4.2, 0xffe6c8, 2.8);
   wrapR.position.set(6.6, 2.1, 2.4);
   wrapR.lookAt(0, 0.9, -2.4);
   s.add(wrapR);
@@ -133,31 +149,31 @@ export function buildEnvScene() {
   // ======================= TOP AND BACK ====================================
 
   // TOP STRIP: long, narrow, high, behind — the rim/edge definer.
-  const strip = box(17, 2.20, 0xeaf4ff, 3.8);
+  const strip = box(17, 2.20, 0xeaf4ff, 6.9);
   strip.position.set(0.6, 5.2, -4.4);
   strip.rotation.x = -Math.PI * 0.40;
   s.add(strip);
 
   // SIDE STRIP: camera-right and back, rakes the side panels.
-  const strip2 = box(8, 1.35, 0xdfeaff, 3.0);
+  const strip2 = box(8, 1.35, 0xdfeaff, 5.4);
   strip2.position.set(6.8, 4.2, 0.6);
   strip2.rotation.set(-Math.PI * 0.16, -Math.PI * 0.5, 0);
   s.add(strip2);
 
   // KICKER: tight warm source low-right behind, separates cabinets from backdrop.
-  const kick = box(3.0, 1.6, 0xffd9a8, 2.6);
+  const kick = box(3.0, 1.6, 0xffd9a8, 4.7);
   kick.position.set(4.6, 0.6, -3.0);
   kick.lookAt(0, 0.6, -1.0);
   s.add(kick);
 
   // CEILING BOUNCE: very dim, very large — no pure-black top faces.
-  const ceil = box(22, 22, 0x9fb0c2, 0.26);
+  const ceil = box(22, 22, 0x9fb0c2, 0.48);
   ceil.position.set(0, 7.6, -0.5);
   ceil.rotation.x = Math.PI * 0.5;
   s.add(ceil);
 
   // FLOOR CARD: dim upward lift so under-chassis surfaces are not voids.
-  const under = box(16, 14, 0x8fa2b6, 0.14);
+  const under = box(16, 14, 0x8fa2b6, 0.26);
   under.position.set(0, -0.45, -1.0);
   under.rotation.x = -Math.PI * 0.5;
   s.add(under);

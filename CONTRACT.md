@@ -98,7 +98,9 @@ The benchmark is a Wilson Audio / McIntosh / Devialet product render.
    energy/current/heat, red `PAL.rd` only to mark a myth, green `PAL.gr` only to
    mark the correct answer. No other hues.
 6. Emissive things (`meterGlow`, LEDs) are `MeshBasicMaterial` with
-   `toneMapped:false`; bloom threshold is 0.92, so keep them bright but small.
+   `toneMapped:false`. Bloom runs on LINEAR HDR values with threshold **2.30**
+   and strength 0.26, so only genuinely emissive things bloom — a chrome specular
+   already sits at 5-20 in linear and must not.
 
 ---
 
@@ -289,3 +291,54 @@ tells better. Cards must not overlap the hero's silhouette; put them beside it.
 art director and a measurement editor, ranked, with the fix each wants. Work
 through them. Where you disagree with a finding, say so in your report with the
 reasoning — do not silently ignore it.
+
+
+---
+
+# ADDENDUM — revision 3
+
+## F. Units are never case-folded
+
+Label kickers and readout keys are printed **exactly as you write them**. There
+is no automatic uppercase, because no rule can tell a unit from a word: CSS
+`text-transform` turns µ into Greek Mu, and an ASCII-only fold still turns
+`µm` into `µM` (micromolar), `ms` into `MS` and `dBFS` into `DBFS`.
+
+Write kickers in the case you mean: `MOTOR FORCE`, `COIL I`, `SPL @ 1 m`,
+`GROOVE PITCH · µm`. Words in caps, units in their own case.
+
+## G. Import primaries from `src/core/spec.js` — now including
+
+* `CART.loadLossDb` (−0.828 dB) and `CART.atInputRms` (258.7 µV). The cartridge
+  is a 10 Ω source into a 100 Ω load, so the phono input never sees the
+  open-circuit 284.6 µV. One chapter showed this row and another did not, and
+  they disagreed by exactly that 0.83 dB. `CHAIN` now accounts for it:
+  `−0.828 + 64 + 10 − 19.23 + 26 = 79.945882 dB`, landing 2.8284 V = 1.0000 W
+  into 8 Ω.
+* `TONEARM.litzMm2` (0.030 mm²) — two chapters quoted different gauges for the
+  same wire.
+* `ROOM` is now `{W, D, H}`, matching `LAYOUT.room`'s axis names. It previously
+  used `L` for the room's width, and two stages read the axes differently.
+
+## H. The lighting rig changed again — re-look before you touch anything
+
+`diffusionMap()` was building every softbox as a flat plateau with **square**
+level sets (`min(u,v)` is an L∞ metric), so anything with a clearcoat mirrored
+the source as a rectangle with corners, and every specular event was either that
+blown plateau or nothing. It is now an elliptical, continuous falloff with no
+plateau, emitter intensities are rebalanced, the two raking spotlights are down
+from 15/22 to 6/9, and the planar floor reflection — which was being multiplied
+down to 1–4 % at the loudspeakers and was effectively switched off — is back at
+strength 0.62 over a 9 m falloff.
+
+Measured across all twelve frames: blown pixels (>95 %) are now **0.11 %** and
+mean luminance is **19.3 %**. Your surfaces will look different. Materials you
+darkened to fight blown highlights are probably now too dark.
+
+## I. The panel truncates
+
+Prose is being cut mid-sentence in the still frame on seven stages. `content()`
+must fit **without scrolling at 1600 x 1000**. That is roughly 260 words
+including headings, less if you use an `.eq` block. Front-load: the callout and
+the arithmetic first, the elaboration last, because the elaboration is what gets
+cut.

@@ -7,12 +7,11 @@
 const $ = (s) => document.querySelector(s);
 
 /**
- * ASCII-only uppercase. `String.toUpperCase()` maps µ (U+00B5) to Greek capital
- * Mu and ß to SS, so a CSS `text-transform:uppercase` silently corrupts every SI
- * prefix in a label — "µV" becomes "ΜV". Units live in these strings, so the
- * transform is done here and only on a–z.
+ * Readout keys are NOT case-folded, for the same reason label kickers are not:
+ * "SPL @ 1 m" must keep its lower-case metre, and no automatic rule can tell a
+ * unit from a word. Authors write the case they mean.
  */
-export const up = (s) => String(s).replace(/[a-z]/g, (c) => c.toUpperCase());
+export const up = (s) => String(s);
 
 function fmtRatio(scale) {
   if (scale >= 0.999 && scale <= 1.001) return 'real time';

@@ -24,11 +24,12 @@ const _v = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
 /**
- * ASCII-only uppercase. `toUpperCase()` maps µ → Μ (Greek Mu) and Ω is left
- * alone only by luck; a CSS `text-transform:uppercase` corrupts every SI prefix
- * in a kicker. Units live in these strings, so fold only a–z.
+ * Kickers are NOT case-folded. There is no safe automatic transform: CSS
+ * `text-transform:uppercase` turns µ into Greek Mu, and an ASCII-only fold still
+ * turns "µm" into "µM" (micromolar), "ms" into "MS" and "dBFS" into "DBFS".
+ * Units carry meaning in their case, so the author writes the case they mean.
  */
-const up = (s) => String(s).replace(/[a-z]/g, (c) => c.toUpperCase());
+const up = (s) => String(s);
 
 const overlaps = (a, b) =>
   a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;

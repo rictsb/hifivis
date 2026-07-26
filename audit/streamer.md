@@ -1,174 +1,103 @@
-# Round-2 audit — stage `streamer`
+# Round-3 audit — stage `streamer`
 
-## Art-director score: **40/100** (-8 from round 1's 48)
+## Art-director score: **36/100** (-3 from 39)
 
-> −8. Card content does not render. Best label system in the piece, attached to a black void.
+> Regressed. fill 0.85 with a card wall covering roughly half the stage over an empty shelf; hero cropped at the bottom; blown-white shelf trim strips on every shelf; a stray chassis sliced by the frame bottom.
 
 
 ## Findings for this stage (5)
 
 ### 1. [BLOCKER] (certain)
 
-**Wrong:** src/stages/streamer.js: the overlay card is ~85% dead black. Neither DIAG.Graph draws at its declared size — only a ~50 px-wide fragment of one frame plus a sliver of the amber jitter band appears at the card's far right edge (around x 2900–3000, y 1450–1750 in shots/streamer.png), against a declared GW 0.235 × GH 0.155 that should be ~440 px wide. The AES3 ribbon shows 2 of its 36 Swarm cells. The DOM labels on the same card update live (106 ms, Δt = −38 ps, 0x5A9DF7), so update() runs; the failure is geometric. This is the worst functional defect in the set.
+**Wrong:** src/stages/streamer.js:712-713 uses `fill: 0.85`. The card wall covers ~55% x 60% of the safe box, floats over an EMPTY shelf (there is nothing behind it to relate to), the hero chassis is pushed to the bottom of the frame and partly cropped, and a further chassis is sliced by the frame bottom edge.
 
-**Fix:** Debug the overlay build in buildOverlay() (lines 387–470). Check that og/eg are not being scaled or re-parented after `og.position.set(OGX, GY, 0.0006)`, that Graph's internal frame uses the w/h passed rather than a stale value, and that the Swarm `.update(i => …)` callback returns a position for every i in 0..7 and 0..27 rather than falling through to undefined for most indices. Re-shoot and confirm both plot boxes fill their declared width before touching anything else in this stage.
+**Fix:** streamer.js:713 -> `{ fill: 0.42, az: -0.14, el: 0.10, fov: 30 }`. Move the card so its lower edge sits above, not across, the streamer chassis, and shrink it to no more than 1.6x the chassis width.
 
-### 2. [BLOCKER] (certain)
+### 2. [MINOR] (certain)
 
-**Wrong:** The overlay card in shots/streamer.png is an empty black plate (device x 725–1355, y 285–705 at 2000-px width) carrying three captions and nothing else. The AES3 subframe bit stream, the buffer strip chart and the clock eye are all absent from the plate; the only geometry visible is a fragment clipped against the card's right edge at x 1275–1310. The three labels therefore point at blank card.
+**Wrong:** The streamer card floats over an empty rack shelf, so the composition has a hole in it: there is nothing behind the most prominent element. Additionally the '44' of a neighbouring chassis display is clipped by the chapter rail at the left edge, breaking contract §A's x < 160 px rule.
 
-**Fix:** In src/stages/streamer.js, re-check the card-local origin and scale of the three regions against the plate rectangle — the content appears to be positioned near or past the plate's right edge. Verify with node verify.mjs streamer and read the PNG before declaring done.
+**Fix:** Either move the card so it sits over the streamer itself and the shelf below (giving it something to relate to), or fill the empty shelf. Pull the camera right so no lit display sits under the rail.
 
-### 3. [MAJOR] (certain)
+### 3. [MINOR] (certain)
 
-**Wrong:** The 'OCXO · 5.6448 MHz = 128 f_s · the whole jitter budget is 0.77 ps rms' label is anchored at device (485,797), which in shots/streamer.png is over the POWER CONDITIONER in bay 0, not over the streamer in bay 1 or its clock island. The label makes a specific claim about a specific part and points at the wrong chassis.
+**Wrong:** The buffer-fill plot has a second signal drawn inside the same axes with no key: below the buffer trace, a row of vertical cyan bars (packet arrival ticks) occupies the bottom of the plot box, sharing the 0–140 ms y axis to which they do not belong. The caption names only "BUFFER FILL VS TIME, MS, target 120, drained at 1000 ms/s".
 
-**Fix:** Re-anchor to the clock island (the code comments place it 60 mm behind the fascia, streamer.js:120) with a short leader, and give it offset that keeps the box over the streamer's own chassis.
+**Fix:** Give the arrival ticks their own thin strip below the plot box with its own one-line caption ("packet arrivals, 181.5/s nominal"), or add a second line to the caption naming them.
 
 ### 4. [MINOR] (certain)
 
-**Wrong:** streamer.js:52 RETX_ONE_IN = 380 is an invented constant, but content() states it as fact: 'one in 380 has to be sent again'. Same for BUF_TARGET = 120 ms and STALL_MEAN = 0.090 s — the buffer figure is at least flagged as 'a wired-LAN figure' in a code comment the reader never sees. Contract §6 requires every number on screen to be derived from stated inputs or an explicitly stated premise.
+**Wrong:** The AES3 card states its time exaggeration as "at 1 : 2352 of the bit clock", which is ambiguous — it is 2352:1 ON TOP OF the stage's own 1 : 50, i.e. 117 600:1 against real time. content() gets this right ("at 1 : 2352 on top of the stage rate") but the card, which is what a reader looking at the picture sees, does not.
 
-**Fix:** Write it as a stated modelling premise in the prose: 'modelled here at one segment in 380 needing a retransmission, with a 4.5 ms fast-retransmit round trip' and 'a 120 ms target buffer, a wired-LAN figure'.
+**Fix:** Change the card text to "1 : 2352 on top of the stage's 1 : 50 — 1 : 117 600 against real time", matching the honesty of power.js's FIELD_TOTAL_SLOW disclosure.
 
 ### 5. [MINOR] (likely)
 
-**Wrong:** The label 'AES3 SUBFRAME · CELLS AT 1 : 117,600' derives CELL_RATIO from BCLK = 64 fs = 2.8224 MHz (streamer.js:46), but the content() prose correctly says biphase-mark coding puts TWO half-cells in every bit, so the line's cell rate is 128 fs = 5.6448 MHz. If what is drawn are biphase cells the ratio is 235,200 : 1, not 117,600 : 1; if what is drawn are bits the label should say 'bits', not 'cells'.
+**Wrong:** The eye diagram is drawn from only three or four edge traces, so it does not read as an eye — there is no eye opening, no crossing density, and the ±50 ps jitter band has nothing statistical to bound. The card caption calls it "CLOCK EDGE · BAND ±50 PS" which is honest, but the graphic promises more than it delivers next to a 110 dB jitter-SNR claim.
 
-**Fix:** Decide which the drawn elements are. If half-cells, use MCLK: CELL_RATIO = Math.round(MCLK / CELL_PER_REAL_S) = 235,200 and keep the word 'cells'. If bits, change the kicker to 'BITS AT 1 : 117,600'.
-
-
----
-
-## Whole-piece (core) findings that constrain you (14)
-
-**1. [BLOCKER]** src/core/env.js: `frontStrip` (18 × 0.85 m at intensity 11.0, line 115) and `strip` (17 × 0.7 m at 12.0, line 136) are narrow enough that every alloy edge in the set returns a clipped 100%-white line rather than a highlight with a rolloff. Count them in one frame: preamp has ~12 blown shelf-lip bars plus four full-length blown rack posts; turntable has a blown plinth chamfer and a blown tonearm; sub has a blown surround ring; the rack in sub and preamp is a neon wireframe. This single pair of emitters is why the piece reads as CGI.
-
-*Intended fix:* Widen and dim both: frontStrip to 18 × 2.6 m at ~3.4, strip to 17 × 2.2 m at ~3.8. Keep the same positions and rotations. The reflected image of the source then spans enough of each fillet to produce a gradient instead of a clipped line. Re-shoot preamp and phono to confirm the shelf trims read as a bright-to-mid ramp, not a bar. If the scene then reads flat, raise `beauty` (line 108) from 4.6 to ~6.0 rather than putting the strips back.
-
-**2. [BLOCKER]** src/app.css line 51: `.wlab` is `white-space:nowrap; max-width:36ch` with no overflow rule, and `.wlab .k` (line 66) inherits nowrap. Any kicker longer than 36 characters spills outside its own scrim onto the render. Visible in air ('FLOOR BOUNCE · SOURCE 0.985 M BELOW THE FLOOR' — 'THE FLOOR' prints over the rack chassis with no backing), power ('THE FIRST TWO AT TRUE ×26 · THE THIRD THAT SAME SWING ~3000 MORE' overprints the neighbouring label), and turntable ('45/45 GROOVE — 1800 : 1 · MOTION 1 : 1000' runs under the adjacent card).
-
-*Intended fix:* In src/app.css: remove `max-width:36ch` from `.wlab` and add `white-space:normal; max-width:34ch` to `.wlab .k`. Long kickers then wrap to a second line inside the scrim and the box grows to fit. Keep `white-space:nowrap` on `.wlab .v` only, so values never break.
-
-**3. [BLOCKER]** The same hardware carries different primaries in different chapters. (a) Voice-coil dc resistance: speaker.js TS.Re = 6.2 Ω and air.js TS.Re = 6.2 Ω, but amp.js RE_COIL = 5.4 Ω (line 60) and xover.js RE_COIL = 5.4 Ω (line 58) — and both use it for the damping-resistance argument. (b) Sensitivity: speaker.js and air.js both derive 91.38 dB @ 2.83 V/1 m; overview.js:45 asserts SENS = 89, and its 89.5 dB / 75.8 dB SPL figures follow from the wrong number. (c) Cartridge output: turntable.js derives E_RMS = 285 µV at 5 cm/s; phono.js V_CART = 0.30 mV and overview.js V_CART = 0.30 mV. (d) Phono gain: phono.js G_STAGE_DB = 64.0; overview.js G_PHONO = 60.0. (e) Amplifier: amp.js is 300 W into 8 Ω and every load in the piece is 8 Ω nominal, but power.js:25 and overview.js:50 compute the headline 2281.8 W / 9.92 A mains draw from 'two 600 W monoblocks' (the 4 Ω rating). At 8 Ω the true full-output draw is (2×300)/0.55 + 100 = 1191 W, 5.2 A rms — half the number the whole mains chapter is built on.
-
-*Intended fix:* Pick one set and propagate. Suggested: Re = 6.2 Ω everywhere (update amp.js RE_COIL and xover.js RE_COIL, and recompute DAMP_PEN / RD_ACT / RD_PAS / RD_PCT); overview SENS = 91.4 (import or restate the derivation); overview G_PHONO = 64.0 and re-solve G_LADDER so the total still lands on an integer-dB ladder setting; cartridge 285 µV rms in all three; and in power.js/overview.js either state the operating point as '2 × 300 W into 8 Ω' and recompute P_SYS = 1191 W, I_RMS = 5.18 A, I_PK = 7.33 A (and every drift figure that follows), or say explicitly on screen that the mains figure is the 4 Ω worst case, not this system's load.
-
-**4. [BLOCKER]** Only xover.js adds DOM numerals to its plot axes. phono's RIAA graph (yRange −25…+25 dB, xRange 20–20 k), preamp's S/N graph (55…125 dB, 0…63), speaker's sealed-response (−27…+6 dB) and excursion (0…14 mm) graphs, sub's pressure map, air's comb plot and all six DAC plots carry tick marks with no values. Every one of these is presented as a measurement and none can be read to a value; the argument rests entirely on captions.
-
-*Intended fix:* Copy the xover pattern (xover.js:508-531, the `tick()` helper with cls:'plain', occlude:false, priority:2) into phono (0, ±20 dB and 20 Hz / 20 kHz), preamp (60, 100, 120 dB and 0 / 63), speaker (0, −12, −24 dB; 0, 8, 14 mm; 15 Hz / 400 Hz and 24 / 200 Hz) and dac's two most load-bearing plots. Three to five short labels each; prune redundant captions to stay inside the ≲10-label budget.
-
-**5. [MAJOR]** Every one of the twelve panels ends mid-sentence under the `#panel-scroll.more` fade mask (src/app.css line 120). Xover loses its entire 'COMMONLY GOT WRONG' block — only the red title survives; sub loses the last line of its mode arithmetic; amp, speaker, air, streamer, phono, preamp, overview and dac all cut mid-word. In a still frame a fade that truncates mid-glyph reads as a crop, not as a scroll affordance. Twelve of twelve stages also exceed the 320-word ceiling in ADDENDUM C.
-
-*Intended fix:* Two changes. (1) In app.css move the mask start from `calc(100% - 34px)` to `calc(100% - 56px)` and add a visible affordance — a hairline rule plus a small chevron — so a reader sees 'there is more' rather than 'this is broken'. (2) Instruct every stage to cut content() to what fits above the fold at 1600×1000, roughly 230 words at 13.5 px/1.66, and to place .key or .myth in the first third per ADDENDUM C. Xover and sub are the urgent two: their callouts are entirely invisible.
-
-**6. [MAJOR]** The chapter rail is illegible in half the stages. Its inactive items are var(--ink-3) grey on the raw canvas, so they vanish against a matte black diagram card (power, dac, sub, preamp, air) and again against a blown-white rack shelf (sub). In power, ten of twelve rail rows are effectively unreadable.
-
-*Intended fix:* In src/app.css give the rail its own scrim independent of what is behind it — on the `#rail` container add `background:linear-gradient(90deg,rgba(7,8,11,.72) 0,rgba(7,8,11,.55) 62%,transparent 100%)` with a 4 px backdrop blur — and lift the inactive `.chap .t` colour from var(--ink-3) to var(--ink-2) at 0.62 alpha. The rail is chrome; it must never depend on the render behind it.
-
-**7. [MAJOR]** src/core/reflector.js: the planar floor reflection is incomplete and inconsistent. In overview the speakers' drivers reflect but the cabinets do not, leaving floating dark rings on a grey field; in speaker the cabinet is absent from its own reflection while unrelated pale rectangles appear; in air the rack reflects as disconnected pale fragments rather than a coherent mirror image. The result reads as smudge, and a broken reflection is worse than none — it is the first thing a retoucher would flag.
-
-*Intended fix:* Check the reflector's camera layers/frustum and its near/far planes: the missing objects are the tall ones, which suggests the mirror camera's frustum or its clip plane is cutting geometry above a height. Also confirm every stage's hardware is on the layer the reflector renders. Then bring the blur down — the current radius destroys the silhouette; a product-floor reflection wants a sharp first 200 mm falling to blur over ~600 mm, not uniform mush.
-
-**8. [MAJOR]** src/core/room.js ttPlinth() line ~160: the `under` slab uses mats().wood and, lit by the current rig, renders as a saturated bright-orange strip along the plinth's front edge. It is the most saturated element in both the overview and speaker frames and is a hue outside the permitted palette. It reads as an accident, not as a material.
-
-*Intended fix:* Either darken and desaturate it — clone mats().wood with `color.setHex(0x1a1410)` and `roughness 0.7` — or replace it with mats().anodBlack. Nothing in this set should carry a warm saturated hue except PAL.am used deliberately as a diagram accent.
-
-**9. [MAJOR]** Every rack stage frames the whole rack instead of its own chassis, because `fill` is applied to a bounding RADIUS that is dominated by the chassis width (0.555 m) while `fill` is a fraction of the safe-box HEIGHT. phono.js uses HERO_R = 0.354 with fill 0.55: the 112 mm chassis ends up ~85 px tall in a 1250-px frame. Measured heights of the subject chassis in the current shots: phono ≈ 85 px, preamp ≈ 80 px, xover ≈ 145 px, streamer ≈ 80 px, dac hidden. In phono, preamp, streamer and xover a reader cannot tell which of the six identical rack units is the subject, and in phono and preamp the identifying label sits over a neighbouring unit's shelf.
-
-*Intended fix:* For the six rack stages, pass frameShot a radius equal to the chassis HALF-HEIGHT plus a small margin (e.g. 0.09 for a 112 mm box) rather than its bounding sphere, and take fill 0.30–0.40 so the chassis is 250–340 px tall with the card beside it. Then anchor the identifying label to the subject chassis's own fascia with a short leader, not to the shelf above it.
-
-**10. [MAJOR]** The pinned readouts and the world labels disagree in the same still frame on every animated stage, because the readouts refresh at 10 Hz while labels update every frame. Measured from the current shots: power reads CURRENT −6.31 A in the footer while the LIVE label on the same conductor says −11.75 A; air reads PARTICLE DISPL +0.265 µm while the parcel label says ξ = +0.544 of 0.546 µm peak (and the footer's +3.00 mm/s velocity is only consistent with its own 0.265, not with the label); sub reads CONE X −3.09 mm against a label of −3.37 mm; speaker reads COIL I −3.06 A against a label of −3.19 A. Since the piece is judged from stills, this reads as an arithmetic error.
-
-*Intended fix:* Have update() write the SAME cached state object that readouts() reads, and drive the labels from that cached state rather than from the instantaneous phase — i.e. latch the display state at the readout tick. Alternatively raise the readout refresh to the frame rate. Either way, a screenshot must show one consistent instant.
-
-**11. [MAJOR]** content() overruns the 320-word cap (ADDENDUM §C) on eight of twelve stages, measured from the rendered DOM with .eq blocks excluded: amp 428, power 400, streamer 385, air 359, xover 357, phono 347, turntable 343, preamp 338. sub 321 is borderline. Only overview (293), speaker (291) and dac (314) comply. In every one of these the prose scrolls out of sight below the pinned readouts.
-
-*Intended fix:* Cut to 320. amp: drop the Damping section entirely (it duplicates the xover argument) and compress the Heat paragraph. power: cut the Fermi-velocity/mean-free-path sentence to one clause. streamer: cut the buffer/master-clock paragraph. air: cut the reverberant-field paragraph to one sentence. xover: cut the passive-network paragraph to the .eq plus one sentence.
-
-**12. [MINOR]** src/app.css .wlab: the label scrims read as operating-system notification toasts, not as editorial annotation — 60% black fill, 4 px backdrop blur, 4 px radius, a white 1 px ring and a 10 px drop shadow. In a magazine a callout over a photograph is a hairline leader plus set text, or a clean flat rule-bounded box. The current treatment is the single most 'web app' element in every frame.
-
-*Intended fix:* Flatten it: drop the box-shadow, drop the border-radius to 2 px, drop the white ring to rgba(255,255,255,.03), and raise the fill to rgba(7,8,11,.74) so the type carries on contrast rather than on blur. Add the leader dot (.wlab.lead already exists) to every label that annotates a world point, and use cls:'plain' wherever the label sits over dead space.
-
-**13. [MINOR]** Dead instrument clusters. All six DAC readouts are compile-time constants (FS, WORD, NYQUIST, LSB, SNR 24-BIT, ZOH). Four of six streamer readouts are constants (PAYLOAD, BIT CLOCK, JITTER, SNR 10 kHz). xover has two (CROSSOVER, SLOPE), sub has three (MODE, DRIVE, SCHROEDER), speaker's SPL @ 1 m never moves because it is the drive premise, turntable's PLATTER and CONTACT P never move. The footer is described in the addendum as 'the instrument cluster'; a cluster where two thirds of the dials are painted on is not one.
-
-*Intended fix:* Cap constants at two per stage and give the rest live values. DAC: current kernel count, instantaneous reconstructed voltage, live in-band noise at the cursor, ZOH droop at the cursor frequency. streamer: live buffer occupancy (already there), live arrival rate (already there), live Δt and its dBFS error from the eye. sub: live seat SPL as the second sub fades in, live Ψ sum.
-
-**14. [MINOR]** src/core/dsp.js:196-201, classABDissipation: the comment says 'Total device dissipation, both halves: P_d = Vcc²/(π²·RL) at m = 2/π'. The function is correct but the total at m = 2/π is 2·Vcc²/(π²·RL) — the quoted expression is the per-half figure. Not displayed anywhere, but amp.js reimplements this and a future author reading the comment would be off by 2×.
-
-*Intended fix:* Correct the comment to 'P_d(total) = 2·Vcc²/(π²·RL) at m = 2/π, i.e. Vcc²/(π²·RL) per half'. Core is frozen, so report only.
+**Fix:** Overlay 32–64 edges with jitter sampled from a Gaussian of 50 ps rms, so the band the caption names is visibly the ±1σ envelope of the drawn population. If the frame budget will not carry it, relabel the graphic "three edges, ±50 ps rms" so the picture and the caption agree.
 
 
 ---
 
-## What the lead has ALREADY fixed in core since these findings (do not redo, do not edit core)
+## Whole-piece findings still open (10)
 
-- **The specular ramp.** The art director's headline finding was that nothing in
-  the piece had a specular layer with a *gradient*: every bright thing was a
-  clipped 100 %-white line or a flat emissive patch, giving a bimodal histogram
-  with no mid-grey. Proximate cause was two very narrow emitters. `env.js` now
-  runs `frontStrip` at 18 x 2.60 m / 3.4 and `strip` at 17 x 2.20 m / 3.8
-  (was 0.85 m / 11.0 and 0.7 m / 12.0), and `strip2` at 8 x 1.35 / 3.0. The
-  reflected image of a source now spans a fillet instead of clipping across it.
-  **Consequence for you:** re-look at your stage. Materials you darkened to fight
-  blown highlights may now be too dark, and emissive patches you brightened to
-  compete may now be too hot.
-- **`src/core/spec.js` — a single source of truth for the system's primaries.**
-  See below. This is mandatory.
-- **`DIAG.Graph.prototype.tickLabels(labels, opts)`** — axis numerals. See below.
-- `.wlab` no longer clips long kickers (the `max-width:36ch` + `nowrap`
-  combination spilled text outside its own scrim).
+- **[major]** Every emitter in env.js is an unmodulated single value: beauty 4.6, frontStrip 3.4, strip 3.8, strip2 3.0, kick 2.6. There is no luminance ramp ACROSS the set — no bright side and dark side to the environment, no visible horizon in the reflection. Consequently a black lacquer cheek reflects a single flat grey with a blob in it, instead of the long unbroken top-to-bottom gradient that is the defining cue of a Wilson or Devialet cabinet shot.
 
-## MANDATORY: import your primaries from `src/core/spec.js`
+  *Fix:* Add a vertical luminance gradient to the emitter texture (multiply the falloff by a top-to-bottom ramp from 1.0 to 0.35) and reduce beauty 4.6 -> 3.2 while enlarging it 11x6.5 -> 15x9 and moving it closer (z 5.0 -> 3.6). A larger, dimmer, gradated source gives a wrapped highlight with a long ramp instead of a hot spot. Also strengthen the shell() horizon band (horiz 0.055 -> 0.085) so there is a readable horizon line in every mirror surface.
 
-The measurement editor caught the piece quoting the same hardware differently in
-different chapters: voice coil 6.2 Ω vs 5.4 Ω, sensitivity 91.4 vs 89 dB,
-cartridge 285 vs 300 µV, phono 64 vs 60 dB, and a mains draw computed from
-"600 W into 4 Ω" while every other chapter ran an 8 Ω load. That is fatal to
-trust and it is the first thing a reader can catch you on.
+- **[major]** src/core/materials.js: pianoBlack has clearcoatRoughness 0.028 as a flat scalar with no map, and floor has clearcoatRoughness 0.10 flat. A perfect uniform clearcoat is what turns a reflected softbox into a decal-sharp rectangle. Real lacquer has orange-peel: the highlight has structure and the reflection distorts slightly.
 
-```js
-import { MAINS, DRIVER, TS, SPEAKER, AMP, CABLE, DAMPING,
-         CART, TT, PHONO, PREAMP, XOVER, DIGITAL, ROOM, CHAIN } from '../core/spec.js';
-```
+  *Fix:* Give pianoBlack a clearcoatRoughnessMap (reuse T.anodisedRough(1024, 0.06, 0.03)) and raise the base to 0.05, and give it a very low-amplitude normalMap for orange-peel. Do the same on M.floor (clearcoatRoughness 0.10 -> map with base 0.13). The highlight must break up over its own length.
 
-Verified values (all derived, and the gain ladder closes to 79.945882 dB both ways):
+- **[major]** The explanation panel's prose is truncated mid-sentence in the still frames for power, streamer, preamp, xover, amp, speaker and air — 'When is the one thing it cannot supply', 'which does not hold', 'What the three bands add up to is an all-pass: 360° of', 'not 24. It is second', 'and reads 91.21 dB. A 100 W peak — 4.8 dB inside the'. The shots are the deliverable being judged; in every one of those seven the reader loses the end of the argument. Contract addendum §C caps content() at 320 words and eight of twelve overran; several still do.
 
-| quantity | value |
-|---|---|
-| `TS.Cms` | 659.37 µm/N |
-| `TS.Qes` / `TS.Qts` | 0.37116 / 0.34102 |
-| `TS.Vas` | 111.95 L |
-| `TS.alpha` / `TS.fc` / `TS.Qtc` | 3.7318 / 60.907 Hz / 0.74182 |
-| `TS.eta0` | 0.647 % |
-| `TS.spl1W` | 90.11 dB @ 1 W / 1 m |
-| `TS.spl283` (= `SPEAKER.sens`) | 91.21 dB @ 2.83 V / 1 m |
-| `AMP.vRms` / `vPk` / `iPk` (300 W into 8 Ω) | 48.990 V / 69.282 V / 8.6603 A |
-| `CABLE.rLoop` | 41.376 mΩ (there AND back) |
-| `DAMPING.atTerminals` / `atDriver` | 400.00 / 130.34 |
-| `CART.outRms` | 284.61 µV |
-| `TT.vOuter` / `vInner` | 0.50964 / 0.20944 m/s |
-| `CHAIN.totalDb` / `volumeDb` | 79.946 dB / −20.054 dB |
+  *Fix:* Cut each of the seven to fit the panel without scroll at 1600x1000. The reliable cut is the third and fourth body paragraphs — the prose in this piece front-loads the mechanism (correctly) and then repeats it. Verify by shooting each stage and confirming the last paragraph's final line is above the readout footer with the fade absent.
 
-**Note the two sensitivities.** `spl1W` is one watt at one metre; `spl283` is
-2.83 V at one metre, which is one watt into 8 Ω *by definition* but 1.29 W into
-this 6.2 Ω coil, so it reads 1.11 dB higher. Quoting one with the other's
-reference is the classic sensitivity fiddle. Use the right one and name it.
+- **[minor]** Label kickers are uppercased by CSS, which destroys every unit in them: 'µm' becomes 'µM' (micromolar), 'ms' becomes 'MS', 'ps' becomes 'PS', 'dBFS' becomes 'DBFS', 'kHz' becomes 'KHZ', 'dB' becomes 'DB', 'mm' becomes 'MM'. For a piece aimed at a measurement editor this is the one typographic error that will be circled. Examples visible in shipped frames: turntable 'TIP · 18 × 5 µM RADII', dac '· DBFS', streamer 'BAND ±50 PS', air '1 KHZ · 94 DB'.
 
-If your stage needs a primary that is not in `spec.js`, derive it locally from
-what is, and say so in a comment. Do not re-declare a primary.
+  *Fix:* In src/core/labels.js, stop text-transform:uppercase on the kicker and instead author kickers in caps in the stage files, leaving units in their correct case. Or wrap units in a span the transform skips. Also fix the orphan wrap seen in dac where the kicker breaks to a second line beginning '· DBFS'.
 
-## MANDATORY: put numerals on your axes
+- **[minor]** Label bodies run to three and four lines of dense monospace at the same size and weight as their own kickers, so there is no typographic hierarchy and they read as code comments scattered over the render rather than as magazine callouts. Turntable carries six such blocks, power roughly eight, air seven. A product-render callout is one line.
 
-Only `xover` did. A plot a reader cannot take a value off is a decoration, not a
-measurement. Every `DIAG.Graph` you keep must call:
+  *Fix:* Establish a hierarchy in labels.js: kicker at 0.72rem letterspaced, body at 0.86rem, value at 1.0rem in the accent. Then cap each label at two body lines in the stage files and push the third line into content(). The value line — the one number the label exists to deliver — should be visibly the largest thing in the block.
 
-```js
-graph.tickLabels(ctx.labels, {
-  xVals: [20, 100, 1000, 10000], yVals: [-20, 0, 20],
-  xFmt: DSP.fHz, yFmt: (v) => v.toFixed(0),
-});
-```
-It creates `cls:'plain'`, `occlude:false`, `priority:2` labels parented to the
-graph, so they track it and survive the collision pass. Keep the tick count low
-(3–5 per axis) and state the unit once, in the graph's own caption label.
+- **[minor]** The bloom pass is constructed as UnrealBloomPass(res, 0.26, 0.42, 2.30) — strength 0.26, radius 0.42, threshold 2.30. The contract §3.6 tells stage authors 'bloom threshold is 0.92', which is wrong by a factor of 2.5 and will cause any author sizing an emissive to that figure to under-drive it. Separately, threshold 2.30 means only genuinely clipped pixels bloom, which is why the blown artefacts have halos and the meters do not.
+
+  *Fix:* Correct CONTRACT.md §3.6 to state the real threshold. Once the lighting fixes land and nothing spurious clips, consider lowering threshold to ~1.15 with strength ~0.20 so the meters and LEDs get a small honest halo — currently the meter glow gets none, which contributes to the decal reading.
+
+- **[minor]** The cyclorama (src/core/room.js seamlessBackdrop) is a single MeshPhysicalMaterial at colour 0x14161a, roughness 0.90, envMapIntensity 0.7 and receives no shaped light. In xover, amp and sub it renders as one flat value across the whole visible area with a visible boundary where it ends. A real infinity cove in a product shot always shows a pool of light and a falloff — that gradient is what separates the subject from the background without a rim light.
+
+  *Fix:* Add a large additive gradient wash on the wall, mirroring what floorPool() does for the floor: a MeshBasicMaterial plane with blobShadow(512,1), colour ~0x2c3a4a, opacity ~0.30, additive, positioned behind the rack and facing camera. Give it a slight horizontal offset from the subject so the falloff is directional.
+
+- **[minor]** Diagram cards throughout are square-cornered black plates with a single thin 1 px border, no thickness, no shadow, no reflection and no relationship to the room's light. They read as pasted PNGs at every stage except xover (which correctly yaws its card off the lens axis at CARD_YAW = CAM_AZ - 0.244). This is the second-largest 'CGI' signal after the highlights.
+
+  *Fix:* In DIAG.diagramCard, give the plate real thickness (a shallow bevelBox rather than a PlaneGeometry) with a machined aluTrim edge fillet, a soft drop shadow onto whatever is behind it, and a faint env sheen across the plate. Then adopt xover's off-axis yaw as the default for every stage — a card square to the lens is always a decal.
+
+- **[minor]** spec.js ROOM names the dimensions {L: 7.4, W: 9.0, H: 3.1} while LAYOUT.room names the same numbers {w: 7.4, d: 9.0, h: 3.1} — so spec's "L" is the room's width and spec's "W" is its depth. sub.js has to remap them (RM.W = LAYOUT.room.w, RM.D = LAYOUT.room.d) and includes a runtime throw to catch the confusion. air.js uses ROOM.L·ROOM.W·ROOM.H for volume and surface, which are order-independent, so nothing is numerically wrong today — but any future stage that computes an axial mode from ROOM.L will get the wrong answer.
+
+  *Fix:* Rename spec.ROOM to {W: 7.4, D: 9.0, H: 3.1} to match LAYOUT, and update air.js's V_ROOM/S_ROOM accordingly. Keep sub.js's cross-check assertion.
+
+- **[minor]** Performance is at the contract floor: 39.0 fps with 8310 draw calls and 4.37 M triangles for the whole build. 8310 draw calls is very high for a scene with thirteen chassis, and leaves no headroom on slower hardware — the contract requires ≥ 30 fps, so a modest regression in any stage breaks it.
+
+  *Fix:* Instance the repeated small parts that dominate the count (screws, vent slots, heatsink fins, RCA/XLR jacks, knob flutes) via InstancedMesh in GEO, or merge each chassis' static sub-meshes with BufferGeometryUtils.mergeGeometries at build time. A 3–4× draw-call reduction is realistic and would give the piece real headroom.
+
+
+---
+
+## Already fixed in core by the lead — do NOT redo, do NOT edit core
+
+All three core blockers from this round are done:
+1. `diffusionMap()` square-plateau emitters → elliptical continuous falloff.
+2. The two raking spotlights, 15/22 → 6/9.
+3. The planar floor reflection, which was multiplied down to 1–4 % and was
+   effectively off → strength 0.62 over a 9 m falloff.
+
+Also done: exposure 1.58 → 1.92; a lit gradient on the cyclorama so it is a
+sweep with a pool of light rather than a flat grey card; unit case-folding
+removed everywhere; `spec.ROOM` renamed to `{W,D,H}`; `CART.loadLossDb` /
+`CART.atInputRms` / `TONEARM.litzMm2` added to `spec.js`.
+
+Measured over the twelve frames after these fixes: mean luminance 14.7 % → **19.3 %**,
+pixels above 95 % → **0.11 %**, mid-tone mass **47 %**. The bimodal histogram is
+fixed. What remains is per-stage.

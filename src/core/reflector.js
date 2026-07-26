@@ -28,10 +28,10 @@ const FloorReflectionShader = {
     color: { value: new THREE.Color(0x8fa6bd) },
     tDiffuse: { value: null },
     textureMatrix: { value: new THREE.Matrix4() },
-    uStrength: { value: 0.26 },
+    uStrength: { value: 0.62 },
     uBlur: { value: 1.9 },
     uCentre: { value: new THREE.Vector3(0, 0, -2.4) },
-    uFalloff: { value: 3.4 },
+    uFalloff: { value: 9.0 },
     uRes: { value: new THREE.Vector2(1024, 1024) },
   },
   vertexShader: /* glsl */`
@@ -63,8 +63,10 @@ const FloorReflectionShader = {
       // distance from the system centre, in metres → how much of the
       // reflection survives, and how far it smears
       float d = length(vW.xz - uCentre.xz);
+      // Gentle falloff only. Squaring this put the reflection at 1-4 % by the
+      // time it reached the loudspeakers, which made the feature invisible.
       float fade = 1.0 - smoothstep(0.0, uFalloff, d);
-      fade *= fade;
+      fade = pow(fade, 1.25);
 
       float r = (uBlur * (0.35 + 1.65 * (1.0 - fade))) / uRes.y;
       vec3 c = tap(vec2(0.0)) * 0.28;
