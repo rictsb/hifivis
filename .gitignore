@@ -1,3 +1,5 @@
 node_modules/
 shots*/
-hifi-system.html
+audit/
+audit-r*.json
+scripts/
