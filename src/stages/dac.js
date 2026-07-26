@@ -1,61 +1,71 @@
 import * as THREE from 'three';
-import { LAYOUT } from '../core/layout.js';
+import { LAYOUT, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
+import { DIGITAL } from '../core/spec.js';
 
 /**
  * DIGITAL TO ANALOGUE — where the staircase myth dies.
  *
- * Nothing on screen is drawn from memory:
- *   · the reconstruction is Σ x[n]·sinc(t/T − n) with every kernel shown
- *   · the zero-order hold appears only as the intermediate the output stage
- *     emits, with its computed aperture droop, and is then removed
- *   · the Δ-Σ spectrum is a 65 536-point FFT of the actual bit stream that is
- *     scrolling on screen, taken at boot
+ * Two plot regions, one card, and the converter itself as the hero.
+ *   · region 1 — the samples, all seventeen sinc kernels, the zero-order hold
+ *     the output stage actually emits (amber), and the one band-limited curve
+ *     that fits the samples (cyan). The myth and its removal in one frame.
+ *   · region 2 — a 65 536-point FFT of the real bit stream from a real
+ *     second-order modulator, with the analogue filter over it.
  *
- * Time: timeScale 2e-5, so one sample period (22.676 µs) takes 1.13 s of wall
- * clock and one modulator bit (354.3 ns) takes 17.7 ms. Both layers run on the
- * same clock; the bit layer is 64× faster exactly as it is in the hardware.
+ * Time: `timeScale` 2e-5, so one sample period (22.676 µs) takes 1.134 s of
+ * wall clock. The cursor steps one sample per sample period — the animation
+ * runs at exactly the rate the transport bar claims and nothing else moves.
  */
 
 // ---------------------------------------------------------------------------
-// 1. Constants — every one of these is derived
+// 1. Primaries — imported, then derived. Nothing here is typed twice.
 // ---------------------------------------------------------------------------
-const FS = 44100;                     // Hz
+const FS = DIGITAL.fsCd;              // 44 100 Hz
+const WORD = DIGITAL.bits;            // 24 bits
+const WORD_CD = DIGITAL.bitsCd;       // 16 bits
+const OSR = DIGITAL.osr;              // 64
+const NS_ORDER = DIGITAL.dsOrder;     // 2
+
 const T_S = 1 / FS;                   // 22.6757 µs
 const NYQ = FS / 2;                   // 22 050 Hz
-const WORD = 24;                      // bits
-const VFS = 2.0;                      // V, full-scale peak (±2 V, 4 V p-p)
 
-const LSB24 = DSP.lsbVolts(24, VFS);  // 2.3842e-7 V = 238.4 nV
-const LSB16 = DSP.lsbVolts(16, VFS);  // 6.1035e-5 V = 61.04 µV
-const SNR16 = DSP.quantSnrDb(16);     // 98.09 dB
-const SNR24 = DSP.quantSnrDb(24);     // 146.26 dB
+/**
+ * Full-scale line output. Not a spec.js primary: it is the IEC 60958 / Red Book
+ * convention for a consumer digital source, 2.000 V rms at 0 dBFS, and it is
+ * DERIVED to peak here so every voltage on screen is unambiguous.
+ */
+const VFS_RMS = 2.0;
+const VFS = VFS_RMS * Math.SQRT2;     // 2.8284 V peak = 0 dBFS
 
-const ZOH_NYQ = DSP.zohDb(NYQ, FS);   // −3.9224 dB  (sinc(1/2) = 2/π)
-const ZOH_20K = DSP.zohDb(20000, FS); // −3.1678 dB
-const OSR_DIG = 8;                    // digital interpolation ratio
-const FS_OS = FS * OSR_DIG;           // 352 800 Hz hold rate after ×8
+const LSB24 = DSP.lsbVolts(WORD, VFS);      // 3.3717e-7 V = 337.2 nV
+const LSB16 = DSP.lsbVolts(WORD_CD, VFS);   // 8.631e-5 V = 86.31 µV
+const SNR16 = DSP.quantSnrDb(WORD_CD);      // 98.09 dB
+const SNR24 = DSP.quantSnrDb(WORD);         // 146.26 dB
+
+const ZOH_NYQ = DSP.zohDb(NYQ, FS);         // −3.9224 dB  (sinc(1/2) = 2/π)
+const ZOH_20K = DSP.zohDb(20000, FS);       // −3.1678 dB, non-oversampling
+const OSR_DIG = 8;                          // CHOSEN digital interpolation ratio
+const FS_OS = FS * OSR_DIG;                 // 352 800 Hz hold rate after ×8
 const ZOH_20K_OS = DSP.zohDb(20000, FS_OS); // −0.0460 dB
 
 /** Johnson–Nyquist noise: v = √(4·k·T·R·B), 1 kΩ, 20 kHz, 20 °C. */
 const K_B = 1.380649e-23, T_KELVIN = 293.15, R_J = 1000, BW_J = 20000;
 const V_JOHNSON = Math.sqrt(4 * K_B * T_KELVIN * R_J * BW_J); // 5.690e-7 V
-const LSB_VS_KTB = 20 * Math.log10(LSB24 / V_JOHNSON);        // −7.56 dB
+const LSB_VS_KTB = 20 * Math.log10(LSB24 / V_JOHNSON);        // −4.54 dB
 
 /** Analogue reconstruction filter: 3rd-order Butterworth, fc = 80 kHz. */
 const FC_REC = 80000, N_REC = 3;
 const recFiltDb = (f) => -10 * Math.log10(1 + Math.pow(f / FC_REC, 2 * N_REC));
 
 // Δ-Σ modulator
-const OSR = 64;
 const FS_MOD = FS * OSR;              // 2 822 400 Hz
 const T_BIT = 1 / FS_MOD;             // 354.31 ns
-const NS_ORDER = 2;                   // error feedback, NTF = (1 − z⁻¹)²
 const SNR_MODEL = DSP.noiseShapedSnrDb(1, NS_ORDER, OSR);  // 85.19 dB
-const MOD_GAIN = 0.5;                 // 1-bit loops need input headroom
+const MOD_GAIN = 0.5;                 // 1-bit loops go unstable near full scale
 /** NTF magnitude in dB: |1 − z⁻¹|ⁿ = (2·sin(πf/fs_mod))ⁿ. */
 const ntfDb = (f) => 20 * NS_ORDER * Math.log10(2 * Math.sin(Math.PI * f / FS_MOD));
 const NTF_20K = ntfDb(20000);         // −54.06 dB
@@ -74,6 +84,12 @@ const sigAt = (t) => SIG[0].a * Math.sin(2 * Math.PI * SIG[0].f * t + SIG[0].p)
   + SIG[1].a * Math.sin(2 * Math.PI * SIG[1].f * t + SIG[1].p)
   + SIG[2].a * Math.sin(2 * Math.PI * SIG[2].f * t + SIG[2].p);
 
+/** rms of a sum of incommensurate sinusoids is √(Σa²/2). */
+const SIG_RMS = Math.sqrt(SIG.reduce((s, c) => s + c.a * c.a, 0) / 2);  // 0.45266
+const MOD_RMS = MOD_GAIN * SIG_RMS;                                     // 0.22633
+/** How far the modulator's input sits below a full-scale sine (rms 1/√2). */
+const HEADROOM_DB = 20 * Math.log10(Math.SQRT1_2 / MOD_RMS);            // 9.897 dB
+
 const N_WIN = 16;      // sample periods shown = 362.81 µs
 const N_OFF = 36;      // window origin, picked so the excerpt sits about zero
 const CTX = 40;        // kernels either side included in the sum
@@ -83,27 +99,15 @@ const SMP = new Float64Array(N_HI - N_LO + 1);
 for (let n = N_LO; n <= N_HI; n++) SMP[n - N_LO] = sigAt((n + N_OFF) * T_S);
 const smp = (n) => SMP[n - N_LO];
 
-/** Σ x[n]·sinc(x − n). `kMax` limits the *visible* kernels for the build-up. */
-function reconstruct(x, kMax = N_WIN) {
+/** Σ x[n]·sinc(x − n), the unique band-limited function through the samples. */
+function reconstruct(x) {
   let y = 0;
-  for (let n = N_LO; n <= N_HI; n++) {
-    if (n >= 0 && n <= N_WIN && n > kMax) continue;
-    y += smp(n) * DSP.sinc(x - n);
-  }
+  for (let n = N_LO; n <= N_HI; n++) y += smp(n) * DSP.sinc(x - n);
   return y;
 }
 
-// Near-Nyquist demonstration: 20 kHz sampled at 44.1 kHz = 2.205 points/cycle
-const F_NEAR = 20000;
-const SAMPLES_PER_CYCLE = FS / F_NEAR;                 // 2.2050
-const nearAt = (t) => Math.sin(2 * Math.PI * F_NEAR * t + 0.6);
-const SMP_N = new Float64Array(N_HI - N_LO + 1);
-for (let n = N_LO; n <= N_HI; n++) SMP_N[n - N_LO] = nearAt(n * T_S);
-function reconstructNear(x) {
-  let y = 0;
-  for (let n = N_LO; n <= N_HI; n++) y += SMP_N[n - N_LO] * DSP.sinc(x - n);
-  return y;
-}
+// 20 kHz at 44.1 kHz — quoted in the panel, so derive it, do not type it.
+const SAMPLES_PER_CYCLE = FS / 20000;                  // 2.2050
 
 // ---------------------------------------------------------------------------
 // 3. A real Δ-Σ modulator and a real FFT of its output
@@ -111,9 +115,6 @@ function reconstructNear(x) {
 /**
  * 2nd-order error-feedback modulator. y = x + (1 − z⁻¹)²·e — the quantisation
  * error is shaped by |1 − z⁻¹|², the signal passes untouched.
- *
- * core/dsp.js exports deltaSigmaStep, but its cascade latches at order 2 and
- * diverges at order 3 (see the report), so the loop is written out here.
  */
 const N_FFT = 1 << 16;                 // 65 536 bits = 23.22 ms of audio
 const BITS_BUF = new Int8Array(N_FFT);
@@ -157,7 +158,7 @@ function fft(re, im) {
 const BHW = [0.27105140069342, -0.43329793923448, 0.21812299954311,
   -0.06592544638803, 0.01081174209837, -0.00077658482522, 0.00001388721735];
 
-const SPEC = { binHz: FS_MOD / N_FFT, snrMeas: 0, floorAt: () => -140 };
+const SPEC = { binHz: FS_MOD / N_FFT, snrMeas: 0, drFs: 0, floorAt: () => -140 };
 
 function analyseStream() {
   const re = new Float64Array(N_FFT), im = new Float64Array(N_FFT);
@@ -186,6 +187,14 @@ function analyseStream() {
     if (tone) sig += pw[k]; else noise += pw[k];
   }
   SPEC.snrMeas = 10 * Math.log10(sig / noise);
+  /**
+   * SIGNAL-TO-NOISE IS NOT DYNAMIC RANGE. The measurement above is taken with
+   * an input HEADROOM_DB below a full-scale sine, because a one-bit loop will
+   * not take full scale. Referring the same in-band noise power to full scale
+   * is the only figure comparable with `SNR_MODEL`, which assumes a full-scale
+   * sine throughout.
+   */
+  SPEC.drFs = SPEC.snrMeas + HEADROOM_DB;
 
   // 1/12-octave mean power per bin, in dBFS
   SPEC.floorAt = (f) => {
@@ -206,16 +215,38 @@ const H_BODY = 0.086;
 const FOOT = 0.006;
 const W_C = LAYOUT.rack.w - 0.03;          // 0.555
 const D_C = LAYOUT.rack.d - 0.06;          // 0.440
-const LID_LIFT = 0.036;                    // lifted, then tilted about its rear edge
-const LID_TILT = 0.085;                    // rad — front edge tops out 11 mm under the shelf
+const LID_LIFT = 0.030;                    // lifted, then tilted about its rear edge
+const LID_TILT = 0.070;                    // rad — front edge stays under the shelf
 
-/** Backlit front-panel readout: one canvas, one draw call, crisp at range. */
+/**
+ * A shallow convex lens. The cover glass over a real instrument display is not
+ * flat: it is a cylinder of a few hundred millimetres' radius, and that is why
+ * the reflected image of a softbox crosses it as a graded band instead of a
+ * flat patch. Bulge is a function of the short axis, so the band runs across.
+ */
+function lensGeometry(w, h, bulge, sx = 28, sy = 10) {
+  const g = new THREE.PlaneGeometry(w, h, sx, sy);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const u = p.getX(i) / (w / 2), v = p.getY(i) / (h / 2);
+    p.setZ(i, bulge * (1 - v * v) * (1 - 0.22 * u * u));
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
+ * Backlit front-panel readout: one canvas, one draw call, crisp at range.
+ * Opaque, so it is present in the transmission pass and therefore visible
+ * THROUGH the cover glass in front of it.
+ */
 function displayTexture() {
   const w = 1024, h = 190;
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   const x = c.getContext('2d');
-  x.clearRect(0, 0, w, h);
+  x.fillStyle = '#05070a';
+  x.fillRect(0, 0, w, h);
 
   x.fillStyle = '#a6e2ff';
   x.font = '600 96px ui-monospace, Menlo, monospace';
@@ -261,7 +292,7 @@ function buildInternals(g) {
 
   // Two board sections, split by a machined screening wall running fore-aft.
   const bd = M.pcb.clone();
-  bd.color.setHex(0xa4b0a8);                  // knock the solder mask back
+  bd.color.setHex(0x9aa79f);
   bd.roughness = 0.55;
   const mkBoard = (x, w, d, z) => {
     const b = new THREE.Mesh(GEO.bevelBox(w, 0.0016, d, 0.0005, 2), bd);
@@ -279,9 +310,9 @@ function buildInternals(g) {
 
   // screening can over the clock and the converter core
   const canMat = M.steel.clone();
-  canMat.color.setHex(0xb4bac1);
-  canMat.roughness = 0.34;
-  canMat.envMapIntensity = 1.5;
+  canMat.color.setHex(0xa8aeb5);
+  canMat.roughness = 0.36;
+  canMat.envMapIntensity = 1.25;
   const can = new THREE.Mesh(GEO.bevelBox(0.098, 0.026, 0.074, 0.0016, 3), canMat);
   can.position.set(-0.116, yF + 0.017, -0.060);
   can.castShadow = can.receiveShadow = true;
@@ -321,14 +352,20 @@ function buildInternals(g) {
     g.add(film);
   }
   const sinkMat = M.anodGrey.clone();
-  sinkMat.color.setHex(0x676d75);
+  sinkMat.color.setHex(0x5c6169);
   const sink = GEO.heatsink(0.056, 0.024, 0.020, 10, { mat: sinkMat });
   sink.position.set(0.205, yF + 0.013, -0.040);
   sink.rotation.y = Math.PI / 2;
   g.add(sink);
 
-  // toroidal supply at the rear
-  const toroid = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.013, 12, 40), M.magnetWire);
+  // toroidal supply at the rear. mats().magnetWire is a saturated orange under
+  // this rig and became the most saturated thing in the frame; knocked back to
+  // a dark varnished copper so nothing outside the palette shouts.
+  const wire = M.magnetWire.clone();
+  wire.color.setHex(0x4e3220);
+  wire.roughness = 0.42;
+  wire.envMapIntensity = 0.6;
+  const toroid = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.013, 12, 40), wire);
   toroid.rotation.x = -Math.PI / 2;
   toroid.position.set(0.150, yF + 0.014, -0.156);
   toroid.castShadow = true;
@@ -411,11 +448,14 @@ function buildHardware() {
   buildRear(g);
   buildInternals(g);
 
-  // ---- fascia ----
+  // ---- fascia ----------------------------------------------------------
+  // The widened studio strips now span the fascia's bevel, so the panel wants
+  // a slightly rougher brush and a lower env gain than it did when the strips
+  // were narrow and hot: the highlight should ramp across the chamfer, not clip.
   const zF = D_C / 2 - 0.008;
   const faceMat = M.alu.clone();
-  faceMat.roughness = 0.28;
-  faceMat.envMapIntensity = 1.55;
+  faceMat.roughness = 0.32;
+  faceMat.envMapIntensity = 1.12;
   const face = new THREE.Mesh(GEO.bevelBox(W_C + 0.008, H_BODY + 0.004, 0.016, 0.0026, 5), faceMat);
   face.position.set(0, 0.003, zF);
   face.castShadow = face.receiveShadow = true;
@@ -424,20 +464,42 @@ function buildHardware() {
   band.position.set(0, 0.005, zF + 0.0085);
   g.add(band);
 
-  const glass = new THREE.Mesh(GEO.bevelBox(0.300, 0.044, 0.0035, 0.0009, 3), M.glass);
-  glass.position.set(-0.092, 0.005, zF + 0.0100);
-  glass.castShadow = true;
-  g.add(glass);
+  // display recess → opaque emissive panel → convex cover glass over it
+  const recess = new THREE.Mesh(GEO.bevelBox(0.310, 0.048, 0.0030, 0.0008, 3), M.anodBlack);
+  recess.position.set(-0.092, 0.005, zF + 0.0092);
+  recess.receiveShadow = true;
+  g.add(recess);
+
   const disp = new THREE.Mesh(
     new THREE.PlaneGeometry(0.284, 0.0390),
-    new THREE.MeshBasicMaterial({
-      map: displayTexture(), transparent: true, toneMapped: false,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    }),
+    new THREE.MeshBasicMaterial({ map: displayTexture(), toneMapped: false }),
   );
-  disp.position.set(-0.092, 0.005, zF + 0.0119);
-  disp.renderOrder = 3;
+  disp.position.set(-0.092, 0.005, zF + 0.0110);
   g.add(disp);
+
+  /* THE SPECULAR LAYER. A lit display with nothing in front of it reads as a
+     decal. This is a real transmissive cover glass with a 1.4 mm bulge and a
+     low but non-zero roughness, so the front strip crosses it as a soft band
+     with a rolloff either side, and the glyphs sit behind that band. */
+  const lensMat = M.clearGlass.clone();
+  /* Transmission is the wrong tool here: three.js's transmissive path leaves a
+     lit diffuse residue and a blurred backdrop, and this panel sits 15 mm from
+     a blown-out shelf strip, so the glyph field went milky grey. A thin, nearly
+     clear alpha layer with a strong environment gain gives the same physics
+     where it matters — a curvature-driven specular band that moves with the
+     camera — and leaves the display black-backed underneath it. */
+  lensMat.transmission = 0;
+  lensMat.color.setHex(0x0b0f14);
+  lensMat.opacity = 0.11;
+  lensMat.roughness = 0.030;
+  lensMat.clearcoat = 1.0;
+  lensMat.clearcoatRoughness = 0.030;
+  lensMat.depthWrite = false;
+  lensMat.envMapIntensity = 3.6;
+  const lens = new THREE.Mesh(lensGeometry(0.300, 0.0440, 0.0018), lensMat);
+  lens.position.set(-0.092, 0.005, zF + 0.0116);
+  lens.renderOrder = 4;
+  g.add(lens);
 
   // machined filter-select buttons, one lit
   const btnGeo = GEO.bevelCyl(0.0086, 0.0092, 0.0045, 28, 0.0006);
@@ -447,9 +509,11 @@ function buildHardware() {
     b.position.set(0.098 + i * 0.026, -0.010, zF + 0.0090);
     b.castShadow = true;
     g.add(b);
-    const led = new THREE.Mesh(GEO.bevelBox(0.008, 0.0013, 0.0006, 0.0003, 2),
+    // the selected-filter tell, standing proud of the fascia rather than
+    // buried level with it, where it did not read at all
+    const led = new THREE.Mesh(GEO.bevelBox(0.0085, 0.0014, 0.0008, 0.0003, 2),
       i === 1 ? M.ledCyan : M.plastic);
-    led.position.set(0.098 + i * 0.026, 0.0065, zF + 0.0084);
+    led.position.set(0.098 + i * 0.026, 0.0032, zF + 0.0097);
     g.add(led);
   }
 
@@ -474,7 +538,8 @@ function buildHardware() {
 
   // ---- lid: lifts on reveal, exposing the two board sections ----
   const lid = new THREE.Group();
-  const lidPlate = new THREE.Mesh(GEO.bevelBox(W_C - 0.020, 0.005, D_C - 0.026, 0.0018, 3), M.anodBlack);
+  const lidMat = M.pianoBlack ? M.pianoBlack.clone() : M.anodBlack.clone();
+  const lidPlate = new THREE.Mesh(GEO.bevelBox(W_C - 0.020, 0.005, D_C - 0.026, 0.0018, 3), lidMat);
   lidPlate.castShadow = lidPlate.receiveShadow = true;
   lid.add(lidPlate);
   const vents = GEO.ventSlots(0.150, 0.230, 3, 12, { mat: M.plastic, sw: 0.0042, sd: 0.014 });
@@ -504,35 +569,53 @@ function buildHardware() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Overlay — one instrument board, six panels plus an amplitude ruler
+// 5. Overlay — ONE card, TWO plot regions
 // ---------------------------------------------------------------------------
-const BW = 0.96, BDH = 0.58, CW = 0.445, COL2 = 0.515;
-const PAN = {
-  E:  { x: 0.000, y: 0.000, w: BW, h: 0.038 },
-  F:  { x: 0.000, y: 0.086, w: CW, h: 0.086 },
-  B:  { x: 0.000, y: 0.222, w: CW, h: 0.106 },
-  A:  { x: 0.000, y: 0.378, w: CW, h: 0.172 },
-  D2: { x: COL2, y: 0.086, w: CW, h: 0.142 },
-  D:  { x: COL2, y: 0.272, w: CW, h: 0.066 },
-  C:  { x: COL2, y: 0.378, w: CW, h: 0.172 },
-};
+const CARD = { w: 0.399, h: 0.204 }, CARD_PAD = 0.016;
+const G1 = { x: 0.026, y: 0.018, w: 0.208, h: 0.148 };    // reconstruction + hold
+const G2 = { x: 0.264, y: 0.018, w: 0.129, h: 0.148 };    // shaped noise, measured
 
-const N_BITS_SHOWN = 256;              // exactly 4 sample periods
-const BUILD_S = 2.0;                   // presentation seconds to lay in 17 kernels
-const CYCLE_S = 9.0;
+/** Card centre in world space. Sits just proud of the rack's front posts, and
+ *  directly above the converter — not above the two units that sit above it. */
+const CARD_C = [0.045, 0.787, -2.980];
+const AZ = 0.22;
 
-/**
- * A flat backing plate. Built locally rather than with DIAG.diagramCard because
- * that helper installs a group-level userData.setOpacity which fadeTree runs
- * *before* it records the child plate's base opacity — so the plate is captured
- * at 0 and never becomes visible again.
- */
-function plate(w, h, color, opacity, z, order) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false }));
-  m.position.set(w / 2, h / 2, z);
-  m.renderOrder = order;
-  return m;
+/*  Composition, measured off the render rather than guessed. At 1600 × 1000
+    the converter's bounding box lands x 208…1060, y 530…925 — 852 × 395 px,
+    47 % of the safe box's height — and the card sits above it at x 240…1030,
+    y 105…549. Nothing crosses x 160 or x 1120, nothing reaches the masthead.
+
+    NOTE on the audit's "chassis at least a third of the safe-box height": the
+    FASCIA alone cannot be. A 555 × 92 mm box seen three-quarter on is 3.6 : 1;
+    made 280 px tall its front face is 1010 px wide and breaks the x limit.
+    Width binds first, so this takes the widest chassis the safe box carries
+    (780 px of fascia) and puts nothing in the frame to compete with it.      */
+const SHOT = frameShot([0.060, 0.692, -3.030], 0.216,
+  { fill: 0.90, az: AZ, el: 0.16, fov: 31 });
+
+/** A soft, broad reflection band — the image of the front strip in the card's
+ *  cover glass. Low amplitude on purpose: it must read as a mid-grey ramp. */
+function sheenTexture() {
+  const s = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.clearRect(0, 0, s, s);
+  x.translate(s / 2, s / 2);
+  x.rotate(-0.30);
+  const g = x.createLinearGradient(0, -s * 0.80, 0, s * 0.80);
+  g.addColorStop(0.00, 'rgba(255,255,255,0)');
+  g.addColorStop(0.22, 'rgba(255,255,255,0.06)');
+  g.addColorStop(0.42, 'rgba(255,255,255,0.26)');
+  g.addColorStop(0.52, 'rgba(255,255,255,0.34)');
+  g.addColorStop(0.68, 'rgba(255,255,255,0.14)');
+  g.addColorStop(0.86, 'rgba(255,255,255,0.02)');
+  g.addColorStop(1.00, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(-s, -s, s * 2, s * 2);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 /** Vertical shaded band between two data x values. */
@@ -554,7 +637,7 @@ export default {
   nav: 'DAC',
   kicker: 'DAC',
   standfirst: 'One band-limited curve fits those samples. Nothing else does.',
-  shot: { position: [0.70, 1.16, -1.30], target: [-0.02, 0.80, -2.94], fov: 33 },
+  shot: SHOT,
   timeScale: TIME_SCALE,
   alwaysUpdate: false,
 
@@ -565,78 +648,61 @@ export default {
     const hardware = buildHardware();
 
     const overlay = new THREE.Group();
-    overlay.position.set(-0.185, 0.99, -2.88);
-    overlay.rotation.y = 0.18;
+    overlay.position.set(...CARD_C);
+    overlay.rotation.y = AZ;
     const root = new THREE.Group();
-    root.position.set(-BW / 2, -BDH / 2, 0);
+    root.position.set(-CARD.w / 2, -CARD.h / 2, 0);
     overlay.add(root);
 
-    const S = this._s = {};
+    const S = this._s = { t: 0, n: -1, state: { n: 0, v: 0, err: 0 } };
 
-    // one solid backing plate for the whole instrument board, plus a lighter
-    // tone behind each panel so the six read as separate instruments
-    const pad = 0.026;
-    const back = plate(BW + pad * 2, BDH + pad * 2, 0x05070a, 0.96, -0.006, 2);
-    back.position.x -= pad; back.position.y -= pad;
-    root.add(back);
-    const edge = new DIAG.Trace(5, 0x3d4652, 1.0, { opacity: 0.8, renderOrder: 3 });
-    edge.write((i) => [[-pad, -pad], [BW + pad, -pad], [BW + pad, BDH + pad],
-      [-pad, BDH + pad], [-pad, -pad]][i].concat(-0.005));
+    /* THE PLATE. Opaque, depth-writing, and a dielectric with a clearcoat
+       rather than a flat unlit fill — so the rack behind it cannot print
+       through (the round-1 and round-2 blocker) and so the card itself carries
+       a specular ramp instead of being one dead value. */
+    const pad = CARD_PAD;
+    /* A FLAT plate reflects a 2.6 m softbox as a flat patch and the whole card
+       goes mid-grey; a gently convex one (R ≈ 1.2 m) compresses the same source
+       into a band with a rolloff either side. Base specular is turned right
+       down and the clearcoat is left tight, so the plate reads near-black with
+       one graded highlight sweeping it — not one dead value. */
+    const plateMat = new THREE.MeshPhysicalMaterial({
+      color: 0x04070c, metalness: 0.0, roughness: 0.90,
+      specularIntensity: 0.13,
+      clearcoat: 1.0, clearcoatRoughness: 0.20,
+      opacity: 1, depthWrite: true,
+    });
+    const plate = new THREE.Mesh(
+      lensGeometry(CARD.w + pad * 2, CARD.h + pad * 2, 0.007, 26, 14), plateMat);
+    plate.position.set(CARD.w / 2, CARD.h / 2, -0.012);
+    plate.renderOrder = 2;
+    root.add(plate);
+
+    const edge = new DIAG.Trace(5, 0x4c5663, 1.2, { opacity: 0.85, renderOrder: 3 });
+    edge.write((i) => [[-pad, -pad], [CARD.w + pad, -pad], [CARD.w + pad, CARD.h + pad],
+      [-pad, CARD.h + pad], [-pad, -pad]][i].concat(-0.0032));
     root.add(edge);
-    for (const k in PAN) {
-      const q = PAN[k];
-      const t = plate(q.w + 0.014, q.h + 0.014, 0x0e1319, 0.55, -0.0035, 4);
-      t.position.x += q.x - 0.007; t.position.y += q.y - 0.007;
-      root.add(t);
-    }
 
-    // one instanced swarm carries every sample dot and marker on the board
-    const dots = new DIAG.Swarm(N_WIN * 2 + 6, { color: PAL.ink, size: 0.0038, additive: false });
+    // sample dots for the reconstruction plot
+    // 0xeef0f4 sits above the 0.92 bloom threshold and every dot grew a halo.
+    const dots = new DIAG.Swarm(N_WIN + 1, { color: 0xdadfe6, size: 0.0021, additive: false });
     root.add(dots);
     S.dots = dots;
 
-    // ===== A · reconstruction ==============================================
+    // ===== 1 · reconstruction, and the hold it replaces =====================
     {
-      const p = PAN.A;
       const g = new DIAG.Graph({
-        w: p.w, h: p.h, xRange: [0, N_WIN], yRange: [-1.12, 1.12],
+        w: G1.w, h: G1.h, xRange: [0, N_WIN], yRange: [-1.16, 1.16],
         xTicks: [0, 2, 4, 6, 8, 10, 12, 14, 16], yTicks: [-1, -0.5, 0, 0.5, 1],
         zeroLine: 0,
       });
-      g.position.set(p.x, p.y, 0);
+      g.position.set(G1.x, G1.y, 0);
       root.add(g);
-      S.gA = g;
+      S.g1 = g;
 
-      S.kernels = [];
-      for (let n = 0; n <= N_WIN; n++) {
-        const t = new DIAG.Trace(190, PAL.cyDim, 1.1, { opacity: 0.95, renderOrder: 10 });
-        const a = smp(n);
-        t.write((i, u) => {
-          const x = u * N_WIN;
-          return [g.x(x), g.y(a * DSP.sinc(x - n)), 0.0006];
-        });
-        t.visible = false;
-        g.add(t);
-        S.kernels.push(t);
-      }
-      S.sumA = new DIAG.Trace(420, PAL.cy, 2.6, { renderOrder: 13 });
-      g.add(S.sumA);
-      S.sweep = new DIAG.Trace(2, PAL.cy, 1.2, { opacity: 0.5, dashed: true, dashSize: 0.006, gapSize: 0.005, renderOrder: 12 });
-      g.add(S.sweep);
-    }
-
-    // ===== B · zero-order hold ==============================================
-    {
-      const p = PAN.B;
-      const g = new DIAG.Graph({
-        w: p.w, h: p.h, xRange: [0, N_WIN], yRange: [-1.12, 1.12],
-        xTicks: [0, 4, 8, 12, 16], yTicks: [-1, 0, 1], zeroLine: 0,
-      });
-      g.position.set(p.x, p.y, 0);
-      root.add(g);
-      S.gB = g;
-
-      const stair = new DIAG.Trace(2 * (N_WIN + 1) + 1, PAL.rd, 1.9, { opacity: 0.78, renderOrder: 11 });
+      // the zero-order hold the output stage physically emits — AMBER, because
+      // it is an intermediate, not a myth. Red is reserved for the myth callout.
+      const stair = new DIAG.Trace(2 * (N_WIN + 1) + 1, PAL.am, 1.7, { opacity: 0.80, renderOrder: 10 });
       stair.write((i) => {
         const n = Math.min(N_WIN, Math.floor(i / 2));
         const x = Math.min(N_WIN, (i + 1) >> 1);
@@ -644,113 +710,77 @@ export default {
       });
       g.add(stair);
 
-      S.recB = new DIAG.Trace(420, PAL.cy, 2.4, { renderOrder: 13 });
-      S.recB.write((i, u) => [g.x(u * N_WIN), g.y(reconstruct(u * N_WIN)), 0.0008]);
-      g.add(S.recB);
-    }
-
-    // ===== F · two points per cycle =========================================
-    {
-      const p = PAN.F;
-      const g = new DIAG.Graph({
-        w: p.w, h: p.h, xRange: [0, N_WIN], yRange: [-1.2, 1.2],
-        xTicks: [0, 4, 8, 12, 16], yTicks: [-1, 0, 1], zeroLine: 0,
-      });
-      g.position.set(p.x, p.y, 0);
-      root.add(g);
-      S.gF = g;
-
-      S.recF = new DIAG.Trace(520, PAL.cy, 3.0, { renderOrder: 12 });
-      S.recF.write((i, u) => [g.x(u * N_WIN), g.y(reconstructNear(u * N_WIN)), 0.0007]);
-      g.add(S.recF);
-
-      // the original 20 kHz sine, dashed on top: the two curves coincide
-      const ref = new DIAG.Trace(520, PAL.gr, 1.6, {
-        opacity: 1, dashed: true, dashSize: 0.014, gapSize: 0.011, renderOrder: 14,
-      });
-      ref.write((i, u) => [g.x(u * N_WIN), g.y(nearAt(u * N_WIN * T_S)), 0.0011]);
-      g.add(ref);
-    }
-
-    // ===== C · aperture and images ==========================================
-    {
-      const p = PAN.C;
-      const g = new DIAG.Graph({
-        w: p.w, h: p.h, xLog: true, xRange: [4000, 160000], yRange: [-30, 3],
-        yTicks: [-30, -20, -10, 0], zeroLine: 0,
-      });
-      g.position.set(p.x, p.y, 0);
-      root.add(g);
-      xBand(g, 4000, 20000, PAL.cy, 0.055);
-      g.addTrace((f) => DSP.zohDb(f, FS), { color: PAL.rd, width: 1.6, n: 800, opacity: 0.8 });
-      g.addTrace((f) => DSP.zohDb(f, FS_OS), { color: PAL.cy, width: 2.2, n: 500 });
-      g.addTrace(recFiltDb, { color: PAL.gr, width: 1.6, n: 400, dashed: true, opacity: 0.9 });
-      g.addMarker(NYQ, { color: PAL.am, width: 1.2, opacity: 0.5 });
-
-      // the 9 kHz tone and its images about multiples of fs, at aperture height
-      for (const fi of [9000, FS - 9000, FS + 9000, 2 * FS - 9000, 2 * FS + 9000,
-        3 * FS - 9000, 3 * FS + 9000]) {
-        const st = new DIAG.Trace(2, PAL.am, 2.0, { opacity: 0.95, renderOrder: 12 });
-        st.write((i) => [g.x(fi), i === 0 ? g.y(-30) : g.y(DSP.zohDb(fi, FS)), 0.001]);
-        g.add(st);
+      // every kernel, all the time: a still frame must show the finished sum
+      for (let n = 0; n <= N_WIN; n++) {
+        const a = smp(n);
+        const t = new DIAG.Trace(150, PAL.cyDim, 1.0, { opacity: 0.55, renderOrder: 9 });
+        t.write((i, u) => {
+          const x = u * N_WIN;
+          return [g.x(x), g.y(a * DSP.sinc(x - n)), 0.0004];
+        });
+        g.add(t);
       }
-      g.addDot(PAL.rd, 0.0042).userData.setData(NYQ, ZOH_NYQ);
-    }
 
-    // ===== D · the 1-bit stream ============================================
-    {
-      const p = PAN.D;
-      const g = new DIAG.Graph({
-        w: p.w, h: p.h, xRange: [0, N_BITS_SHOWN], yRange: [-1.15, 1.15],
-        xTicks: [0, 64, 128, 192, 256], yTicks: [-1, 0, 1], zeroLine: 0,
+      const sum = new DIAG.Trace(480, PAL.cy, 2.8, { renderOrder: 13 });
+      sum.write((i, u) => [g.x(u * N_WIN), g.y(reconstruct(u * N_WIN)), 0.0010]);
+      g.add(sum);
+
+      // live cursor: one sample period per step, at the stated time scale
+      S.cur = new DIAG.Trace(2, PAL.ink, 1.0, {
+        opacity: 0.45, dashed: true, dashSize: 0.006, gapSize: 0.005, renderOrder: 12,
       });
-      g.position.set(p.x, p.y, 0);
-      root.add(g);
-      S.gD = g;
-      S.stream = new DIAG.Trace(N_BITS_SHOWN * 2 + 2, PAL.cy, 1.1, { opacity: 0.42, renderOrder: 11 });
-      g.add(S.stream);
-      S.boxcar = new DIAG.Trace(N_BITS_SHOWN, PAL.gr, 2.8, { renderOrder: 13 });
-      g.add(S.boxcar);
+      g.add(S.cur);
+      // the hold error at the middle of the interval, where it is largest
+      S.errBar = new DIAG.Trace(2, PAL.am, 3.6, { renderOrder: 15 });
+      g.add(S.errBar);
+      S.holdDot = g.addDot(PAL.am, 0.0026);
+      S.curDot = g.addDot(PAL.cy, 0.0026);
+
+      g.tickLabels(ctx.labels, {
+        xVals: [0, 16], yVals: [-1, 0, 1],
+        xFmt: (v) => String(v),
+        yFmt: (v) => (v === 0 ? '0' : (v > 0 ? '+' : '−') + VFS.toFixed(2)),
+        xOffset: [0, 12], yOffset: [-20, 0],
+      });
     }
 
-    // ===== D2 · shaped noise, measured =====================================
+    // ===== 2 · shaped noise, measured =======================================
     {
-      const p = PAN.D2;
       const g = new DIAG.Graph({
-        w: p.w, h: p.h, xLog: true, xRange: [3000, FS_MOD / 2], yRange: [-160, 0],
+        w: G2.w, h: G2.h, xLog: true, xRange: [3000, FS_MOD / 2], yRange: [-160, 0],
         yTicks: [-160, -120, -80, -40, 0],
       });
-      g.position.set(p.x, p.y, 0);
+      g.position.set(G2.x, G2.y, 0);
       root.add(g);
-      xBand(g, 3000, 20000, PAL.cy, 0.055);
+      S.g2 = g;
+      xBand(g, 3000, 20000, PAL.cy, 0.038);
       g.addTrace((f) => SPEC.floorAt(f), { color: PAL.am, width: 1.5, n: 480, opacity: 0.92 });
       g.addTrace((f) => SPEC.floorAt(f) + recFiltDb(f), { color: PAL.cy, width: 2.0, n: 480 });
-      g.addTrace(recFiltDb, { color: PAL.gr, width: 1.5, n: 300, dashed: true, opacity: 0.85 });
-      g.addMarker(NYQ, { color: PAL.am, width: 1.2, opacity: 0.5 });
-    }
+      g.addTrace(recFiltDb, { color: PAL.gr, width: 1.4, n: 300, dashed: true, opacity: 0.85 });
+      g.addMarker(NYQ, { color: PAL.ink, width: 1.0, opacity: 0.40 });
 
-    // ===== E · amplitude ruler ==============================================
-    {
-      const p = PAN.E;
-      const g = new DIAG.Graph({
-        w: p.w, h: p.h, xLog: true, xRange: [1e-8, 4], yRange: [0, 1],
-        xTicks: [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1],
-        yTicks: [], zeroLine: null,
-      });
-      g.position.set(p.x, p.y, 0);
-      root.add(g);
-      S.gE = g;
-      xBand(g, 1e-8, V_JOHNSON, PAL.rd, 0.07);
-      S.stemV = [LSB24, V_JOHNSON, LSB16, VFS];
-      const cols = [PAL.cy, PAL.rd, PAL.cy, PAL.ink];
-      S.stemV.forEach((v, i) => {
-        const st = new DIAG.Trace(2, cols[i], 2.2, { renderOrder: 12 });
-        st.write((k) => [g.x(v), k === 0 ? 0 : g.o.h * 0.80, 0.001]);
-        g.add(st);
+      g.tickLabels(ctx.labels, {
+        xVals: [20000, 1000000], yVals: [0, -80, -160],
+        xFmt: (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + ' MHz' : (v / 1000).toFixed(0) + ' kHz'),
+        yFmt: (v) => (v === 0 ? '0' : String(v)),
+        xOffset: [0, 12], yOffset: [-20, 0],
       });
     }
 
-    // ---- labels ------------------------------------------------------------
+    /* Cover glass over the whole card: the image of the widened front strip,
+       swept across as a graded band. Additive and low, so it lifts the plate
+       into a mid-grey ramp without touching the legibility of the traces. */
+    const sheen = new THREE.Mesh(
+      new THREE.PlaneGeometry(CARD.w + pad * 2, CARD.h + pad * 2),
+      new THREE.MeshBasicMaterial({
+        map: sheenTexture(), color: 0x8ea6bc, transparent: true, opacity: 0.05,
+        blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      }));
+    sheen.position.set(CARD.w / 2, CARD.h / 2, 0.0060);
+    sheen.renderOrder = 30;
+    root.add(sheen);
+
+    // ---- labels -------------------------------------------------------------
     const L = ctx.labels;
     const anchor = (lx, ly) => {
       const o = new THREE.Object3D();
@@ -758,59 +788,61 @@ export default {
       root.add(o);
       return o;
     };
-    const top = (p, frac) => anchor(p.x + p.w * frac, p.y + p.h + 0.004);
 
-    S.labA = L.add(top(PAN.A, 0.42), {
-      kicker: 'Reconstruction · sum of sincs',
-      value: '17 of 17 kernels', cls: 'acc', offset: [0, -15],
+    S.lab1 = L.add(anchor(G1.x + G1.w * 0.5, G1.y + G1.h + 0.004), {
+      kicker: 'Reconstruction · sum of sincs · V',
+      text: 'amber · the hold it replaces',
+      value: '', cls: 'acc', offset: [0, -38], occlude: false, priority: 6,
     });
-    L.add(top(PAN.B, 0.32), {
-      kicker: 'Zero-order hold · the intermediate',
-      value: `${ZOH_NYQ.toFixed(2)} dB at fs/2 · ${ZOH_20K.toFixed(2)} dB at 20 k`,
-      cls: 'am', offset: [0, -15],
-    });
-    L.add(top(PAN.F, 0.30), {
-      kicker: '20 kHz sampled at 44.1 kHz',
-      value: `${SAMPLES_PER_CYCLE.toFixed(3)} points per cycle — exact`,
-      cls: 'acc', offset: [0, -15],
-    });
-    L.add(top(PAN.C, 0.34), {
-      kicker: 'Aperture and images',
-      value: `hold ×8: ${ZOH_20K_OS.toFixed(3)} dB at 20 kHz`,
-      cls: 'acc', offset: [0, -15],
-    });
-    S.labD = L.add(top(PAN.D, 0.34), {
-      kicker: 'Δ-Σ 1-bit stream · 2.8224 MHz',
-      value: '64 bits per sample · 1 : 5.0×10⁴', cls: 'acc', offset: [0, -15],
-    });
-    L.add(top(PAN.D2, 0.36), {
-      kicker: 'Shaped noise · measured FFT',
-      value: `in-band ${SPEC.snrMeas.toFixed(1)} dB · model ${SNR_MODEL.toFixed(1)} dB`,
-      cls: 'am', offset: [0, -15],
-    });
-    L.add(anchor(PAN.E.x + S.gE.x(LSB24), PAN.E.y + PAN.E.h), {
-      kicker: 'Amplitude floor, ±2 V',
-      value: `LSB ${(LSB24 * 1e9).toFixed(1)} nV · 1 kΩ kTB ${(V_JOHNSON * 1e9).toFixed(0)} nV`,
-      cls: 'am', offset: [86, -15],
-    });
-    L.add(anchor(PAN.E.x + S.gE.x(VFS), PAN.E.y + PAN.E.h), {
-      kicker: 'Full scale',
-      value: `${VFS.toFixed(3)} V · 16-bit LSB ${(LSB16 * 1e6).toFixed(2)} µV`,
-      offset: [-92, -15],
+    L.add(anchor(G2.x + G2.w * 0.5, G2.y + G2.h + 0.004), {
+      kicker: 'Δ-Σ shaped noise, measured · dBFS',
+      value: `65 536-pt FFT · DR ${SPEC.drFs.toFixed(1)} · model ${SNR_MODEL.toFixed(1)}`,
+      cls: 'acc', offset: [0, -30], occlude: false, priority: 6,
     });
 
     const hwAnchor = new THREE.Object3D();
-    hwAnchor.position.set(-0.09, -0.046, 0.20);
+    hwAnchor.position.set(-0.10, H_BODY / 2, D_C / 2);
     hardware.add(hwAnchor);
     L.add(hwAnchor, {
-      kicker: 'Analogue | digital',
-      text: 'screened clock, split ground',
-      offset: [0, 24],
+      kicker: 'Digital to analogue · rack bay 2',
+      value: `${WORD} bit · ${(FS / 1000).toFixed(1)} kHz · ${VFS_RMS.toFixed(3)} V rms out`,
+      cls: 'acc', offset: [0, -30], occlude: false, priority: 7,
     });
 
-    S.phase = 0;
-    S.nAcc = -1;
+    this._latch(true);
     return { hardware, overlay };
+  },
+
+  /**
+   * Latch the displayed instant.
+   *
+   * The whole-piece audit caught every animated stage disagreeing with its own
+   * footer, because readouts refresh at 10 Hz while labels are written every
+   * frame. Here the ONLY moving quantity is the sample index, it is derived
+   * from the simulated clock at the true sample rate, and it is advanced from
+   * readouts() — so the cursor, the two label values and the six footer cells
+   * are always the same instant, whatever moment a screenshot catches.
+   */
+  _latch(force) {
+    const S = this._s;
+    if (!S) return { n: 0, v: 0, err: 0 };
+    const n = ((Math.floor(S.t / T_S) + 9) % N_WIN + N_WIN) % N_WIN;
+    if (n === S.n && !force) return S.state;
+    S.n = n;
+
+    const g = S.g1;
+    const xm = n + 0.5;                       // mid-interval: worst case for the hold
+    const yRec = reconstruct(xm);
+    const yHold = smp(n);
+    S.state = { n, v: yRec * VFS, err: (yHold - yRec) * VFS * 1000 };
+
+    S.cur.write((i) => [g.x(xm), i === 0 ? 0 : g.o.h, 0.0012]);
+    S.errBar.write((i) => [g.x(xm), g.y(i === 0 ? yRec : yHold), 0.0013]);
+    S.curDot.userData.setData(xm, yRec);
+    S.holdDot.userData.setData(xm, yHold);
+    const sv = (x, d) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(d);
+    S.lab1.setValue(`n+\u00bd = ${n}.5 · y = ${sv(S.state.v, 3)} V · hold error ${sv(S.state.err, 0)} mV`);
+    return S.state;
   },
 
   setReveal(k, ctx) {
@@ -826,103 +858,41 @@ export default {
   update(dt, t, ctx) {
     const S = this._s;
     if (!S) return;
+    S.t = t;
 
-    // Presentation clock: real seconds scaled by the user's rate. The physics
-    // runs on `t`; only the draw-on of the diagram runs on this.
-    S.phase = (S.phase + dt / TIME_SCALE) % CYCLE_S;
-    const build = DSP.clamp(S.phase / BUILD_S, 0, 1);
-    const nAcc = Math.min(N_WIN, Math.floor(build * (N_WIN + 1)) - 1);
-
-    if (nAcc !== S.nAcc) {
-      S.nAcc = nAcc;
-      const g = S.gA;
-      for (let n = 0; n <= N_WIN; n++) {
-        S.kernels[n].visible = n <= nAcc;
-        S.kernels[n].material.color.setHex(n === nAcc ? PAL.cy : PAL.cyDim);
-      }
-      S.sumA.write((i, u) => {
-        const x = u * N_WIN;
-        return [g.x(x), g.y(reconstruct(x, nAcc)), 0.0009];
-      });
-      S.labA.setValue(`${nAcc + 1} of ${N_WIN + 1} kernels`);
-      const done = nAcc >= N_WIN;
-      S.sweep.visible = !done;
-      if (!done) {
-        const xs = g.x(Math.max(0, nAcc));
-        S.sweep.write((i) => [xs, i === 0 ? 0 : g.o.h, 0.0012]);
-      }
-      const f = done ? 1 : DSP.clamp((nAcc + 1) / (N_WIN + 1), 0.02, 1);
-      S.recB.setProgress(f);
-      S.recF.setProgress(f);
-    }
-
-    // ---- the 1-bit stream, at its true rate ------------------------------
-    const g = S.gD;
-    const p = t / T_BIT;
-    const i0 = Math.floor(p), frac = p - i0;
-    const bit = (j) => BITS_BUF[(i0 + j) & (N_FFT - 1)];
-    S.stream.write((i) => {
-      const j = Math.min(N_BITS_SHOWN, i >> 1);
-      const x = Math.min(N_BITS_SHOWN, (i + 1) >> 1) - frac;
-      return [g.x(DSP.clamp(x, 0, N_BITS_SHOWN)), g.y(bit(j)), 0.0006];
-    });
-    // 64-bit boxcar — one sample period of decimation. Its output is the audio.
-    S.boxcar.write((i, u) => {
-      const j0 = Math.round(u * N_BITS_SHOWN);
-      let s = 0;
-      for (let k = -32; k < 32; k++) s += bit(j0 + k);
-      return [g.x(DSP.clamp(j0 - frac, 0, N_BITS_SHOWN)), g.y(s / 64), 0.0009];
-    });
-
-    // ---- sample dots and ruler markers, all in one instanced swarm --------
-    const A = PAN.A, F = PAN.F, E = PAN.E;
-    S.dots.update((i) => {
-      if (i <= N_WIN) {
-        return { p: [A.x + S.gA.x(i), A.y + S.gA.y(smp(i)), 0.0016], s: 1, c: PAL.ink };
-      }
-      if (i <= N_WIN * 2 + 1) {
-        const n = i - N_WIN - 1;
-        return { p: [F.x + S.gF.x(n), F.y + S.gF.y(SMP_N[n - N_LO]), 0.0016], s: 1, c: PAL.ink };
-      }
-      const k = i - (N_WIN * 2 + 2);
-      const v = S.stemV[k];
-      if (v === undefined) return null;
-      return {
-        p: [E.x + S.gE.x(v), E.y + E.h * 0.80, 0.0016], s: 1.1,
-        c: [PAL.cy, PAL.rd, PAL.cy, PAL.ink][k],
-      };
-    });
+    const g = S.g1;
+    S.dots.update((i) => ({
+      p: [G1.x + g.x(i), G1.y + g.y(smp(i)), 0.0016], s: 1, c: 0xdadfe6,
+    }));
   },
 
   content() {
-    const snr = SPEC.snrMeas ? SPEC.snrMeas.toFixed(1) : '\u2014';
+    const dr = SPEC.drFs ? SPEC.drFs.toFixed(1) : '—';
+    const gap = SPEC.drFs ? (SNR_MODEL - SPEC.drFs).toFixed(1) : '—';
     return `
 <h3>The unique curve</h3>
-<p>A converter is handed <span class="num">44 100</span> numbers a second and has to make a voltage. The sampling theorem does not say those numbers are "enough points to draw the wave". It says that <em>if</em> the recording held nothing at or above <span class="num">22 050</span> Hz, exactly one band-limited function passes through them.</p>
-<p>That function is a sum of sinc kernels, one centred on every sample and scaled by it. Because sinc is <b>1</b> at its own sample instant and <b>exactly zero</b> at every other one, the sum meets every dot and stays smooth between them.</p>
-<div class="eq">y(t) = \u03a3\u2099 x[n] \u00b7 sinc(t/T \u2212 n)
-<span class="c">T = 1/44 100 = 22.676 \u00b5s</span></div>
-<div class="myth"><span class="lab">Commonly got wrong</span><p>The staircase. A chip does emit steps — holding each value until the next update is what the output stage physically does — but the hold is an artefact of that stage and the reconstruction filter removes it. Its aperture costs <span class="num">\u22123.92</span> dB at f<sub>s</sub>/2 and puts a null at 44.1 kHz. Recorded sound never looks like stairs.</p></div>
+<p>A converter is handed <span class="num">44 100</span> numbers a second and has to make a voltage. The sampling theorem does not say those numbers are enough points to draw the wave. It says that <em>if</em> the recording held nothing at or above <span class="num">${(NYQ).toLocaleString('en-GB').replace(',', ' ')}</span> Hz, exactly one band-limited function passes through them.</p>
+<div class="myth"><span class="lab">Commonly got wrong</span><p>The staircase, drawn here in amber. The output stage does hold each value until the next update — but the hold belongs to that stage, not to the signal. Interpolating <span class="num">×${OSR_DIG}</span> first moves the hold to <span class="num">${(FS_OS / 1000).toFixed(1)}</span> kHz, where its aperture costs <span class="num">${ZOH_20K_OS.toFixed(3)}</span> dB at 20 kHz instead of <span class="num">${ZOH_20K.toFixed(2)}</span> dB — the un-oversampled hold costs <span class="num">${ZOH_NYQ.toFixed(2)}</span> dB at f<sub>s</sub>/2 and puts a null at f<sub>s</sub>. The analogue filter removes what is left.</p></div>
+<div class="eq">y(t) = Σₙ x[n] · sinc(t/T − n)
+<span class="c">T = 1/44 100 = 22.676 µs</span></div>
+<div class="key"><span class="lab">The idea</span><p>Two points per cycle is enough. A 20 kHz tone gets <span class="num">${SAMPLES_PER_CYCLE.toFixed(3)}</span> of them, looks like nothing on a plot, and reconstructs exactly.</p></div>
 <h3>Arithmetic</h3>
 <ul>
-<li>16-bit: <span class="num">6.02 \u00d7 16 + 1.76 = ${SNR16.toFixed(1)}</span> dB. 24-bit: <span class="num">${SNR24.toFixed(1)}</span> dB.</li>
-<li>The 24-bit LSB over \u00b12 V is <span class="num">${(LSB24 * 1e9).toFixed(1)} nV</span>; a 1 k\u03a9 resistor makes <span class="num">${(V_JOHNSON * 1e9).toFixed(0)} nV</span> of its own noise in 20 kHz, so the bottom bit sits <span class="num">${Math.abs(LSB_VS_KTB).toFixed(1)}</span> dB below one component's floor.</li>
-<li>Shaping by |1\u2212z\u207b\u00b9|\u00b2 drops the one-bit noise density <span class="num">${Math.abs(NTF_20K).toFixed(1)}</span> dB at 20 kHz. In band the model gives <span class="num">${SNR_MODEL.toFixed(1)}</span> dB; this modulator measures <span class="num">${snr}</span> dB — white-noise assumptions flatter a one-bit quantiser.</li>
-<li>Interpolating \u00d78 moves the hold to <span class="num">352.8</span> kHz, where the aperture costs <span class="num">${ZOH_20K_OS.toFixed(3)}</span> dB at 20 kHz.</li>
-</ul>
-<div class="key"><span class="lab">The idea</span><p>Two points per cycle is enough. The 20 kHz trace has <span class="num">2.205</span> of them, looks like nothing, and reconstructs exactly.</p></div>
-<h3>Colour</h3>
-<p>Cyan is the reconstruction; red the hold and the sub-thermal region; green the original wave and the analogue filter; amber measured noise.</p>`;
+<li>Full scale is <span class="num">${VFS_RMS.toFixed(3)}</span> V rms, <span class="num">${VFS.toFixed(3)}</span> V peak, so the ${WORD}-bit LSB is <span class="num">${(LSB24 * 1e9).toFixed(1)} nV</span>. One 1 kΩ resistor makes <span class="num">${(V_JOHNSON * 1e9).toFixed(0)} nV</span> of noise of its own in 20 kHz, so the bottom bit sits <span class="num">${Math.abs(LSB_VS_KTB).toFixed(1)}</span> dB below it. At ${WORD_CD} bits the step is <span class="num">${(LSB16 * 1e6).toFixed(1)} µV</span>, 256 times larger.</li>
+<li>Ideal quantisation is <span class="num">6.02 × ${WORD_CD} + 1.76 = ${SNR16.toFixed(1)}</span> dB at ${WORD_CD} bits and <span class="num">${SNR24.toFixed(1)}</span> dB at ${WORD}.</li>
+<li>Shaping by |1−z⁻¹|² drops the one-bit noise density <span class="num">${Math.abs(NTF_20K).toFixed(1)}</span> dB at 20 kHz. A one-bit loop cannot take full scale, so this one runs <span class="num">${HEADROOM_DB.toFixed(2)}</span> dB down; referring its measured in-band noise back to full scale gives <span class="num">${dr}</span> dB against a model of <span class="num">${SNR_MODEL.toFixed(1)}</span>. The <span class="num">${gap}</span> dB shortfall is that model's white-error assumption failing: a one-bit quantiser makes idle tones, not noise.</li>
+</ul>`;
   },
 
   readouts() {
+    const st = this._latch(false);
     return [
       { k: 'FS', v: (FS / 1000).toFixed(2), u: 'kHz', cls: 'acc' },
-      { k: 'WORD', v: String(WORD), u: 'bit' },
-      { k: 'NYQUIST', v: (NYQ / 1000).toFixed(2), u: 'kHz', cls: 'acc' },
-      { k: 'LSB', v: (LSB24 * 1e9).toFixed(1), u: 'nV', cls: 'am' },
-      { k: 'SNR 24-BIT', v: SNR24.toFixed(1), u: 'dB' },
-      { k: 'ZOH 20 kHz', v: ZOH_20K.toFixed(2), u: 'dB', cls: 'am' },
+      { k: 'CURSOR n+\u00bd', v: `${st.n}.5`, u: `of ${N_WIN}` },
+      { k: 'y(t)', v: (st.v >= 0 ? '+' : '−') + Math.abs(st.v).toFixed(3), u: 'V', cls: 'acc' },
+      { k: 'HOLD ERR', v: (st.err >= 0 ? '+' : '−') + Math.abs(st.err).toFixed(0), u: 'mV', cls: 'am' },
+      { k: 'IN-BAND DR', v: SPEC.drFs.toFixed(1), u: 'dBFS' },
+      { k: 'ZOH \u00d78 20 kHz', v: ZOH_20K_OS.toFixed(3).replace('-', '\u2212'), u: 'dB', cls: 'am' },
     ];
   },
 };

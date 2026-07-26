@@ -35,6 +35,18 @@ export function buildMaterials() {
     envMapIntensity: 1.0,
   });
 
+  /**
+   * Trim alloy. A 3.5 mm bar or a 17 mm post is NARROWER than the reflected
+   * image of a softbox, so a mirror finish makes the whole section clip to
+   * white and bloom — the rack was reading as a neon wireframe. Real extruded
+   * trim is satin, not polished. Higher roughness and a lower env response keep
+   * the section inside the grey ramp.
+   */
+  M.aluTrim = new THREE.MeshPhysicalMaterial({
+    color: 0x9fa4aa, metalness: 1.0, roughness: 0.46,
+    roughnessMap: anRough, envMapIntensity: 0.52,
+  });
+
   /** Same, brushed vertically (rotate the maps 90°) for side cheeks. */
   M.aluV = M.alu.clone();
   M.aluV.anisotropyRotation = Math.PI / 2;
@@ -60,7 +72,7 @@ export function buildMaterials() {
 
   /** Stainless — fasteners, spikes, tonearm hardware. */
   M.steel = new THREE.MeshPhysicalMaterial({
-    color: 0x9ea3a9, metalness: 1.0, roughness: 0.20,
+    color: 0x9ea3a9, metalness: 1.0, roughness: 0.32,
     roughnessMap: anRough, envMapIntensity: 1.0,
   });
 

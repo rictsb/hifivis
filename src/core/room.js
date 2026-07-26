@@ -83,7 +83,7 @@ function rack() {
   const postR = 0.017;
   const topY = L.topY;
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    const p = new THREE.Mesh(bevelCyl(postR, postR * 1.05, topY, 28, 0.0012), mats().anodBlack);
+    const p = new THREE.Mesh(bevelCyl(postR, postR * 1.05, topY, 28, 0.0012), mats().aluTrim);
     p.position.set(sx * (L.w / 2 - postR * 1.4), topY / 2, sz * (L.d / 2 - postR * 1.4));
     p.castShadow = p.receiveShadow = true;
     g.add(p);
@@ -106,7 +106,7 @@ function rack() {
     s.castShadow = s.receiveShadow = true;
     g.add(s);
     // thin alloy edge trim catches the strip light
-    const trim = new THREE.Mesh(bevelBox(L.w + 0.004, 0.0035, 0.004, 0.0012, 2), mats().alu);
+    const trim = new THREE.Mesh(bevelBox(L.w + 0.004, 0.0035, 0.004, 0.0012, 2), mats().aluTrim);
     trim.position.set(0, y - 0.0035, L.d / 2 + 0.001);
     g.add(trim);
   }
@@ -153,7 +153,13 @@ function ttPlinth() {
   slab.position.y = top - 0.0225;
   slab.castShadow = slab.receiveShadow = true;
   g.add(slab);
-  const under = new THREE.Mesh(bevelBox(w * 0.86, 0.020, d * 0.86, 0.003, 3), mats().wood);
+  // a bright orange strip along the plinth edge was the loudest thing in three
+  // separate frames; the veneer is right, the saturation was not
+  const underMat = mats().wood.clone();
+  underMat.color.setHex(0x6a5646);
+  underMat.roughness = 0.52;
+  underMat.envMapIntensity = 0.55;
+  const under = new THREE.Mesh(bevelBox(w * 0.86, 0.020, d * 0.86, 0.003, 3), underMat);
   under.position.y = top - 0.055;
   under.castShadow = true;
   g.add(under);
@@ -211,14 +217,14 @@ export function buildRoom(scene) {
 
   // Foreground wash: without this the floor between camera and system falls to
   // pure black and the frame loses its bottom third.
-  const fore = new THREE.SpotLight(0xdCE6F2, 26, 14, Math.PI * 0.42, 0.95, 1.35);
+  const fore = new THREE.SpotLight(0xdCE6F2, 15, 14, Math.PI * 0.42, 0.96, 1.35);
   fore.position.set(1.4, 3.6, 5.6);
   fore.target.position.set(-0.2, 0.0, 0.4);
   fore.castShadow = false;
   scene.add(fore, fore.target);
 
   // A soft overhead pool that grazes the top surfaces and pools on the floor.
-  const pool = new THREE.SpotLight(0xffe9cf, 40, 12, Math.PI * 0.30, 0.85, 1.6);
+  const pool = new THREE.SpotLight(0xffe9cf, 22, 12, Math.PI * 0.30, 0.92, 1.6);
   pool.position.set(-0.6, 4.4, 0.9);
   pool.target.position.set(-0.15, 0.2, -2.6);
   pool.castShadow = false;

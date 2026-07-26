@@ -93,7 +93,7 @@ export function createComposer(renderer, scene, camera) {
 
   // Bloom: high threshold, small radius. Only the meter glow and LEDs should
   // ever bloom — a scene-wide haze is the classic "WebGL demo" tell.
-  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.30, 0.40, 1.06);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.26, 0.42, 2.30);
   composer.addPass(bloom);
 
   const output = new OutputPass();

@@ -4,18 +4,19 @@ import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
+import { DIGITAL } from '../core/spec.js';
 
 /* =========================================================================
-   NETWORK TO BITS — every constant below is derived, none is chosen.
+   NETWORK TO BITS — every constant below is derived from spec.js or from a
+   modelling premise that is stated on screen in content().
 
-   The chain runs at 44.1 kHz because the converter in bay 2 does: its
-   front panel lights the 44.1 segment and its whole reconstruction argument
-   is built on two points per cycle at 20 kHz. One rate for the whole chain.
+   The stream is the disc rate at the system's word length: DIGITAL.fsCd and
+   DIGITAL.bits. Both come from spec.js so this chapter and the converter
+   quote the same hardware.
    ========================================================================= */
 
-const FS = 44100, NBITS = 24, NCH = 2;
+const FS = DIGITAL.fsCd, NBITS = DIGITAL.bits, NCH = 2;
 const PAYLOAD_BPS = NCH * NBITS * FS;              // 2 116 800 bit/s
-const PAYLOAD_B = PAYLOAD_BPS / 8;                 // 264 600 byte/s
 const FRAME_B = (NCH * NBITS) / 8;                 // 6 byte per stereo frame
 const MSS = 1460;                                  // 1500 MTU − 20 IPv4 − 20 TCP
 /* A segment carries whole frames only: 1460/6 = 243.33, so 243. */
@@ -25,8 +26,7 @@ const PKT_AUDIO = SEG_FRAMES / FS;                 // 5.5102 ms of music
 const PKT_RATE = FS / SEG_FRAMES;                  // 181.481 packet/s
 const WIRE_B = SEG_B + 40 + 14 + 4 + 8 + 12;       // 1536 B on the wire
 const LINE_BPS = 1e9;                              // 1000BASE-T
-const T_SER = (WIRE_B * 8) / LINE_BPS;             // 12.288 µs per frame
-const LINE_PPS = 1 / T_SER;                        // 81 380 packet/s at line rate
+const T_SER = (WIRE_B * 8) / LINE_BPS;             // 12.288 µs per wire frame
 
 const BCLK = 64 * FS;                              // 2.8224 MHz — AES3 frame is 64 bit
 const MCLK = 128 * FS;                             // 5.6448 MHz — biphase channel rate
@@ -37,20 +37,22 @@ const SNR_24 = DSP.quantSnrDb(NBITS);              // 146.26 dB
 const TJ_24 = 1 / (DSP.TAU * JF * DSP.undB(SNR_24)); // 0.7746 ps
 const SNR_20K = SNR_TJ + 10 * Math.log10((FS / 2) / 20000); // 110.48 dB in 20 kHz
 
-/* Time. The packet layer runs at the stage timeScale; the bit layer is far too
-   fast for that, so it is derived from t with its own multiplier and the ratio
-   is stated on screen. */
+/* Time. The packet layer runs at the stage timeScale; the bit layer is four
+   orders of magnitude faster, so it is derived from t with its own multiplier
+   and that further ratio is stated on the card. It is a ratio against the
+   stage's OWN time base, so it stays true at any transport speed. */
 const TS = 0.02;                                   // 1 simulated s per 50 real s
-const CELL_PER_REAL_S = 24;
-const CELL_PER_SIM_S = CELL_PER_REAL_S / TS;       // 1200 cell per simulated second
-const CELL_RATIO = Math.round(BCLK / CELL_PER_REAL_S);   // 117 600 : 1 against real time
+const BIT_PER_SIM_S = 1200;                        // bit slots drawn per simulated second
+const BIT_RATIO = Math.round(BCLK / BIT_PER_SIM_S);// 2352 : 1 on top of the stage rate
 
-/* Receive buffer. 120 ms is a wired-LAN figure; Wi-Fi players use seconds. */
-const BUF_TARGET = 120, BUF_FULL = 140;            // ms of audio
+/* MODELLING PREMISES. Not measurements — every one of these is named in the
+   prose as a premise, because a number on screen that came from nowhere is
+   worse than no number. */
+const BUF_TARGET = 120, BUF_FULL = 140;            // ms of audio; a wired-LAN target
 const WIN = 0.360;                                 // s of history on the strip chart
-const STALL_MEAN = 0.090;                          // mean interval between stalls, s
+const STALL_MEAN = 0.090;                          // mean interval between switch stalls, s
 const RETX_ONE_IN = 380;                           // segments needing a retransmission
-const RTT = 0.0045;                                // fast-retransmit round trip
+const RTT = 0.0045;                                // fast-retransmit round trip, s
 
 const TONE_F = 997, TONE_A = DSP.undB(-3), FULL24 = Math.pow(2, NBITS - 1) - 1;
 
@@ -73,6 +75,28 @@ function mulberry32(a) {
 }
 function anchor(parent, x, y, z = 0) {
   const o = new THREE.Object3D(); o.position.set(x, y, z); parent.add(o); return o;
+}
+
+/**
+ * A CONVEX clear panel. This is the specular layer the set was missing: a flat
+ * pane facing the camera mirrors whatever sits at the reflection angle, and in
+ * this room that is the dark floor. Curving it sweeps the surface normal
+ * through ~13°, which drags the reflected image of the wide front strip across
+ * the panel as a soft band with a real gradient either side of it.
+ *
+ * rx, ry are the radii of curvature in metres; the sag is (w/2)²/2rx + (h/2)²/2ry.
+ */
+function curvedPane(w, h, rx, ry, sx = 26, sy = 16) {
+  const g = new THREE.PlaneGeometry(w, h, sx, sy);
+  const p = g.attributes.position;
+  const sag = (w * w) / (8 * rx) + (h * h) / (8 * ry);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i);
+    p.setZ(i, sag - (x * x) / (2 * rx) - (y * y) / (2 * ry));
+  }
+  p.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
 }
 
 /* ---------- real 24-bit sample words ------------------------------------ */
@@ -119,6 +143,7 @@ const H = 0.092, W = LAYOUT.rack.w - 0.03, D = LAYOUT.rack.d - 0.06;
 const CUT_X0 = 0.022, CUT_X1 = 0.186;
 /** Clock island, in the band the cutaway can see: 60 mm behind the fascia. */
 const OCXO_POS = [(CUT_X0 + CUT_X1) / 2, 0, 0.160];
+const DISP_X = -0.086, DISP_Y = 0.004, DISP_W = 0.200, DISP_H = 0.040;
 
 function oled() {
   const c = document.createElement('canvas');
@@ -131,15 +156,17 @@ function oled() {
     g.fillStyle = '#03060a'; g.fillRect(0, 0, 640, 128);
     g.fillStyle = 'rgba(120,200,240,0.030)';
     for (let y = 0; y < 128; y += 3) g.fillRect(0, y, 640, 1);
-    g.fillStyle = '#7fd2ff'; g.font = mono(48); g.fillText('44.1', 16, 58);
-    g.font = mono(24, 500); g.fillStyle = '#4e93b6'; g.fillText('kHz', 130, 57);
-    g.fillStyle = '#7fd2ff'; g.font = mono(48); g.fillText('24', 206, 58);
-    g.font = mono(24, 500); g.fillStyle = '#4e93b6'; g.fillText('bit', 264, 57);
-    g.fillStyle = '#7fd2ff'; g.font = mono(28); g.fillText('AES · LOCK', 380, 55);
-    g.font = mono(19, 500); g.fillStyle = '#4e93b6'; g.fillText('BUF', 16, 105);
-    g.fillStyle = '#12303f'; g.fillRect(62, 87, 392, 18);
-    g.fillStyle = '#5cc0f2'; g.fillRect(62, 87, 392 * Math.min(1, occ / BUF_FULL), 18);
-    g.fillStyle = '#7fd2ff'; g.font = mono(23); g.fillText(`${occ.toFixed(0)} ms`, 474, 106);
+    // Panel emissives are no longer competing with clipped white highlights, so
+    // the display runs at a real OLED level rather than at paper white.
+    g.fillStyle = '#63aecd'; g.font = mono(48); g.fillText('44.1', 16, 58);
+    g.font = mono(24, 500); g.fillStyle = '#3d7590'; g.fillText('kHz', 130, 57);
+    g.fillStyle = '#63aecd'; g.font = mono(48); g.fillText('24', 206, 58);
+    g.font = mono(24, 500); g.fillStyle = '#3d7590'; g.fillText('bit', 264, 57);
+    g.fillStyle = '#63aecd'; g.font = mono(28); g.fillText('AES · LOCK', 380, 55);
+    g.font = mono(19, 500); g.fillStyle = '#3d7590'; g.fillText('BUF', 16, 105);
+    g.fillStyle = '#0e2733'; g.fillRect(62, 87, 392, 18);
+    g.fillStyle = '#4a9cc4'; g.fillRect(62, 87, 392 * Math.min(1, occ / BUF_FULL), 18);
+    g.fillStyle = '#63aecd'; g.font = mono(23); g.fillText(`${occ.toFixed(0)} ms`, 474, 106);
     t.needsUpdate = true;
   };
   draw(BUF_TARGET);
@@ -216,7 +243,12 @@ function clockIsland() {
 function internals() {
   const g = new THREE.Group();
   const iw = W - 0.012, id = D - 0.014, y0 = -H / 2 + 0.006;
-  const board = new THREE.Mesh(GEO.bevelBox(iw, 0.0016, id, 0.0006, 2), mats().pcb);
+  // A high-end digital board is not bright green FR4: it is a dark, matt
+  // soldermask that would not draw the eye away from the gold can. Cloning
+  // keeps the copper-trace map and only pulls the base colour down.
+  const bm = mats().pcb.clone();
+  bm.color.setHex(0x66776d); bm.roughness = 0.58; bm.clearcoat = 0.22;
+  const board = new THREE.Mesh(GEO.bevelBox(iw, 0.0016, id, 0.0006, 2), bm);
   board.position.set(0, y0, -0.002); board.receiveShadow = true; g.add(board);
   const put = (mesh, x, z, y = 0) => {
     mesh.position.set(x, y0 + 0.0008 + y, z); mesh.castShadow = true; g.add(mesh); return mesh;
@@ -227,6 +259,18 @@ function internals() {
   isl.position.set(CIX, y0 + 0.0008, CIZ);
   g.add(isl);
   g.userData.can = isl.userData.can;
+
+  // Parts that sit inside the band the cutaway window actually reaches, so the
+  // window has something to look at either side of the clock island: the two
+  // low-noise regulators that feed the oven, and their tantalum reservoirs.
+  for (const sx of [-1, 1]) {
+    const reg = new THREE.Mesh(GEO.bevelBox(0.0062, 0.0022, 0.0056, 0.0004, 2), mats().plastic);
+    put(reg, CIX + sx * 0.070, CIZ + 0.010, 0.0011);
+    const tab = new THREE.Mesh(GEO.bevelBox(0.0058, 0.0003, 0.0026, 0.0001, 1), mats().steel);
+    put(tab, CIX + sx * 0.070, CIZ + 0.0142, 0.0002);
+    const tan = new THREE.Mesh(GEO.bevelBox(0.0034, 0.0018, 0.0018, 0.0003, 2), mats().anodGrey);
+    put(tan, CIX + sx * 0.070, CIZ - 0.012, 0.0009);
+  }
 
   // re-clocker, buffer DRAM, PHY magnetics, reservoir caps
   put(new THREE.Mesh(GEO.bevelBox(0.023, 0.0026, 0.023, 0.0004, 2), mats().plastic), -0.030, 0.150, 0.0013);
@@ -288,13 +332,46 @@ function buildHardware() {
   const gap = new THREE.Mesh(GEO.bevelBox(W - 0.004, 0.0042, 0.0035, 0.0008, 2), blk);
   gap.position.set(0, -H / 2 + 0.0032, fz - 0.0016); g.add(gap);
 
-  const dw = 0.200, dh = 0.040;
-  const bez = new THREE.Mesh(GEO.bevelBox(dw + 0.009, dh + 0.009, 0.003, 0.0008, 3), blk);
-  bez.position.set(-0.086, 0.004, fz - 0.0012); g.add(bez);
+  const bez = new THREE.Mesh(GEO.bevelBox(DISP_W + 0.009, DISP_H + 0.009, 0.003, 0.0008, 3), blk);
+  bez.position.set(DISP_X, DISP_Y, fz - 0.0012); g.add(bez);
   const ol = oled();
-  const disp = new THREE.Mesh(new THREE.PlaneGeometry(dw, dh),
+  const disp = new THREE.Mesh(new THREE.PlaneGeometry(DISP_W, DISP_H),
     new THREE.MeshBasicMaterial({ map: ol.tex, toneMapped: false }));
-  disp.position.set(-0.086, 0.004, fz + 0.0009); g.add(disp);
+  disp.position.set(DISP_X, DISP_Y, fz + 0.0009); g.add(disp);
+
+  // A polished trim ring, 1.2 mm proud of the bezel. It is what tells the eye
+  // there is a physical window here and not a printed panel, and it gives the
+  // glass an edge to sit in.
+  for (const [w, h, dx, dy] of [
+    [DISP_W + 0.0132, 0.0024, 0, DISP_H / 2 + 0.0054],
+    [DISP_W + 0.0132, 0.0024, 0, -DISP_H / 2 - 0.0054],
+    [0.0024, DISP_H + 0.0036, -DISP_W / 2 - 0.0054, 0],
+    [0.0024, DISP_H + 0.0036, DISP_W / 2 + 0.0054, 0]]) {
+    // Brushed rather than polished, and 2.4 mm rather than 1.3: a wide enough
+    // bar for the reflected source to ramp across instead of clipping to a
+    // white hairline.
+    const t = new THREE.Mesh(GEO.bevelBox(w, h, 0.0026, 0.0007, 3), mats().alu);
+    t.position.set(DISP_X + dx, DISP_Y + dy, fz + 0.0004); g.add(t);
+  }
+
+  // THE SPECULAR LAYER over the display. Without it a lit panel is a decal:
+  // the emissive is the only thing the surface does. This is a real dielectric
+  // cover with its own reflection — almost flat across the width so the wide
+  // front strip lands as one long horizontal band, and curved top-to-bottom so
+  // that band has a gradient either side of it instead of mirroring the dark
+  // floor straight back at the lens.
+  const cg = mats().glass.clone();
+  cg.transparent = true; cg.opacity = 0.33;
+  cg.roughness = 0.075; cg.clearcoatRoughness = 0.05;
+  cg.depthWrite = false; cg.envMapIntensity = 1.35;
+  const cover = new THREE.Mesh(curvedPane(DISP_W + 0.007, DISP_H + 0.008, 12.0, 0.160, 30, 20), cg);
+  cover.position.set(DISP_X, DISP_Y, fz + 0.0012);
+  // Raked back 6°: with the glass vertical the mirror direction points at the
+  // floor, and the floor is the darkest thing in the room. Six degrees drags
+  // the reflected strip down into the top third of the window.
+  cover.rotation.x = -0.105;
+  cover.renderOrder = 4;
+  g.add(cover);
 
   const kn = GEO.knob(0.0185, 0.013, { flutes: 64 });
   kn.rotation.x = Math.PI / 2; kn.position.set(0.222, 0.002, fz + 0.0055); g.add(kn);
@@ -353,6 +430,7 @@ function buildHardware() {
 
   GEO.shadowed(g);
   disp.castShadow = disp.receiveShadow = false;
+  cover.castShadow = cover.receiveShadow = false;
   sled.castShadow = sled.receiveShadow = false;
   const sh = GEO.contactShadow(W * 1.45, D * 1.45, 0.40, 0);
   sh.position.set(0, -H / 2 - 0.0038, 0); g.add(sh);
@@ -365,24 +443,32 @@ function buildHardware() {
 }
 
 /* =========================================================================
-   OVERLAY — one card, three regions, above and right of the chassis.
+   OVERLAY — one card, three regions, floating above the chassis.
    Local origin = bottom-left of the content area.
    ========================================================================= */
-const PW = 0.500, PH = 0.320;
-const CARD_C = [0.300, 0.628, -2.950];         // world centre of the card
+const PW = 0.400, PH = 0.235, PAD = 0.018;
+/** One scale on the card group, so the hardware keeps the larger share of the
+ *  frame. Screen-space line widths and DOM type do not scale, so the plots
+ *  stay legible. */
+const CS = 0.90;
+const CARD_HALF = (PH / 2 + PAD) * CS;
+/** Chassis top is at 0.382; the card's outer edge clears it by 75 mm. */
+const CARD_C = [0.005, 0.382 + 0.075 + CARD_HALF, -3.020];
 const P_OP = 1.0;      // fully opaque: at 0.93 the rack's specular highlights
                        // punch through in linear space and read as ghosts.
 
 /* ribbon */
-const RIB_X0 = 0.015, RIB_W = 0.470, RIB_H = 0.016, RIB_Y = 0.268;
-const CELL_P = RIB_W / 32, CELL_W = CELL_P - 0.0026;
-const HALF_P = CELL_P / 2, HALF_W = HALF_P - 0.0017;
+const RIB_X0 = 0.010, RIB_W = 0.380, RIB_H = 0.014, RIB_Y = 0.176;
+const CELL_P = RIB_W / 32, CELL_W = CELL_P - 0.0022;
+const HALF_P = CELL_P / 2, HALF_W = HALF_P - 0.0014;
 const cellX = (i) => RIB_X0 + (i + 0.5) * CELL_P;
 const halfX = (i) => RIB_X0 + (i + 0.5) * HALF_P;
 
 /* the two plots */
-const GW = 0.235, GH = 0.155, GY = 0.030;
-const OGX = 0.015, EGX = 0.285, EGW = 0.200;
+const GH = 0.095, GY = 0.018;
+const OGX = 0.012, GW = 0.180;
+const EGX = 0.222, EGW = 0.166;
+const CAP_Y = GY + GH + 0.027;
 
 function buildOverlay(ctx, shot) {
   const ov = new THREE.Group();
@@ -390,17 +476,22 @@ function buildOverlay(ctx, shot) {
 
   const P = new THREE.Group();
   P.position.set(...CARD_C);
+  P.scale.setScalar(CS);
   // Face the card at the camera: a diagram read at an angle is a diagram
   // half-read, but a few degrees of toe-in keeps it in the room rather than
   // on the glass.
   P.rotation.y = Math.atan2(shot.position[0] - CARD_C[0], shot.position[2] - CARD_C[2]) * 0.94;
+  // Rake the pane back 4°, the way an instrument panel is raked. It costs
+  // nothing in legibility and it lifts the reflected image of the front strip
+  // off the top edge down into the plate, where it reads as a band.
+  P.rotation.x = -0.070;
   ov.add(P);
 
   const C = new THREE.Group();
   C.position.set(-PW / 2, -PH / 2, 0);
   P.add(C);
 
-  const card = DIAG.diagramCard(PW, PH, { opacity: P_OP, pad: 0.018 });
+  const card = DIAG.diagramCard(PW, PH, { opacity: P_OP, pad: PAD });
   // fadeTree captures a mesh's base opacity the first time it sees it — and the
   // card group's own setOpacity(0) runs first in the same traverse. Seed it.
   card.userData.plate.userData._baseOp = P_OP;
@@ -418,8 +509,8 @@ function buildOverlay(ctx, shot) {
   {
     const y = RIB_Y - RIB_H / 2 - 0.005;
     const pb = new DIAG.Trace(4, C_AUX, 1.0, { opacity: 0.55 });
-    poly(pb, [[RIB_X0, y + 0.005], [RIB_X0, y], [RIB_X0 + 4 * CELL_P - 0.0026, y],
-      [RIB_X0 + 4 * CELL_P - 0.0026, y + 0.005]]);
+    poly(pb, [[RIB_X0, y + 0.005], [RIB_X0, y], [RIB_X0 + 4 * CELL_P - 0.0022, y],
+      [RIB_X0 + 4 * CELL_P - 0.0022, y + 0.005]]);
     C.add(pb);
     const ab = new DIAG.Trace(4, PAL.cy, 1.1, { opacity: 0.55 });
     poly(ab, [[cellX(4) - CELL_W / 2, y + 0.005], [cellX(4) - CELL_W / 2, y],
@@ -433,19 +524,25 @@ function buildOverlay(ctx, shot) {
     xTicks: [-0.36, -0.27, -0.18, -0.09, 0], yTicks: [0, 35, 70, 105, 140],
   });
   og.position.set(OGX, GY, 0.0006); C.add(og); S.og = og;
-  const tgt = new DIAG.Trace(2, PAL.am, 1.2, { opacity: 0.6, dashed: true, dashSize: 0.007, gapSize: 0.006 });
+  const tgt = new DIAG.Trace(2, PAL.am, 1.2, { opacity: 0.6, dashed: true, dashSize: 0.006, gapSize: 0.005 });
   poly(tgt, [[0, og.y(BUF_TARGET), 0.0008], [GW, og.y(BUF_TARGET), 0.0008]]);
   og.add(tgt);
   og.addTrace((x) => S.occAt(-x), { color: PAL.cy, width: 2.0, n: 190 });
+  og.tickLabels(ctx.labels, {
+    xVals: [-0.36, -0.18, 0], yVals: [0, 70, 140],
+    xFmt: (v) => (v * 1000).toFixed(0).replace('-', '−'),
+    yFmt: (v) => v.toFixed(0),
+    xOffset: [0, 12], yOffset: [-15, 0],
+  });
 
   // Arrival ticks share the plot's time axis, along the floor of the box: the
   // occupancy curve never comes below 55 % of full scale, so the space is free.
   S.pk = new DIAG.Swarm(96, {
-    color: 0xffffff, additive: false, geometry: new THREE.PlaneGeometry(0.0017, 0.020),
+    color: 0xffffff, additive: false, geometry: new THREE.PlaneGeometry(0.0015, 0.015),
   });
   S.pk.position.z = 0.0010;
   og.add(S.pk);
-  S.tickY = 0.013;
+  S.tickY = 0.010;
 
   /* ---------- region 3: the clock edge ----------------------------------- */
   const eg = new DIAG.Graph({
@@ -456,51 +553,73 @@ function buildOverlay(ctx, shot) {
   const TE = 400 / (2 * Math.atanh(0.6));           // 20–80 % edge = 400 ps
   const edge = (x, sh) => 0.5 * (1 + Math.tanh((x - sh) / TE));
   const bandM = new THREE.Mesh(new THREE.PlaneGeometry(eg.x(50) - eg.x(-50), GH),
-    new THREE.MeshBasicMaterial({ color: PAL.am, transparent: true, opacity: 0.15, depthWrite: false, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: PAL.am, transparent: true, opacity: 0.10, depthWrite: false, toneMapped: false }));
   bandM.position.set(eg.x(0), GH / 2, -0.0003); bandM.renderOrder = 6; eg.add(bandM);
   for (const q of [-1.6, -0.7, 0.7, 1.6]) {
     eg.addTrace((x) => edge(x, q * (TJ * 1e12)), { color: PAL.am, width: 1.1, n: 70, opacity: 0.24 });
   }
   eg.addTrace((x) => edge(x, 0), { color: PAL.cy, width: 1.7, n: 90, dashed: true });
   S.edgeT = eg.addTrace((x) => edge(x, S.dt || 0), { color: PAL.am, width: 2.4, n: 90 });
-  S.edgeDot = eg.addDot(PAL.am, 0.0042);
+  S.edgeDot = eg.addDot(PAL.am, 0.0038);
+  eg.tickLabels(ctx.labels, {
+    xVals: [-400, 0, 400], yVals: [0, 1],
+    xFmt: (v) => v.toFixed(0).replace('-', '−'),
+    yFmt: (v) => v.toFixed(0),
+    xOffset: [0, 12], yOffset: [-12, 0],
+  });
 
-  /* ---------- divider ---------------------------------------------------- */
-  const dv = new DIAG.Trace(2, 0x2c333c, 1.0, { opacity: 0.9 });
-  poly(dv, [[0.267, GY - 0.010], [0.267, RIB_Y - 0.040]]); C.add(dv);
+  /* ---------- the specular layer over the card ---------------------------
+     The card is a physical pane in the room, not a screen-space overlay, so it
+     has to carry a reflection. Curved, so the front strip crosses it as a soft
+     band with a gradient rather than sitting on it as a flat value. */
+  const pg = mats().glass.clone();
+  pg.transparent = true; pg.opacity = 0.10;
+  pg.roughness = 0.075; pg.clearcoatRoughness = 0.05;
+  pg.depthWrite = false; pg.envMapIntensity = 1.5;
+  const pane = new THREE.Mesh(curvedPane(PW + PAD * 2, PH + PAD * 2, 20.0, 0.80, 26, 20), pg);
+  pane.position.set(PW / 2, PH / 2, 0.0016);
+  pane.renderOrder = 26;
+  pane.castShadow = pane.receiveShadow = false;
+  C.add(pane);
 
   /* ---------- callout: the real oscillator, in the box ------------------- */
   const canW = new THREE.Vector3();
   HW.userData.can.getWorldPosition(canW);
-  const CO = [0.030, 0.192, -2.930];
-  const lead = new DIAG.Trace(4, 0x5a6570, 1.1, { opacity: 0.55, dashed: true, dashSize: 0.007, gapSize: 0.006 });
-  poly(lead, [[canW.x, canW.y, canW.z], [canW.x, canW.y, LAYOUT.rack.z + D / 2 + 0.010],
-    [canW.x - 0.020, canW.y - 0.070, CO[2] + 0.020], [CO[0] + 0.030, CO[1] + 0.012, CO[2]]]);
+  // The label lives in the clear band between the chassis lid and the card, so
+  // it sits over its OWN chassis and nothing else, with a leader that comes out
+  // through the cutaway window and up the front.
+  const CO = [canW.x, 0.408, -3.040];
+  const lead = new DIAG.Trace(5, 0x7c8894, 1.1, { opacity: 0.7, dashed: true, dashSize: 0.005, gapSize: 0.004 });
+  poly(lead, [[canW.x, canW.y + 0.006, canW.z],
+    [canW.x, canW.y + 0.010, -3.046],
+    [CO[0], CO[1] - 0.004, CO[2] - 0.006],
+    [CO[0], CO[1], CO[2] - 0.006]]);
   ov.add(lead);
   S.coAnchor = anchor(ov, CO[0], CO[1], CO[2]);
 
   /* ============ labels =============================================== */
   const L = ctx.labels;
   S.lab = {};
-  S.lab.word = L.add(anchor(C, RIB_X0 + RIB_W / 2, RIB_Y + 0.032), {
-    kicker: `AES3 SUBFRAME · CELLS AT 1 : ${CELL_RATIO.toLocaleString('en-GB')}`,
-    text: 'preamble, then 24 audio bits LSB first&nbsp;·&nbsp;',
-    value: '0x000000', cls: 'acc', occlude: false, priority: 2, offset: [0, -6],
+  S.lab.bits = L.add(anchor(C, RIB_X0 + RIB_W / 2, RIB_Y + 0.036), {
+    kicker: 'AES3 SUBFRAME · 32 BITS',
+    text: `preamble, then 24 bits LSB first, at 1 : ${BIT_RATIO} of the bit clock&nbsp;·&nbsp;`,
+    value: '0x000000', cls: 'acc', occlude: false, priority: 3, offset: [0, -4],
   });
-  S.lab.buf = L.add(anchor(C, OGX + GW / 2, GY + GH + 0.030), {
-    kicker: `BUFFER · 0–${BUF_FULL} MS · ${(WIN * 1000).toFixed(0)} MS WINDOW`,
-    text: 'arrivals below&nbsp;·&nbsp;drained by the local clock&nbsp;·&nbsp;',
+  S.lab.buf = L.add(anchor(C, OGX + GW / 2, CAP_Y), {
+    kicker: 'BUFFER FILL vs TIME, MS',
+    text: 'target 120, drained at 1000 ms/s&nbsp;·&nbsp;',
     value: '120 ms', cls: 'acc', occlude: false, priority: 3, offset: [0, -4],
   });
-  S.lab.edge = L.add(anchor(C, EGX + EGW / 2, GY + GH + 0.030), {
-    kicker: `CLOCK EDGE · ±500 PS · ${(TJ * 1e12).toFixed(0)} PS RMS`,
-    text: 'peak error, full-scale 10 kHz sine&nbsp;·&nbsp;',
+  S.lab.edge = L.add(anchor(C, EGX + EGW / 2, CAP_Y), {
+    kicker: 'CLOCK EDGE · BAND ±50 PS',
+    text: 'peak error on a 10 kHz tone&nbsp;·&nbsp;',
     value: 'Δt = +0 ps', cls: 'am', occlude: false, priority: 3, offset: [0, -4],
   });
   S.lab.ocxo = L.add(S.coAnchor, {
     kicker: `OCXO · ${(MCLK / 1e6).toFixed(4)} MHz = 128 f_s`,
-    text: 'the whole jitter budget is&nbsp;·&nbsp;',
-    value: `${(TJ_24 * 1e12).toFixed(2)} ps rms`, cls: 'acc', occlude: false, offset: [0, 16],
+    text: 'the whole 24-bit jitter budget&nbsp;·&nbsp;',
+    value: `${(TJ_24 * 1e12).toFixed(2)} ps rms`, cls: 'acc',
+    occlude: false, priority: 5, offset: [0, 0],
   });
 
   ov.userData.S = S;
@@ -581,8 +700,54 @@ function makeModel() {
    STAGE
    ========================================================================= */
 const M = makeModel();
-const SHOT = frameShot([0.145, 0.508, -3.030], 0.2775,
-  { fill: 0.60, az: -0.20, el: 0.105, fov: 30 });
+
+/**
+ * Framing. The subject is a 555 × 92 mm rack unit with a diagram card stacked
+ * above it; radius is HALF THE STACK, not the chassis's bounding sphere, so
+ * `fill` means what it says. A 555 mm chassis inside the 960 px safe box caps
+ * the fascia at about 150 px tall — that is the geometry, not a choice.
+ */
+const STACK_LO = 0.290;                                   // shelf line
+const STACK_HI = CARD_C[1] + CARD_HALF;                   // card outer top
+const SHOT = frameShot([0.0, (STACK_LO + STACK_HI) / 2 + 0.020, -3.040],
+  (STACK_HI - STACK_LO) / 2, { fill: 0.85, az: -0.14, el: 0.10, fov: 30 });
+
+/**
+ * ONE LATCHED INSTANT.
+ *
+ * The pinned readouts refresh at 10 Hz and the world labels used to refresh
+ * every frame, so a still frame showed the buffer as 106 ms on the card and
+ * 108 ms in the footer. Latching in update() is not enough either: the two
+ * cadences still land on different ticks. So the snapshot is taken inside
+ * readouts(), which the app calls at exactly the moment it rewrites the
+ * footer — the card labels, the eye trace, the front-panel display and the
+ * footer therefore all carry the SAME instant, always.
+ *
+ * It re-latches only when the model has actually advanced, so pausing freezes
+ * every number rather than letting the jitter draw keep running.
+ */
+const DISP = { occ: BUF_TARGET, rate: PKT_RATE, dt: 0, errDb: -140, t: -1 };
+
+function latch() {
+  DISP.t = M.t;
+  DISP.occ = M.occ;
+  DISP.rate = M.recent(WIN) / WIN;
+  // One Gaussian draw per tick, clipped to the plot: a single edge out of a
+  // jitter distribution whose rms is TJ.
+  const u1 = Math.random() || 1e-9, u2 = Math.random();
+  DISP.dt = DSP.clamp(Math.sqrt(-2 * Math.log(u1)) * Math.cos(DSP.TAU * u2) * (TJ * 1e12), -190, 190);
+  // Error amplitude for that displacement on a full-scale 10 kHz sine.
+  DISP.errDb = DSP.dB(DSP.TAU * JF * Math.max(1e-3, Math.abs(DISP.dt)) * 1e-12);
+  if (!S) return;
+  S.dt = DISP.dt;
+  S.eg._fill(S.edgeT);
+  S.edgeDot.userData.setData(DISP.dt, 0.5);
+  S.lab.buf.setValue(`${DISP.occ.toFixed(0)} ms`);
+  S.lab.edge.setValue(
+    `Δt = ${DISP.dt >= 0 ? '+' : '−'}${Math.abs(DISP.dt).toFixed(0)} ps → ${DISP.errDb.toFixed(1)} dBFS`);
+  HW.userData.oled.draw(DISP.occ);
+}
+
 let S = null, HW = null;
 
 export default {
@@ -602,6 +767,7 @@ export default {
     // Run the model through more than one graph window so the strip chart opens
     // with real history rather than a flat pre-roll.
     for (let i = 0; i < 1200; i++) M.step(0.0005);
+    latch();
     return { hardware: HW, overlay };
   },
 
@@ -621,8 +787,7 @@ export default {
     if (!S) return;
 
     /* ---- the AES3 subframe, at its own rate --------------------------- */
-    const cIdx = t * CELL_PER_SIM_S;
-    const ci = Math.floor(cIdx);
+    const ci = Math.floor(t * BIT_PER_SIM_S);
     const sf = subframeAt(Math.floor(ci / 32));
     const cur = ((ci % 32) + 32) % 32;
 
@@ -631,16 +796,19 @@ export default {
       const isNow = cur < 4 && (i >> 1) === cur;
       return { p: [halfX(i), RIB_Y, 0.0008], s: 1, c: isNow ? C_NOW : (hi ? C_PRE : C_AUXD) };
     });
+    // The WHOLE subframe is always drawn at its true values, with one bright
+    // cell marking where the bit clock is. Drawing the bits ahead of the cursor
+    // as unlit would be a truer picture of a serial line, but it leaves a still
+    // frame showing six cells out of thirty-two — and this piece is read as
+    // stills. The cursor carries the time; the cells carry the word.
     S.dat.update((i) => {
       const idx = i + 4, b = sf.bits[idx];
-      let col;
-      if (idx === cur) col = C_NOW;
-      else if (idx > cur) col = idx < 28 ? 0x0d1a23 : 0x12161a;
-      else if (idx < 28) col = b ? C_LIT : C_DIM;
-      else col = b ? C_AUX : C_AUXD;
+      const col = idx === cur ? C_NOW
+        : idx < 28 ? (b ? C_LIT : C_DIM)
+          : (b ? C_AUX : C_AUXD);
       return { p: [cellX(idx), RIB_Y, 0.0008], s: 1, c: col };
     });
-    S.lab.word.setValue('0x' + sf.val.toString(16).toUpperCase().padStart(6, '0'));
+    S.lab.bits.setValue('0x' + sf.val.toString(16).toUpperCase().padStart(6, '0'));
 
     /* ---- packet layer -------------------------------------------------- */
     const g = S.og, ph = S.pk;
@@ -658,26 +826,8 @@ export default {
     }
     ph.instanceMatrix.needsUpdate = true;
     if (ph.instanceColor) ph.instanceColor.needsUpdate = true;
-
     S.og.refresh();
-    S.lab.buf.setValue(`${M.occ.toFixed(0)} ms`);
 
-    /* ---- jitter -------------------------------------------------------- */
-    S.jAcc = (S.jAcc || 0) + dt;
-    if (S.jAcc > 0.006) {
-      S.jAcc = 0;
-      const u1 = Math.random() || 1e-9, u2 = Math.random();
-      S.dt = DSP.clamp(Math.sqrt(-2 * Math.log(u1)) * Math.cos(DSP.TAU * u2) * (TJ * 1e12), -190, 190);
-      const err = DSP.TAU * JF * Math.max(1e-3, Math.abs(S.dt)) * 1e-12;
-      S.lab.edge.setValue(
-        `Δt = ${S.dt >= 0 ? '+' : '−'}${Math.abs(S.dt).toFixed(0)} ps → ${DSP.dB(err).toFixed(1)} dBFS`);
-    }
-    S.eg._fill(S.edgeT);
-    S.edgeDot.userData.setData(S.dt || 0, 0.5);
-
-    /* ---- front-panel display ------------------------------------------ */
-    S.oAcc = (S.oAcc || 0) + dt;
-    if (S.oAcc > 0.004) { S.oAcc = 0; HW.userData.oled.draw(M.occ); }
   },
 
   content() {
@@ -691,11 +841,10 @@ export default {
 <span class="c">1460 B segment / 6 B frame = 243.3, so</span>
 243 whole frames = <span class="hl">1458 B</span> = 5.5102 ms
 264 600 / 1458 = <span class="hl">181.5 packet/s</span></div>
-<p>They do not arrive every 5.51 ms. They arrive in clumps and late, and one in 380 has to be sent again. TCP repairs all of that: the bits are guaranteed, in order, eventually. <b>When</b> is the one thing it cannot supply.</p>
-<p>The buffer absorbs that arrival variance, not a rate error. The player is the master and asks for data as its own oscillator consumes it, so there is no second clock to drift against — which is why an AES3 or S/PDIF <em>input</em>, where the source sets the rate, needs a phase-locked loop or asynchronous rate conversion instead.</p>
+<p>They do not arrive every 5.51 ms. The card models a switch stall every <span class="num">90 ms</span> and one segment in <span class="num">380</span> needing a retransmission over a <span class="num">4.5 ms</span> round trip, into a <span class="num">120 ms</span> buffer — a wired-LAN figure. TCP repairs the loss: the bits are guaranteed, in order, eventually. <b>When</b> is the one thing it cannot supply.</p>
 
 <h3>What leaves</h3>
-<p>An AES3 frame is 64 bits: two subframes of preamble, 24 audio bits LSB first, then validity, user, channel-status and parity. The bit clock is 64 f<sub>s</sub> = <span class="num">2.8224 MHz</span>. Biphase-mark coding puts two half-cells in every bit, so the line's channel rate is 128 f<sub>s</sub> = <span class="num">5.6448 MHz</span> — the oscillator frequency itself. The preamble breaks the biphase rule deliberately: three identical half-cells in a row cannot occur in coded data, and that violation is the frame marker.</p>
+<p>An AES3 frame is 64 bits: two subframes of preamble, 24 audio bits LSB first, then validity, user, channel-status and parity. The bit clock is 64 f<sub>s</sub> = <span class="num">2.8224 MHz</span>. Biphase-mark coding puts two half-cells in every bit, so the line's channel rate is 128 f<sub>s</sub> = <span class="num">5.6448 MHz</span> — the oscillator frequency itself. The card draws one subframe at <span class="num">1 : 2352</span> on top of the stage rate. The preamble breaks the biphase rule deliberately: three identical half-cells in a row cannot occur in coded data, and that violation is the frame marker.</p>
 
 <h3>Why the clock is the hard part</h3>
 <p>A sample converted Δt early on a tone of frequency f is wrong by A·2πf·Δt. For <em>random</em> Δt of rms t<sub>j</sub> that becomes a noise floor:</p>
@@ -707,19 +856,19 @@ export default {
 <span class="c">24-bit floor 6.02 × 24 + 1.76 = 146.3 dB</span>
 <span class="c">50 ps sits 36.2 dB above that floor;</span>
 <span class="c">reaching it needs 0.77 ps rms.</span></div>
-<p>The eye on the card shows single edges, so its figure is a <em>peak</em> error, not that rms floor. Periodic jitter does something else again: discrete sidebands either side of every tone, spaced by the jitter frequency.</p>
+<p>The eye on the card draws single edges, so its figure is a <em>peak</em> error, not that rms floor.</p>
 <div class="myth"><span class="lab">Commonly got wrong</span><p>That "bit-perfect" settles the question. It settles the numbers. What comes out is those numbers multiplied by the instants at which they are converted — and only the numbers came over the network.</p></div>`;
   },
 
   readouts() {
-    const rate = M.recent(WIN) / WIN;
+    if (M.t !== DISP.t) latch();
     return [
       { k: 'PAYLOAD', v: (PAYLOAD_BPS / 1e6).toFixed(4), u: 'Mbit/s', cls: 'acc' },
       { k: 'BIT CLOCK', v: (BCLK / 1e6).toFixed(4), u: 'MHz', cls: 'acc' },
-      { k: 'BUFFER', v: M.occ.toFixed(0), u: 'ms', bar: M.occ / BUF_FULL },
-      { k: 'ARRIVAL 0.36 s', v: rate.toFixed(0), u: 'pkt/s' },
-      { k: 'JITTER', v: (TJ * 1e12).toFixed(0), u: 'ps rms', cls: 'am' },
-      { k: 'SNR 10 kHz', v: SNR_TJ.toFixed(1), u: 'dB, 0–f_s/2', cls: 'am' },
+      { k: 'BUFFER', v: DISP.occ.toFixed(0), u: 'ms', bar: DISP.occ / BUF_FULL },
+      { k: 'ARRIVAL 0.36 s', v: DISP.rate.toFixed(0), u: 'pkt/s' },
+      { k: 'CLOCK Δt', v: (DISP.dt >= 0 ? '+' : '−') + Math.abs(DISP.dt).toFixed(0), u: 'ps', cls: 'am' },
+      { k: 'ERROR 10 kHz', v: DISP.errDb.toFixed(1), u: 'dBFS', cls: 'am' },
     ];
   },
 };

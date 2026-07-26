@@ -28,10 +28,10 @@ const FloorReflectionShader = {
     color: { value: new THREE.Color(0x8fa6bd) },
     tDiffuse: { value: null },
     textureMatrix: { value: new THREE.Matrix4() },
-    uStrength: { value: 0.38 },
+    uStrength: { value: 0.26 },
     uBlur: { value: 1.9 },
     uCentre: { value: new THREE.Vector3(0, 0, -2.4) },
-    uFalloff: { value: 4.6 },
+    uFalloff: { value: 3.4 },
     uRes: { value: new THREE.Vector2(1024, 1024) },
   },
   vertexShader: /* glsl */`
@@ -91,8 +91,8 @@ export function addGlossFloor(scene, renderer) {
   const geo = new THREE.PlaneGeometry(26, 26);
   const refl = new Reflector(geo, {
     clipBias: 0.0008,
-    textureWidth: 1024,
-    textureHeight: 1024,
+    textureWidth: 768,
+    textureHeight: 768,
     color: 0x8fa6bd,
     shader: FloorReflectionShader,
   });
@@ -103,7 +103,7 @@ export function addGlossFloor(scene, renderer) {
   refl.material.depthWrite = false;
   refl.material.toneMapped = false;
   refl.renderOrder = -1;
-  refl.material.uniforms.uRes.value.set(1024, 1024);
+  refl.material.uniforms.uRes.value.set(768, 768);
   refl.material.uniforms.uCentre.value.set(0, 0, LAYOUT.rack.z + 0.9);
   scene.add(refl);
   return refl;
