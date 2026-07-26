@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { PAL } from './materials.js';
+import { PAL, mats } from './materials.js';
+import { bevelBox } from './geo.js';
 import { logSpace, linSpace, clamp } from './dsp.js';
 
 /**
@@ -311,28 +312,61 @@ export class Graph extends THREE.Group {
  * hairline border. Keeps traces legible over any part of the scene.
  */
 export function diagramCard(w, h, opts = {}) {
-  const { opacity = 0.90, border = true, pad = 0.02 } = opts;
+  const { opacity = 0.94, border = true, pad = 0.02, depth = 0.012 } = opts;
   const g = new THREE.Group();
-  const geo = new THREE.PlaneGeometry(w + pad * 2, h + pad * 2);
-  // depthWrite must be ON: with it off the card is a ghost and the hardware
-  // behind it prints straight through, which reads as a bug, not a diagram.
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0x080a0d, transparent: true, opacity, depthWrite: true, toneMapped: false,
+  const W = w + pad * 2, H = h + pad * 2;
+
+  // The plate is a REAL OBJECT, not a UI div composited into a photograph.
+  // It was a MeshBasicMaterial with toneMapped:false, which meant it took no
+  // light, cast no shadow and never appeared in the floor reflection — so in
+  // most frames the largest single element in the picture was visibly not in
+  // the room. It is now a lit dielectric slab with a machined bezel: it catches
+  // the horizon band along its top edge, it shades across its face, and it
+  // shows up in the floor like everything else.
+  const plateMat = new THREE.MeshPhysicalMaterial({
+    color: 0x0a0c10, metalness: 0.0, roughness: 0.34,
+    clearcoat: 0.6, clearcoatRoughness: 0.22,
+    envMapIntensity: 0.75, transparent: true, opacity,
   });
-  const p = new THREE.Mesh(geo, mat);
-  p.position.set(w / 2, h / 2, -0.001);
-  p.renderOrder = 3;
-  g.add(p);
+  const plate = new THREE.Mesh(bevelBox(W, H, depth, 0.0035, 3), plateMat);
+  // front face sits just behind the traces, which live at z ≥ 0
+  plate.position.set(w / 2, h / 2, -0.001 - depth / 2);
+  plate.castShadow = plate.receiveShadow = true;
+  plate.renderOrder = 3;
+  g.add(plate);
+
+  // Machined bezel: four bars of trim alloy around the rim. This is the edge
+  // that catches a bright line and tells you the card has thickness.
+  const bez = 0.006, bt = depth * 0.55;
+  const bm = mats().aluTrim;
+  const bar = (bw, bh, x, y) => {
+    const m = new THREE.Mesh(bevelBox(bw, bh, bt, 0.0012, 2), bm);
+    m.position.set(x, y, -0.001 - bt / 2 + 0.0006);
+    m.castShadow = m.receiveShadow = true;
+    m.renderOrder = 4;
+    g.add(m);
+    return m;
+  };
+  const bars = [
+    bar(W + bez, bez, w / 2, h + pad + bez / 2),
+    bar(W + bez, bez, w / 2, -pad - bez / 2),
+    bar(bez, H, -pad - bez / 2, h / 2),
+    bar(bez, H, w + pad + bez / 2, h / 2),
+  ];
+
   if (border) {
     const b = new Trace(5, 0x39414c, 1.0, { opacity: 0.85, renderOrder: 5 });
-    const W = w + pad * 2, H = h + pad * 2, x0 = -pad, y0 = -pad;
-    b.write((i) => [[x0, y0], [x0 + W, y0], [x0 + W, y0 + H], [x0, y0 + H], [x0, y0]][i].concat(-0.0008));
+    const x0 = -pad, y0 = -pad;
+    b.write((i) => [[x0, y0], [x0 + W, y0], [x0 + W, y0 + H], [x0, y0 + H], [x0, y0]][i].concat(0.0002));
     g.add(b);
     g.userData.border = b;
   }
-  g.userData.plate = p;
+
+  g.userData.plate = plate;
   g.userData.setOpacity = (o) => {
-    mat.opacity = opacity * o;
+    plateMat.opacity = opacity * o;
+    plateMat.visible = o > 0.002;
+    for (const m of bars) { m.visible = o > 0.002; }
     if (g.userData.border) g.userData.border.setOpacity(o);
   };
   return g;

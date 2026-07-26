@@ -1,0 +1,705 @@
+{
+ "verdicts": [
+  {
+   "lens": "Art direction \u2014 forced photo-vs-render verdict across composition, staging, materials, lighting, render quality, typography and information design. Benchmarks (Wilson Sasha/Alexia studio renders, McIntosh MC275/MC1.25KW press shots, Devialet Expert Pro product images) are reconstructed from memory; I have not opened any reference on disk. Baseline for the deltas below is the per-stage score recorded in audit/<stage>.md (the most recent prior art-direction pass).",
+   "verdict": "Twelve frames, twelve forced verdicts: not one of them is the photograph. The round is net flat \u2014 a mean of 37.1 against 39.5 \u2014 but that average hides real motion in both directions. Genuine gains: sub (+7, the cabinet is now the only object in the piece with a true machined fillet catching a long bright line), preamp (+4, the blown starburst that owned a third of the frame is gone), amp (+3). Genuine regressions, all of them framing: dac (\u221215, the DAC chassis is now about 7% of frame height with a monoblock sliced by each edge \u2014 the fixer over-corrected fill 0.90 to 0.40), streamer (\u22125), phono (\u22125, still no identifiable hero). The physics has quietly become the best thing here: I recomputed the Thiele\u2013Small chain, Small's efficiency, the sealed f\u2083, the Hertzian contact stress, the ZOH aperture at 44.1 k and 352.8 k, the AES3 bit clock, the jitter SNR, the room-mode (1,1,0), the LR4 asymptote and the damping-factor argument, and every one of them is right \u2014 the only real arithmetic defect left is that overview rounds the volume ladder to \u221219.0 dB and then reports the rounded sum's answer (+80.17 dB, 2.903 V, 1.053 W) as the system's result, while preamp, phono, air and speaker all quote spec.js's 79.95 dB / 2.828 V / 1.000 W. The single biggest remaining thing between this and a real product render is that THERE IS NO SPECULAR EVENT ANYWHERE IN THE PIECE. Every surface returns one flat value from its environment: the sub's cheek is a single grey, the amp's meter is a printed decal, the speaker's lacquer flank is a uniform tan wash, the rack posts are a line. There is no long unbroken top-to-bottom ramp down a cabinet, no reflected horizon, no reflection sitting in front of a glowing meter, no highlight that changes value along the length of a fillet. That one absence is what a Wilson or Devialet frame is entirely made of, and it has two named causes on disk: env.js builds eight emitters at flat single intensities with no luminance ramp across the set and no horizon band, so the integrated environment is nearly uniform per direction; and GEO.instrumentGlass \u2014 the helper written specifically for this, per Addendum J \u2014 is used by exactly ZERO of the twelve stages. Fix those two and the whole set moves ten points before anyone touches a camera. The close second is the diagram card: diagram.js builds it as a MeshBasicMaterial at 0x080a0d with toneMapped:false, so it is flatter and darker than any lit surface in the room, it takes no light, casts no shadow and never appears in the floor reflection \u2014 in eight of twelve frames the largest single element in the picture is a UI div that visibly did not exist in the room.",
+   "scores": [
+    {
+     "stage": "turntable",
+     "score": 55,
+     "round1": 58,
+     "note": "Still the only frame with a real hero shot: proper three-quarter, clean diagonal, platter reads. Now held back by a record with no label, a plinth top that is the largest area in frame and returns nothing, a cartridge that is 30 px at the chapter about the cartridge, and four labels piled at bottom-centre."
+    },
+    {
+     "stage": "overview",
+     "score": 48,
+     "round1": 50,
+     "note": "Standfirst count fixed, panel typography is excellent. But the system is small in a void, the floor returns almost nothing under twelve chassis, and the chain equation on screen now disagrees with spec.js's CHAIN by 0.22 dB."
+    },
+    {
+     "stage": "amp",
+     "score": 47,
+     "round1": 44,
+     "note": "The monoblock is the most credible object in the set \u2014 handles, fins, spikes, a real floor reflection. Undone by a meter that is a flat blue decal with an unshadowed needle and illegible printing, a cyclorama with a visible diagonal seam and a painted grey pool, and heatsink fins with no edge highlight."
+    },
+    {
+     "stage": "sub",
+     "score": 45,
+     "round1": 38,
+     "note": "Biggest gain. The cabinet finally has a machined fillet catching an unbroken bright line, and the two-sub null argument is the sharpest information design in the deck. Killed by the room-plan card: saturated tan and pale-blue fills at a quarter of the frame, off-palette, reading as a weather map."
+    },
+    {
+     "stage": "xover",
+     "score": 38,
+     "round1": 40,
+     "note": "Cleanest staging in the rack set, one card, correct physics. But 48% of the frame is empty backdrop, the card floats as a TV on an invisible stand with no shadow or reflection, and the shot aims 92 mm above the crossover's own centre so the hero sits in the bottom third."
+    },
+    {
+     "stage": "speaker",
+     "score": 36,
+     "round1": 34,
+     "note": "Framing works. Materials do not: the cabinet flank is a warm tan wash (off-palette and the only warm object in a cool frame), the surround reads as a chrome torus rather than rubber, the cone has no texture, and the panel prose is visibly truncated mid-argument."
+    },
+    {
+     "stage": "power",
+     "score": 33,
+     "round1": 34,
+     "note": "The top of the frame carries a full-width band of rainbow scanline moir\u00e9 off the shelf trim \u2014 the single worst render artefact in the piece and the brightest thing in the shot. Meters are decals. Three diagram regions crowd each other and one is clipped by the panel."
+    },
+    {
+     "stage": "preamp",
+     "score": 34,
+     "round1": 30,
+     "note": "The blown flare is gone, and the preamp fascia is the best-lit chassis in the piece. Now the problem is a large unlit black card glued flat to the rack front covering two bays, chassis cropped at both the top and bottom edges, and a silver fascia among five black ones."
+    },
+    {
+     "stage": "streamer",
+     "score": 31,
+     "round1": 36,
+     "note": "Regressed. The shot deliberately frames card-plus-chassis as one stack, so the card is the hero: an opaque black wall over half the rack with four plot regions in it. The display carries a blown white specular that buries its own content, and the display glass shows visible dither checkerboard at the corners."
+    },
+    {
+     "stage": "dac",
+     "score": 30,
+     "round1": 45,
+     "note": "Worst regression in the set. fill 0.40 on radius 0.216 leaves the DAC chassis at roughly 7% of frame height; TRUCK_PX -152 puts a monoblock half-cropped at each edge; the reconstruction card floats detached in the top-left with a wide dead gap to the rack. The maths in this chapter is the best in the piece and the picture shows none of it."
+    },
+    {
+     "stage": "air",
+     "score": 30,
+     "round1": 32,
+     "note": "Two large floating monitor-like cards own the top half and the entire system is compressed to an unreadable 200 px strip along the bottom. Cyan and amber beams cross the frame as tractor beams. A sofa is sliced by the bottom edge as a grey smudge."
+    },
+    {
+     "stage": "phono",
+     "score": 28,
+     "round1": 33,
+     "note": "Nothing in frame is whole and nothing is identifiable as the hero. A large translucent card is rotated off-axis so the rack prints through it and its type is skewed; a second card overlaps its top-left corner; two blown white streaks sit on the shelf trim and across the graph."
+    }
+   ]
+  },
+  {
+   "lens": "measurement editor / loudspeaker engineer \u2014 physics, arithmetic and units, checked against the renders",
+   "verdict": "Most of the arithmetic now survives an independent recomputation, and that is a real change from round 1. I re-derived every headline figure: the RIAA time constants and the realised E96 network (T1 3172.29 \u00b5s, T2 314.49, T3 74.58; sum error +0.060/\u22120.003 dB inside a \u00b10.10 dB parts tolerance) are right and honestly framed as a result rather than an identity; LR4 is \u22126.02 dB at each fc with a measured worst sum error of \u22120.0149 dB and 660\u00b0 of in-band rotation, and the LR2-needs-inversion caveat is present; Thiele\u2013Small closes (\u03b1 3.73, fc 60.9 Hz, Qtc 0.742, f\u2083 58.2 Hz, \u03b7\u2080 0.647 %, 90.11 dB/1 W and 91.22 dB/2.83 V) and the sealed box is correctly called second order; excursion tracks 1/f\u00b2 to three figures; 6.02N+1.76, the ZOH \u22123.92 dB at fs/2 and \u22123.167 dB at 20 kHz/44.1 k, jitter SNR, Baerwald nulls, Hertzian contact, Fermi velocity and mean free path, room modes and Schroeder all reproduce. The three bans are handled, and power and turntable handle them better than most published work \u2014 power states the drawn field:drift ratio (6.8:1) alongside the true one (9.2\u00d710\u00b9\u00b9:1), which is exactly right. But yes, there is material a measurement editor would refuse to print. Three things in particular. First, the system does not exist as described: the crossover chapter shows an active box with two inputs and six outputs feeding a 6.2 \u03a9 driver, while the amplifier, crossover, overview and preamp chapters all compute into an \"8 \u03a9 nominal\" load with only two monoblocks in the room \u2014 six amplifier channels are required and two are drawn. Second, the same operating point produces two different mains draws: power.js bills 1191 W (545 W per monoblock at 55 % wall-plug) while amp.js's own supply model reads 413.5 W at full output, a 32 % disagreement on the piece's headline energy figure, with nothing on screen reconciling them. Third, preamp.js prints \"One watt into 8 \u03a9 is 2.83 V, 91.2 dB at 1 m\" \u2014 precisely the sensitivity conflation spec.js's own comment identifies as \"the classic sensitivity fiddle\", and which air.js gets right two chapters later. Beyond the numbers, the turntable chapter's entire ban-1 myth callout \u2014 the single most important paragraph in the piece for this brief \u2014 is below the fold in the delivered still, and the phono chapter's RIAA plot has an opaque grey plate pasted across its low-frequency half. Neither would survive a proof.",
+   "scores": null
+  }
+ ],
+ "findings": [
+  {
+   "stage": "core",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "GEO.instrumentGlass() is used by ZERO of the twelve stages \u2014 I grepped all of them. Addendum J added this helper specifically so that a meter or display would carry a reflection sitting IN FRONT of its glow. Consequently every instrument in the piece is a bare emissive decal: the two conditioner VU meters (power), the monoblock power meter (amp), the -19 display (preamp, phono, xover), the 44.1 kHz displays (power, streamer, dac). At 1:1 the amp meter is a flat blue radial gradient with a black needle that casts no shadow and printing so low-contrast it is illegible. This is the single most-named cue in the brief and it is unimplemented across the whole set.",
+   "fix": "In every stage that draws a meter or a lit display, place `GEO.instrumentGlass(w, h)` 2-4 mm in front of the emissive plane and add it to the same group. Priority order by visual payoff: amp.js (the 300 W meter), power.js (both VU meters), preamp.js / phono.js / xover.js (the -19 display), streamer.js / dac.js (the 44.1 display). While there, give each meter a needle shadow (a second thin dark quad offset 1.5 mm behind the needle at 40% opacity) and raise the dial printing to at least 55% contrast against the face.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "src/core/env.js: all eight emitters are flat single intensities (beauty 8.4, frontStrip 6.2, wrapL 3.5, wrapR 2.8, strip 6.9, strip2 5.4, kick 4.7, ceil 0.48) and diffusionMap() applies the same radially symmetric falloff to each. There is no luminance ramp ACROSS the set and no readable horizon, so the integrated environment is nearly uniform per direction band. Result, visible at 1:1 in sub.png and speaker.png: a gloss cabinet cheek returns ONE flat value with no structure. The long unbroken top-to-bottom gradient down a cabinet is the defining cue of the benchmark shots and it does not exist anywhere in these twelve frames.",
+   "fix": "In diffusionMap(), multiply the computed `val` by a vertical ramp `(1.0 - 0.62 * (y / (size - 1)))` so every softbox is brightest at its top and rolls to ~0.38 at its bottom. Then in shell() raise the horizon band from vec3(0.055,0.062,0.076) to vec3(0.095,0.104,0.124) and tighten its smoothstep to (-0.30, 0.02) so a readable horizon line appears in every mirror surface. Finally enlarge beauty from 11x6.5 to 15x9, drop its intensity 8.4 -> 5.6 and move it to z 3.6: a larger, dimmer, gradated source gives a wrapped highlight with a long ramp instead of a single flat return.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "src/core/diagram.js:319 \u2014 diagramCard's plate is a MeshBasicMaterial, color 0x080a0d, toneMapped:false. It therefore takes no light, is flatter and darker than any lit surface in the room, casts no shadow, has no thickness and no edge, and never appears in the planar floor reflection. In eight of twelve frames the largest single element in the picture is one of these, and in every one it reads as a UI div composited over the render rather than an object that was in the room. In streamer and preamp the card is glued flat to the rack front and reads as a hole punched through the shelves.",
+   "fix": "Replace the plate with a MeshPhysicalMaterial: `color 0x0a0c10, metalness 0, roughness 0.34, clearcoat 0.45, clearcoatRoughness 0.22, envMapIntensity 0.65, transparent, opacity` \u2014 drop toneMapped:false so it sits in the same tone curve as everything else. Give it real thickness via GEO.bevelBox(w+2*pad, h+2*pad, 0.012, 0.0015, 3) so the rim catches a bright line. Set castShadow/receiveShadow true, and add a GEO.contactShadow under any card whose lower edge is near the floor so it stops floating.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "src/core/room.js:143 \u2014 the per-shelf edge trim is a 3.5 mm x 4 mm bar in mats().aluTrim (metalness 1, roughness 0.46). At every rack framing it is 2-4 px tall and near edge-on, so it returns a clipped pure-white strip across the full frame width AND severe undersampled specular aliasing. Cropped at 1:1 in power.png the top of the frame is a band of rainbow-fringed horizontal scanline noise \u2014 the worst render artefact in the piece, and it is the brightest region of the shot. It appears in power, streamer, dac, phono, preamp, xover and overview: seven of twelve frames.",
+   "fix": "room.js:143 \u2014 make the trim 0.008 m tall instead of 0.0035 so it covers 6-9 px, and give it its own material rather than aluTrim: roughness 0.62, envMapIntensity 0.28, color 0x8d9298. Additionally in materials.js:45 raise M.aluTrim roughness 0.46 -> 0.60 and envMapIntensity 0.52 -> 0.32. A 3.5 mm extrusion physically cannot mirror a softbox at full value; it is satin, not polished.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "dac",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "src/stages/dac.js:634-657 \u2014 `FILL = 0.40` on `HERO_R = 0.216` puts the DAC chassis at roughly 7% of frame height, and `TRUCK_PX = -152` slides the whole rack far enough right that a monoblock is sliced by the left edge AND a second by the right edge. Nothing in the frame is whole and the subject of the chapter is a 90 px sliver. This is a 15-point regression from the previous pass (which over-filled at 0.90); the correction went straight past the target.",
+   "fix": "dac.js:634 -> `const AZ = 0.24, EL = 0.155, FOV = 31, FILL = 0.56;` and dac.js:635 -> `const HERO_R = 0.125;` (chassis half-height plus the top face in view). dac.js:647 -> `const TRUCK_PX = -40;` so both monoblocks leave the frame entirely. Then re-anchor the reconstruction card to screen-left of the DAC at roughly 1.6x the chassis height, closing the dead gap between card and rack.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "src/core/materials.js:106 and :195 \u2014 pianoBlack has clearcoatRoughness 0.028 as a flat scalar with no map, and M.floor has clearcoatRoughness 0.10 flat. A perfectly uniform clearcoat is what turns a reflected source into a decal-sharp shape with no internal structure; real lacquer has orange-peel, so the highlight breaks up over its own length and the reflection distorts. Combined with finding 2 this is why no cabinet in the piece has a reflection with any structure in it.",
+   "fix": "materials.js:104-108 \u2014 add `clearcoatRoughnessMap: T.anodisedRough(1024, 0.06, 0.03)` and raise the base clearcoatRoughness to 0.05, plus a very low-amplitude normalMap (T.anodisedNormal(1024, 0.10), normalScale 0.06) for orange-peel. materials.js:192-196 \u2014 give M.floor the same treatment with base clearcoatRoughness 0.13.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "phono",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "src/stages/phono.js:166-168 \u2014 `FILL = 0.33` on `HERO_R = 0.1103` leaves the phono stage unidentifiable; I cannot tell from the render which chassis is the subject. The RIAA graph card is then rotated well off the camera axis so its type is skewed and the rack prints through it, and a second smaller card overlaps its top-left corner, cutting the 'Record \u00b7 standard' label. Two blown white streaks (the shelf trim, finding 4) sit across the fascia and the graph.",
+   "fix": "phono.js:168 -> `const FILL = 0.52;` and re-target to the phono chassis centre so it reads as the hero at roughly half the safe-box height. Rotate the graph card to face the camera within ~6\u00b0 (currently it is far off axis) and move it to screen-right of the chassis rather than in front of it. Merge the two overlapping cards into one \u2014 Addendum B allows two cards but not two that touch.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "streamer",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "src/stages/streamer.js:858-861 \u2014 the shot deliberately frames `STACK_LO` (shelf line) to `STACK_HI` (card outer top) as one subject at fill 0.65, so the CARD is the hero and the streamer chassis is a band across the top. The card is an opaque black wall across the whole rack front containing four plot regions (bit strip, buffer trace, eye diagram, packet-arrival strip) against Addendum B's three-region maximum. The chassis's own display then carries a blown white specular that buries its content, and the display glass shows visible dither checkerboard at its lower-left and lower-right corners (broken alpha/stipple).",
+   "fix": "streamer.js:860 \u2014 frame the CHASSIS alone: `frameShot([-0.015, 0.290 + H_CH/2, -3.040], H_CH/2 + 0.02, { fill: 0.52, az: -0.15, el: 0.115, fov: 28 })`. Move the card to screen-right of the chassis, beside it, not below it. Drop one of the four plot regions (the packet-arrival strip duplicates what the buffer trace already says). Investigate the corner checkerboard \u2014 it is either a transparent material without `depthWrite:false` z-fighting against the bezel or an alpha-dithered material; give the display cover GEO.instrumentGlass instead.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "src/app.css:95 \u2014 chapter-rail items use `color: var(--ink-4)` = rgba(238,240,244,.26) with no scrim, and src/app.css:84 \u2014 the masthead subtitle uses --ink-3 = .44 alpha with no scrim, while world labels (.wlab) DO get a scrim. In every frame the rail sits directly over live hardware: in power.png the masthead reads across a bright chassis and is illegible mud; in dac.png 'Subwoofers' and 'Air & ear' print across a monoblock meter. The text is neither readable nor invisible \u2014 it is noise laid over the picture.",
+   "fix": "Give #chapters and #masthead the same treatment as .wlab: `background: rgba(7,8,11,.55); backdrop-filter: blur(6px); border-radius: 5px; text-shadow: 0 1px 2px rgba(0,0,0,.9)`, and raise inactive .chap from --ink-4 to --ink-3. Alternatively fade the rail to 0 opacity in the still-frame render and keep it for interaction only \u2014 the shots are the deliverable being judged.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "speaker",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "content() overflows the panel: the last line, '29.2 Hz, which the LR4 at 80 Hz never asks for.', is visibly faded out by the scroll mask at 1600x1000. The reader loses the closing clause of the excursion argument. Addendum I caps content() at roughly 260 words including headings and this still overruns.",
+   "fix": "Cut the two sentences of THE MOTOR that restate what the F = Bl\u00b7i equation block already shows ('Bl = 12.0 T\u00b7m: of the coil's 28.9 m...' can lose the wire-length clause, which is repeated in the 'Current is a loop' paragraph). Target 235 words. Verify by re-shooting and confirming no fade at the bottom edge.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "overview",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "src/stages/overview.js:50-58 \u2014 `G_LADDER = Math.round(CHAIN.volumeDb)` rounds -19.23 to -19, then G_TOTAL is summed from the rounded rows (+80.17 dB) and V_TERM derived from the rounded total (2.9031 V, quoted on screen as '1.053 W in 8 \u03a9'). Every other chapter \u2014 preamp ('79.95 + 0.83 - 64 - 10 - 26 = -19.23'), phono ('+16.77 dB more lands 2.828 V \u2014 1.000 W into 8 \u03a9'), air and speaker \u2014 quotes spec.js's canonical 2.8284 V = 1.000 W. The opening spread, which is the piece's contract with the reader, therefore states a different answer from the four chapters that derive it, and overview's own paragraph quotes 91.21 dB at 2.83 V in the same breath as 2.903 V at the posts.",
+   "fix": "overview.js:50 \u2014 do not round. Use `const G_LADDER = CHAIN.volumeDb;` and print the row as '- 9.23 dB  pre-amp: +10 line, -19.23 ladder'. The eq block then closes '= +79.95 dB \u2192 2.828 V at the posts / = 1.000 W in 8 \u03a9, 1.29 W in the 6.2 \u03a9 coil', which matches spec.js and every other chapter. Adjust the CHAIN GAIN readout accordingly.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "xover",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "src/stages/xover.js:690 \u2014 the shot targets `[0.0645, 1.133, -3.03]`, which is the rack's top plate (LAYOUT.rack.topY = 1.128), not the crossover. The crossover's own centre is LAYOUT.bayCentre(5, 0.150) \u2248 1.041. At the derived camera distance of 1.18 m that 92 mm error is about 15% of frame height, and it is exactly why the hero sits in the bottom third with 48% of the frame as empty backdrop. Addendum A: 'target is your component's centre.'",
+   "fix": "xover.js:690 -> `const SHOT = frameShot([0.0645, 1.041, -3.03], 0.187, { fill: 0.62, az: CAM_AZ, el: 0.06, fov: 30 });` \u2014 target the chassis, drop fill 0.706 -> 0.62 to make room for the card above it, and raise el from -0.02 to 0.06 so the camera stops looking up at the undersides of the shelves.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "xover",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The graph card floats in mid-air with a hard rectangular border and no support, no shadow and no reflection in the polished floor directly below it. It reads as a flatscreen television hovering over the rack. The same object appears in air.js (twice) and amp.js. Addendum D explicitly requires that nothing float without a reflection or a contact shadow.",
+   "fix": "Either give the card a visible physical stand \u2014 a slim anodBlack foot plus GEO.contactShadow(cardW*1.1, 0.06) on the floor beneath it \u2014 or drop the border entirely and let the card be a lit dark slab (see finding 3) that reads as a panel rather than a screen. Whichever is chosen must be applied identically in xover.js, air.js and amp.js so the diagram language is one language.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "amp",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The cyclorama behind the monoblock has a hard diagonal boundary running from mid-left to upper-right separating a light grey from a darker grey, plus a soft grey blob upper-right that reads as a lens smudge. src/core/room.js:59-60 paints the lighting gradient into the backdrop's ALBEDO via cycGradient() as a `map`. A painted gradient does not move with the camera, shows a fixed hotspot, and creates exactly this kind of visible seam where the texture steps. It is the difference between a lit cyclorama and a printed backdrop card.",
+   "fix": "room.js:59 \u2014 set the backdrop's map to a near-flat 0.72 grey with only a very low-amplitude noise for tooth, and get the gradient from actual light: add a broad, dim area emitter in env.js aimed at the cove (or a second wide spot in room.js with a large shadow-map radius) so the pool falls off physically. If the painted map is retained for performance, at minimum smooth the step that produces the diagonal and reduce its contrast by half.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "amp",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The heatsink fin block is a flat black comb with no highlight on the fin tips. Real extruded fins each catch a bright line along the tip, and that repetition at scale is most of what says '300 W class-AB monoblock'. Currently the fin block reads as one dark textured plate. The top plate is likewise a plain black slab with three shallow grooves \u2014 no vents, no fasteners, no badge on a chassis that must dissipate 199 W.",
+   "fix": "amp.js \u2014 break the top edge of every fin with a small chamfer (GEO.bevelBox with a 0.4 mm bevel, or add a 0.5 mm radiused cap strip in mats().anodGrey along each fin tip) so a specular line runs along it. Add a vented top panel over the output devices using GEO.ventSlots, and four GEO.screw fasteners on the top plate corners.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "sub",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The room-in-plan card is the only saturated colour field in the piece: large flat tan/orange and pale-blue regions occupying about a quarter of the frame at full chroma. It reads as a television weather map, it breaks CONTRACT \u00a73.5 (one accent colour; amber means energy, cyan means signal \u2014 here they mean +p and -p), and it overwhelms the subwoofer, which is the best-rendered object in the set. It is also drawn in perspective, so a 'plan' is not presented as a plan.",
+   "fix": "sub.js \u2014 replace the filled regions with contour LINES only on the dark card ground: amber lines for compression, cyan for rarefaction, at the existing 0.86 Pa spacing, plus a single low-alpha (\u22640.18) fill to distinguish sign. Rotate the card to face the camera square so the plan reads as a plan. Move the PRESSURE KEY block out of the scene and into content() \u2014 a legend is prose, not staging.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "air",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "src/stages/air.js:402 \u2014 `frameShot([-0.42, 1.22, 0.20], 0.860, { fill: 0.62, ... })` frames a 0.86 m radius centred 1.22 m up and 0.2 m in front of the seat, which means the framed sphere is mostly the two diagram cards. The entire system is compressed to an unreadable 200 px strip along the bottom of the frame. Six label cards and two cards at unrelated depths sit over it, and a sofa is sliced by the bottom edge as a grey smudge. The physics in this chapter is the strongest in the deck and the picture hides all of it.",
+   "fix": "air.js:402 \u2014 reframe on the listening axis, not on the cards: target the seat-to-speaker line at around [-0.30, 0.95, -1.20] with radius 1.8 and fill 0.58, fov 36, so the loudspeaker, the floor bounce and the seat are all legible objects. Then reduce to ONE card (Addendum B) \u2014 keep the direct+floor comb response, drop the parcel-oscillation card into content() as prose plus one readout \u2014 and cut the six labels to three.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "src/core/geo.js:69 \u2014 knob() builds the knurl as 56 instanced BoxGeometry(0.0007, h*0.72, 0.0016) flutes in mats().alu (metalness 1, roughness 0.26). At the on-screen size these knobs actually render (roughly 60-90 px across in streamer.png and power.png) that is about one pixel per flute, so the knurl aliases into a rotating chrome starburst that reads as a turbine fan, not a machined grip. It is visible on every knob in the piece and it is the second-worst aliasing artefact after the shelf trim.",
+   "fix": "geo.js:63 \u2014 drop the default `flutes` from 56 to 30 and the flute section from 0.0007 x 0.0016 to 0.0005 x 0.0009 so the ridges are shallower. Give the flutes their own material rather than `body`: a clone of mats().alu at roughness 0.44 and envMapIntensity 0.6, so each facet cannot return a hard specular. Below about 40 px on screen the instanced ring should be skipped entirely in favour of a normal-mapped band.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "preamp",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The large diagram card sits flat against the rack front, unlit and opaque, covering two bays; combined with finding 3 it reads as a rectangular hole cut into the rack. Separately, the frame is cropped through a chassis at the top edge (knobs sliced at y=0) and through another at the bottom edge, so neither terminating element is whole. src/stages/preamp.js:977 also bypasses frameShot entirely and hand-builds `{ position: CAMP.toArray(), target: AIM.toArray(), fov: FOV }`, so it is not held to the safe-box derivation the other stages use.",
+   "fix": "preamp.js \u2014 move the card off the rack face to screen-right of the preamp chassis, standing clear in space at roughly 1.5x the chassis height, and pull the camera back so the top of the rack (LAYOUT.rack.topY 1.128) and the shelf below the preamp both terminate inside the frame. Re-derive the shot through frameShot(preampCentre, 0.115, { fill: 0.50, az: 0.30, el: 0.09, fov: 30 }) and apply any offset as an explicit truck in pixels, as amp.js and dac.js do.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "major",
+   "confidence": "likely",
+   "what": "The six rack chassis do not share a finish. In preamp.png bay 4 is a light silver brushed fascia; power's conditioner has silver end-cheeks with a black centre; the DAC and streamer are near-black; the crossover is black with chrome knobs. Side by side in one rack this reads as five brands of kit bought secondhand, not one reference system. Every benchmark press shot in this category commits to a single finish family across the range.",
+   "fix": "Pick one: either all-black anodised with alu trim, or all brushed alu. The cheapest correct move is to make every fascia mats().alu at the preamp's value (it is the best-lit chassis in the set) with anodBlack end-cheeks, applied consistently in power.js, streamer.js, dac.js, phono.js, preamp.js, xover.js. If a deliberate two-tone is wanted, it must be the SAME two-tone on all six.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "turntable",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The record has no label. The disc is black vinyl with an amber ring and a bare brown centre boss, and at this framing \u2014 a hero three-quarter with the platter as the largest bright object \u2014 the missing label is the first thing a reader's eye goes to. Separately, the plinth top is the largest single area in the frame and it is completely dead: matte, featureless, and returning no reflection of the platter or tonearm above it.",
+   "fix": "turntable.js \u2014 add a paper label: a 100 mm disc at r 0.0508 in a clone of mats().plastic (roughness 0.72, no clearcoat) in a muted off-white or deep amber, with a canvas-textured ring of type. For the plinth, switch its top surface from its current matte material to mats().pianoBlack (or a graphite clone at clearcoat 0.8, clearcoatRoughness 0.06) so the platter and arm are mirrored in it \u2014 that single change does more for this frame than anything else available.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "power",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "Three diagram regions plus two cards are simultaneously visible (the conductor cross-section, the carrier-swing card, and the 20 ms sine plot), the carrier-swing card overlaps the conductor card, and the right-hand edge of the conductor card and the 'cyan: the same at \u00d73,000 more' line run under the explanation panel and are clipped. Addendum B caps this at two cards and three plot regions and forbids overlap.",
+   "fix": "power.js \u2014 merge the carrier-swing text into the conductor card as a caption strip along its bottom, so there is one card. Move that card left by roughly 0.10 m in the camera's screen-right basis so its right edge clears x = 1120 px at 1600x1000. Keep the sine plot as the second card. Re-shoot and confirm nothing crosses the panel boundary.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "major",
+   "confidence": "likely",
+   "what": "The planar floor reflection is doing almost nothing on the wide framings. In overview.png twelve chassis sit on what reads as black felt: the reflection is present but so dim it does not register at the rack, while amp.png and sub.png (close framings, subject near uCentre) get a strong, convincing return. src/core/reflector.js sets uCentre (0, 0, -2.4) with uFalloff 9.0 and uStrength 0.62, so anything at the rack (z -3.30) and beyond is already well down the falloff and the overview camera sees the weakest part of it.",
+   "fix": "reflector.js \u2014 raise uFalloff from 9.0 to 16.0 so the reflection survives across the whole set, and raise uStrength to 0.72 for the wide shots. Verify against overview.png specifically: the rack legs and the loudspeaker plinths should each carry a legible vertical smear beneath them.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "speaker",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "At 1:1 the cabinet's gloss side panel is a warm brown/tan gradient \u2014 it is mirroring env.js's wrapR (0xffe6c8, warm) and it is the only warm-coloured object in an otherwise cool frame. It reads as brown plastic or a wood-effect vinyl wrap, not black lacquer. This is off-palette (CONTRACT \u00a73.5) and it is the largest single colour area on the hero.",
+   "fix": "Two options, pick one. (a) In env.js:144 cool wrapR from 0xffe6c8 to 0xf0eee8 and drop its intensity 2.8 -> 2.2, keeping the warmth only in `kick` where it separates cabinets from the backdrop. (b) In speaker.js, rotate the cabinet's azimuth ~8\u00b0 so the flank picks up frontStrip (0xf2f6ff) instead of wrapR. (a) is the better fix because the same tan appears on the turntable plinth edge and the amp's right flank.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "speaker",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The drivers are not driver-shaped. At 1:1 the midwoofer's surround is a light grey ring with a single hard specular crescent \u2014 it reads as a chrome torus, not a rubber half-roll; the cone is a flat untextured grey; the dust cap is a smooth ellipsoid with one blown white blob; there is no visible basket, no spider, no chassis spokes. The tweeter dome has a golf-ball highlight. In a Wilson or Devialet frame the surround is matte with a soft wrapped sheen and the cone carries visible fibre or weave.",
+   "fix": "speaker.js \u2014 build the surround from mats().rubber (roughness 0.82, sheen 0.4) as a proper half-torus, never a bright dielectric; give the cone mats().coneWeave with its clothWeave map at a repeat tight enough to read at 1:1; make the dust cap the same material as the cone, not a separate smooth body; and add a cast basket ring with 4-6 spokes visible between cone and baffle. The sub's cone in sub.js has the same problem and takes the same fix.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "streamer",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The panel's .eq block overruns. 'over 0-22.05 kHz; 110.5 dB counted to 20 kHz' and '24-bit floor 146.3 dB, which 0.77 ps rms reaches' are both past Addendum C's 46-character limit and visibly touch the right rounded corner of the eq box. They are also rendered dimmed, which makes an overflowing line look like a rendering error.",
+   "fix": "streamer.js content() \u2014 recast as: line 1 'SNR = -20 log10(2 pi f t_j)', line 2 '    = 110.1 dB   f 10 kHz, t_j 50 ps rms', line 3 '24-bit floor 146.3 dB' and move the 0-22.05 kHz bandwidth caveat into the prose paragraph above. Count characters against 46 before re-shooting.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "overview",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The cyan signal path is drawn as glowing tubes running box to box at the same visual weight as the physical interconnects and the amber mains loop, so three line systems compete and none reads. Real interconnects are dark and matte; the cyan is the diagram and it should be unmistakably thinner and brighter than any cable. The result in overview.png is neon spaghetti across the lower third.",
+   "fix": "overview.js \u2014 halve the cyan tube radius and raise its emissive so it reads as a drawn line rather than a lit cable, and either give the physical interconnects a separate dark mats().rubber run or drop them entirely on this stage so cyan and amber are unambiguously diagrammatic. Same treatment for the amber mains loop so the two diagram systems match each other in weight and differ only in hue.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "air",
+   "severity": "major",
+   "confidence": "likely",
+   "what": "The two cyan beams and one amber beam crossing the frame to a glowing sphere read as sci-fi tractor beams, not as an acoustic path. They are thin, uniformly bright, unattenuated over their length, and terminate in a glowing ball with concentric rings. Nothing in the benchmark category looks like this and it undercuts the credibility of the strongest physics chapter in the deck.",
+   "fix": "air.js \u2014 make the direct and floor-bounce rays fall off in brightness along their length (they are carrying 1/r pressure; show it), reduce them to hairline width, and replace the glowing terminal sphere with a small flat marker plus a label. If the intent is to show arrival time, animate a short bright segment travelling the path rather than lighting the whole path at once.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "turntable",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "Four label cards are stacked at bottom-centre ('MOVING COIL', 'GROOVE VELOCITY', 'BELT DRIVE', and the 45/45 caption) and two of them overlap the plinth's front edge. They read as a bulleted list dropped on the picture rather than annotations pointing at things. Separately the cartridge \u2014 the subject of the chapter \u2014 is roughly 30 px in the frame while the platter, which is not the subject, is 450 px.",
+   "fix": "turntable.js \u2014 cut to two world labels (MOVING COIL at the headshell, GROOVE VELOCITY at the stylus contact) and move BELT DRIVE and the strobe arithmetic into content() or a readout. Then either raise the camera elevation and shorten the lens so the headshell reads at 80-100 px, or add a small inset detail card showing the cartridge at 4x beside the deck.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "sub",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "At 1:1 the subwoofer's cheek and top face are each ONE flat grey value with no gradient and no reflected structure, despite the cabinet having a genuinely good machined fillet catching a bright line down its front-left edge. The fillet proves the geometry is right; the flat cheek proves the environment is not (see finding 2). This is the clearest single demonstration in the deck of what is missing.",
+   "fix": "Apply finding 2 (vertical luminance ramp in diffusionMap, stronger horizon in shell) and finding 6 (clearcoatRoughnessMap on pianoBlack), then re-shoot sub and check that the cheek carries an unbroken ramp from soft white at the top through several stops of grey into the flag at the bottom. If it does not, the cabinet's material is not pianoBlack \u2014 check which material sub.js applies to the cabinet body.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "amp",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The three interconnect cables leaving the monoblock are uniformly thick, uniformly grey-tan, have no visible connector where they meet the chassis, and the left-hand one passes straight through the bottom edge of the diagram card. They read as garden hose. They are also the only tan objects in the frame besides the backdrop seam.",
+   "fix": "amp.js \u2014 halve the cable radius, switch to mats().rubber (which is near-black with a sheen) so they stop competing with the chassis, add a GEO.bindingPost or a moulded strain relief where each leaves the chassis, and reroute the left cable behind the card rather than through it.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "air",
+   "severity": "minor",
+   "confidence": "likely",
+   "what": "content() reads 'A 100 W peak \u2014 1.29 W of sound, 199 W of heat \u2014 gives 96.4 dB direct at 4.830 m'. At eta0 = 0.647%, 100 W gives 0.647 W of sound and 99.35 W of heat; 1.29 W and 199 W are the figures for the PAIR at 100 W a side. The SPL that follows (90.11 + 20 = 110.11 at 1 m, less 20log10(4.83) = 96.43 dB) is correct for one loudspeaker, so the sentence mixes a per-pair power with a per-channel SPL in one clause.",
+   "fix": "air.js content() \u2014 'A 100 W peak a side \u2014 1.29 W of sound and 199 W of heat for the pair \u2014 gives 96.4 dB direct from one at 4.830 m, 102.4 dB from both.' Everything else in this chapter recomputes exactly, including the 10.9 pm threshold displacement and the 1.00e5 speed ratio.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "power",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The eight status LEDs on the conditioner fascia are an even 4x2 grid of identical flat dots with no lens, no countersink and no light spilling onto the surrounding panel. They read as a printed dot pattern. Real indicator LEDs sit in a bezel or behind a light pipe and put a faint pool of their own colour on the fascia around them.",
+   "fix": "power.js \u2014 recess each LED into a small countersink (a short bevelCyl bore in the fascia material) with a domed lens over it, and vary the group: two amber, one green, the rest dark. Add a very low-intensity PointLight or a small additive quad at each lit LED so the fascia picks up a faint pool.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "dac",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The reconstruction card floats top-left with a wide band of empty backdrop between it and the rack, and with no leader, no anchor and no reflection. Given the frame already fails on subject size (finding 5), the card being the only thing in the left half compounds it: the eye goes to a UI panel over empty grey rather than to the converter.",
+   "fix": "After applying finding 5's reframing, re-anchor the card so its inner edge sits within about 0.15 m of the rack's left silhouette, and add a hairline leader from the card's lower-right corner to the DAC's fascia. Apply the lit-slab material from finding 3.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "phono",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "Readout key 'IN \u2192 OUT' shows '0.389 \u2192 410' with the unit 'mV rms' applied once at the end, so the input reads as 0.389 mV where the prose says 258.7 \u00b5V in. The two are different operating points (the readout is the live sweep value at 2427 Hz after RIAA boost; the prose is 1 kHz reference) but nothing on screen says so, and a measurement editor will read it as a contradiction.",
+   "fix": "phono.js readouts() \u2014 relabel the key 'IN \u2192 OUT @ f' and add the sweep frequency to the unit string, or fix the readout at 1 kHz so it matches the 258.7 \u00b5V / 410 mV pair the prose derives. Same applies to the GAIN readout (60.46 dB) against the prose's 64.00 dB at 1 kHz.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "core",
+   "severity": "minor",
+   "confidence": "likely",
+   "what": "src/core/materials.js:131-135 \u2014 M.glass is roughness 0.035 with clearcoatRoughness 0.02, which is a laser optic, not a display cover. On any flat display window it returns the whole softbox as one hard shape. This is the same class of error Addendum J called out for meters, and it is why the streamer's display carries a blown white specular and the DAC's and preamp's displays read as decals with a hotspot.",
+   "fix": "materials.js:131 \u2014 raise M.glass to roughness 0.09, clearcoatRoughness 0.06, and drop envMapIntensity 1.3 -> 0.9. Then have every stage that covers a display use GEO.instrumentGlass (finding 1) rather than a flat M.glass plane, so the source sweeps as a band across a crowned surface instead of sitting as a rectangle.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "overview",
+   "severity": "minor",
+   "confidence": "likely",
+   "what": "The wide shot does not show the whole system, which CONTRACT \u00a71 requires of it. The right subwoofer is not visible at all and the left subwoofer overlaps the turntable plinth's leg frame from this azimuth, so the two read as one confused mass. The level-diagram card also has no marker or numeral at the POSTS end \u2014 the whole point of the plot, the number at the end, is not on it.",
+   "fix": "overview.js:656 \u2014 yaw the shot until LAYOUT.subL (-2.92, -3.28) clears LAYOUT.ttPlinth (-2.34, -2.28) in silhouette and both subs are inside the frame; az 0.50 -> ~0.38 with fov 29 -> 31 should do it without losing the outer loudspeakers. Add a dot and a value label at the POSTS end of the plot reading the corrected '+79.95 dBV = 2.828 V' (see finding 11), and label the amber dashed reference '2.83 V = 1 W into 8 \u03a9'.",
+   "lens": "Art direction \u2014 forced photo-vs-"
+  },
+  {
+   "stage": "turntable",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "content() overruns the panel and the still frame cuts it at \"...482 MPa, 4.9 tf/cm\u00b2.\" Everything after that is lost: the whole \"Why the last track is the worst\" section (\u03bb 51 \u2192 21 \u00b5m, traceable velocity 83 \u2192 14 cm/s, the (146/60)\u00b2 = 5.92 ratio) AND the entire .myth block that kills ban 1 (3.66 \u00b5A peak, 8.96 nm/s drift, \u00b11.43 pm shuffle = 1/179 of the 255.6 pm copper spacing, field at 1.98\u00d710\u2078 m/s, \"it is a loop\"). The chapter's two best arguments are invisible in the deliverable.",
+   "fix": "Cut src/stages/turntable.js content() to ~230 words. Delete the entire \"<h3>The cut</h3>\" paragraph and its u/w .eq block (the 45/45 geometry is already fully carried by the groove card in the render, which is legible), and move the .myth block to immediately after the .key. Re-shoot and confirm the myth block's last line sits above the readout footer with no fade over it.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "phono",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "An opaque dark-grey rectangle with hard edges is pasted on top of the RIAA plot, occluding roughly the left third of the plot box (visible at shots/phono.png ~x 1560-2000, y 900-1440). It hides the cyan playback trace entirely below ~200 Hz and clips the amber record trace. The chapter's whole picture is the two curves crossing; half of one curve is under a grey plate.",
+   "fix": "In src/stages/phono.js, that plate is a second card / label scrim rendering in front of the Graph. Find the mesh centred near the plot's upper-left and either remove it, move it clear of the plot box, or set occlude:false + renderOrder below the Graph. Re-shoot and confirm the cyan trace is continuous from 20 Hz to 20 kHz.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "core",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "The system's topology is self-contradictory across chapters. xover.js draws an ACTIVE three-way, LR4, with a label reading \"2 in, 6 out\" (xover.js:789) \u2014 six amplifier channels. amp.js and LAYOUT provide exactly TWO monoblocks. Meanwhile amp.js, xover.js, overview.js and preamp.js all compute into SPEAKER.nominalZ = 8 \u03a9 (damping factor, 300 W rating, insertion loss, meter face \"WATTS INTO 8 \u03a9\") while DRIVER.Re = 6.2 \u03a9 and, with an active crossover, there is no passive network to make an 8 \u03a9 nominal load \u2014 each amplifier sees one driver.",
+   "fix": "Pick one and make every chapter agree. Cheapest: state in xover.js content() and amp.js content() that each monoblock chassis houses three channels (or that six monoblocks are implied and two are shown), and add one clause wherever 8 \u03a9 appears: \"8 \u03a9 is the nominal used for the power rating; the driver this amplifier actually sees is Re 6.2 \u03a9 rising to 76 \u03a9 at resonance.\" Do NOT leave \"2 in, 6 out\" beside two boxes with no comment.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "core",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "Two chapters give two mains draws for the same operating point. power.js: P_SYS = 2\u00b7AMP.pOut8/AMP.effAB + 100 = 2\u00b7300/0.55 + 100 = 1190.9 W, i.e. 545 W per monoblock. amp.js: P_DC_FULL = 2\u00b7RAIL\u00b7I_pk/\u03c0 = 2\u00b775\u00b72.7566 = 413.5 W at full output, and the amp's own SUPPLY DRAW readout prints 371 W at 233 W mean. That is 300/413.5 = 72.6 % against power.js's 55 %. Both are on screen; nothing says the 55 % includes transformer, rectifier, bias and PF losses that the 413.5 W rail figure excludes.",
+   "fix": "In src/stages/power.js content(), replace \"at 55 %\" with an explicit wall-plug ladder: rail draw 413.5 W per channel (amp.js's own figure), plus quiescent, driver stages, transformer and rectifier losses \u2192 545 W at the wall, effAB 0.55. Or lower AMP.effAB to something reconcilable and quote the rail figure in both. The two numbers must be visibly the same quantity or visibly different quantities.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "streamer",
+   "severity": "blocker",
+   "confidence": "certain",
+   "what": "A hard white specular flare with a bloom halo sits dead centre of the streamer's front-panel display (shots/streamer.png ~x 1400-1650, y 340-450), obliterating the buffer bar and any text on the hero's own face. Hard-edged rectangular grey/white patches also remain at the display window's corners. This is exactly the failure ADDENDUM \u00a7J describes and it is the brightest thing in the frame, on the hero.",
+   "fix": "In src/stages/streamer.js, replace the hand-rolled clear panel over the front display with GEO.instrumentGlass(w, h) placed 2-4 mm in front of the emissive, and delete the local convex-panel helper. If the flare persists, drop the panel's envMapIntensity to ~0.4. Verify at 1:1 that no highlight on the display has a straight edge and that the buffer bar is readable end to end.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "preamp",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "content() (preamp.js:1145) prints \"One watt into 8 \u03a9 is 2.83 V, 91.2 dB at 1 m\". 91.216 dB is TS.spl283 \u2014 the 2.83 V figure. 2.83 V into this 6.2 \u03a9 coil is 1.290 W, so the one-watt sensitivity is 90.108 dB. spec.js's own comment names this exact substitution \"the classic sensitivity fiddle\", and air.js gets it right (\"2.83 V is 1.29 W into the 6.2 \u03a9 coil and reads 91.21 dB\"). The preamp chapter commits it.",
+   "fix": "Change to: \"One watt into 8 \u03a9 is 2.83 V; into this 6.2 \u03a9 coil 2.83 V is 1.29 W and reads SPEAKER.sens dB at 1 m (SPEAKER.sens1W dB at one true watt).\" Use SPEAKER.sens1W wherever a watt is meant.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "dac",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The DAC chapter has no hero. dac.js:635 sets HERO_R = 0.216 and the comment states the intent is to frame \"the whole rack (1.128 m) ... 877 px tall\". The converter is a 92 mm chassis \u2014 about 72 px in an 840 px safe box, 8.6 % \u2014 and its front display (\"44.1 \u00b7 24 bit \u00b7 AES \u00b7 LOCK\") is visually identical to the streamer's directly below it. The only cue is a small floating label \"CONVERTER \u00b7 RACK BAY 2\" that sits above the shelf boundary and reads as pointing at either bay. In its own chapter the reader cannot identify the subject.",
+   "fix": "Set HERO_R to the converter's apparent half-height with its top face in view (~0.105-0.115, as phono.js does) and keep FILL 0.40; retarget HERO_C on the bay-2 chassis; raise EL to ~0.30 so the top face reads. Then differentiate the fascia: give the DAC a distinct display layout from the streamer's, and light the hero bay while flagging the neighbours down, as phono.js already does.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "speaker",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The motor cutaway is unreadable. At 1:1 it is a set of pale-blue outlined rectangles, a grey diagonal bar for the cone, an amber zig-zag polyline with a circle and a triangle for the source, and a small cyan bow-tie \u2014 no magnet body, no pole piece, no top plate shading, no gap flux, nothing that reads as a voice coil in a magnetic circuit. Four callouts (CHARGE CARRIERS, VOICE COIL, MOTOR FORCE, CONE TRAVEL) float in a column 200-350 px away with no leaders to any part, so nothing on the drawing is identified.",
+   "fix": "In src/stages/speaker.js buildSection(): give the magnet, front plate, back plate and pole piece filled silhouettes in distinguishable values (graphite / lamination / anodGrey clones) rather than outlines, and draw 4-6 flux arcs through the gap in amber. Shorten the four label offsets to 60-120 px and add a leader line from each to the part it names (the 'lead' class is already in use at speaker.js:1214).",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "speaker",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The section card and the response/excursion card abut and overlap (shots/speaker.png, the graph card's top-left corner sits over the section card's lower edge at ~x 1450-1900, y 1090-1130). Together they form one black slab occupying roughly a third of the safe box, which is more visual mass than the loudspeaker. ADDENDUM \u00a7B caps this at two cards that do not overlap the hero's silhouette; they also crop the near cabinet's upper woofer.",
+   "fix": "Separate the two cards by at least 40 px of clear background and shrink the combined stack: put the section card above and clear of the graph card, or drop the free-air dashed trace and the excursion plot's caption box to shorten the graph card. Confirm no card pixel touches another card or the near cabinet.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "air",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "content() reads \"A 100 W peak \u2014 1.29 W of sound, 199 W of heat \u2014 gives 96.4 dB direct at 4.830 m\". The 1.293 W and 198.7 W are W_AC and W_HEAT for the PAIR (2 \u00d7 100 W), while 96.4 dB is the single-speaker figure. As written the sentence claims 100 W in produces 1.29 W of sound plus 199 W of heat, which does not add up, and a reader checking energy conservation will stop there.",
+   "fix": "Rewrite as: \"100 W into each \u2014 0.65 W of sound and 99 W of heat per speaker \u2014 gives 96.4 dB direct at 4.830 m, 102.4 dB for the pair.\" Or keep the pair figures and say \"100 W each: 1.29 W of sound and 199 W of heat between them.\"",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "dac",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The instrument cluster prints \"IN-BAND DR 77.3 dBFS\" as an unqualified headline in a chapter whose panel simultaneously argues a 24-bit 337.2 nV LSB and 98.1 dB at 16 bits. 77.3 dB is the measured in-band dynamic range of a deliberately crippled 2nd-order 1-bit demonstration modulator run at MOD_GAIN 0.5. Read as the converter's dynamic range \u2014 which is how the key reads \u2014 it says this DAC is worse than CD.",
+   "fix": "Change the key to something unambiguous, e.g. k: '\u0394-\u03a3 demo DR' with u: 'dBFS \u00b7 2nd order, OSR 64'. And in content(), state why the measured 77.3 sits 7.9 dB below the 85.2 dB model (the 6.02\u00b71+1.76 term is optimistic for a 1-bit quantiser and the FFT counts three-tone IMD as noise) \u2014 an unexplained 8 dB gap between \"DR\" and \"model\" on the same line invites the reader to distrust both.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "power",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "Three shelf light-strips render as pure-white bars with hard ends across the full width of the frame (shots/power.png at y \u2248 60-140, 640-690 and 1140-1190 in the 3200 px original). They are the brightest objects in the picture, brighter than either meter, and they read as light leaks rather than as lighting. The same artefact is in preamp, phono and dac.",
+   "fix": "These strips are clipping in linear HDR above the bloom threshold of 2.30. Drop their emissive intensity until the peak sits below 2.0 linear, or replace the bare emissive plane with a diffuser (a low-roughness strip lit by a hidden emitter). Verify: no pixel of the shelf strips above 95 % in any of the four frames.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "xover",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "Two different quantities are both printed as \"sum ... dB\" in one frame. The card's own label prints SUM_ERR \u2014 the worst-case magnitude error over 20 Hz-20 kHz, \u22120.015 dB (xover.js:802) \u2014 while the footer prints S.sum, the cursor's instantaneous sum, \u22120.007 dB. Identical wording, different numbers, no way for the reader to tell them apart.",
+   "fix": "Change the card label at xover.js:802 to `worst |sum| ${Math.abs(SUM_ERR).toFixed(3)} dB at ${SUM_ERR_F.toFixed(0)} Hz` and change the footer key from 'Sum' to 'Sum at cursor'. Both numbers are worth showing; they must be distinguishable.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "preamp",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The diagram card (relay ladder + S/N plot) is roughly twice the hero's projected area, covers two rack bays, and pushes the line preamp \u2014 the actual subject \u2014 into the top 15 % of the frame where the frame edge also cuts through the crossover chassis above it. The subject is identifiable only by a small floating label.",
+   "fix": "Shrink the card to ~0.65 of its current linear size and move it down and right so it clears the bay-4 fascia entirely; retarget the shot on bay 4 and boom down so the hero sits at the vertical centre of the safe box. The relay ladder graphic and the S/N plot do not both need to be this large \u2014 the ladder can be halved.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "overview",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The whole system occupies roughly the lower 45 % of the safe box with a large empty grey field above it, and the floor reflection is nearly as strong and as large as the subject, so the bottom third of the frame is an upside-down duplicate rack. The level-diagram card floats unattached in the empty upper-left. This is the establishing shot of the piece and it reads as a small model on a wet floor.",
+   "fix": "Raise fill from 0.372 to ~0.46 and boom the target up so the subject centres in the safe box; move the level-diagram card down so its lower edge sits just above the loudspeakers rather than floating in the void. If the reflection still doubles the subject, this stage should fade the planar reflection's strength over distance more aggressively \u2014 but check core ownership before touching it and report rather than edit.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "streamer",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The .eq block's last two commentary lines are under the panel's fade in the still: \"over 0-22.05 kHz; 110.5 dB counted to 20 kHz\" and \"24-bit floor 146.3 dB, which 0.77 ps rms reaches\". Those two lines are the entire payoff of the jitter argument \u2014 without them the reader gets 110.1 dB with no reference band and no comparison to the word length.",
+   "fix": "Cut the \"What arrives\" paragraph by about 25 words (the switch-stall and retransmission premises can go to a label) so the .eq block clears the footer. Verify the last commentary line is fully opaque in the shot.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "speaker",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "Drivers still have no detail density. Each woofer is a smooth grey cone gradient with a soft torus surround, no dust-cap boundary, no basket spokes or windows, no spider, no trim ring. At 3200 px on the hero of the loudspeaker chapter this reads as a stamped disc. This was round-1 finding 3 and it has not been actioned.",
+   "fix": "Rebuild the driver in src/stages/speaker.js: a LatheGeometry half-roll surround in mats().rubber at roughness ~0.75 with visible thickness at the cone junction; a separate dust cap in coneWeave or dome; a cast basket with six open windows; a machined trim ring with GEO.screw at eight positions; the cone in coneWeave rather than flat cone.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "power",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The conductor cutaway card and the \"Energy front\" label are laid over the streamer chassis and its lit 44.1 kHz display, so another stage's emissive prints through and around the card edges. ADDENDUM \u00a7B: cards go beside the hardware, not through it.",
+   "fix": "Move the cutaway card and its two labels camera-left into the clear backdrop between the rack and the safe box's left edge, or lower them so they sit against the dark shelf void rather than across a lit fascia.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "turntable",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The groove card's dimension chain does not line up with the geometry it measures. The \"60 \u00b5m\" arrow sits entirely to the left of the drawn groove notch and the \"69 \u00b5m\" land arrow spans a region that is partly groove, so the chain 60 + 69 = 129 measures nothing on the drawing. And MAG = 770 is documented as chosen so \"exactly three grooves at true 129 \u00b5m pitch span the card\", but only one full V and a partial second are drawn \u2014 there is no adjacent groove for the land to be between.",
+   "fix": "Draw three groove periods across the card at MAG so the pitch is measurable, and anchor each dimension line's extension witnesses on the actual feature edges (groove top-left to groove top-right for 60 \u00b5m; groove top-right to next groove top-left for 69 \u00b5m; crest to crest for 129 \u00b5m).",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "amp",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The power meter is the hero's face and it fails at 1:1: the dial is a flat, near-blown light-blue radial gradient, \"POWER OUTPUT\" and \"WATTS INTO 8 \u03a9\" are illegible low-contrast grey on light blue, there is no red overload sector, no tick hierarchy, and no glass. The needle at 233 W mean lands essentially on the last graduation (300), which reads as pinned rather than as \u22121 dB.",
+   "fix": "Darken the dial face and raise the silkscreen contrast (dark legends on a pale face, or pale legends on a dark face \u2014 not pale on pale); add a red sector above 300 W; add GEO.instrumentGlass over it. Consider extending the log scale one division past 300 so the operating point is not on the end stop.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "air",
+   "severity": "major",
+   "confidence": "likely",
+   "what": "Three plates plus four multi-line label blocks are visible at once (parcel window, floor-bounce comb, and the At-the-seat / Floor-bounce / Below-the-rule / Air-parcels blocks, each three to five lines of mono at the same size and weight). ADDENDUM \u00a7B caps this at two cards and three plot regions. The result is that the true-scale parcel row \u2014 which correctly shows essentially no motion \u2014 is lost among the annotation rather than being the point.",
+   "fix": "Drop the floor-bounce comb plate into content() as a sentence (the two figures \u221215.3 dB at 414 Hz and +5.2 at 828 are already in a label) and keep only the parcel window. Cut every remaining label to two body lines and push the third into the panel.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "xover",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The card floats in the empty upper third with the crossover chassis cropped at the bottom of the frame and the rack running out of the left edge, so the hero is a strip of knobs at the picture's base and the top 15 % of the frame is bare backdrop. The plot legend (\"sum \u00b7 low \u00b7 mid \u00b7 high\" and \"LR2, every driver +\") is set in one colour, so nothing on the plot can be keyed to a name.",
+   "fix": "Boom the shot down and raise fill so the crossover chassis reads as an object with its top face in view, and drop the card so it sits beside rather than above. Colour each legend entry to match its trace (sum in PAL.gr, the three bands in PAL.cy at three widths or one dashed, LR2 in PAL.rd) and put a short colour swatch before each word.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "phono",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The hero (bay 3) is largely behind the diagram card and its identifying label \"Bay 3 \u00b7 moving-coil phono\" sits on the shelf edge above it. The framing comment at phono.js:158-166 asserts the chassis lands at y 188-372 and the card at y 435-915 with no overlap; in the shipped render the card's upper-left corner reaches y \u2248 430 at 1400 px scale and the chassis is behind it. The stated arithmetic and the render disagree.",
+   "fix": "Re-measure off the current shot and move the card down/right until the bay-3 fascia is fully clear, or shrink the card. The claim in the comment should be re-verified against a fresh render, not left as prose.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "core",
+   "severity": "major",
+   "confidence": "certain",
+   "what": "The page header (\"Signal Path / Anatomy of a reference hi-fi system \u2014 mains to eardrum\") and the chapter rail are overprinted by hardware in power, amp, streamer and preamp: a chrome rack post, a monoblock and rack legs all cross x < 160 px and the header text becomes unreadable against them. ADDENDUM \u00a7A forbids anything crossing x < 160 at 1600\u00d71000.",
+   "fix": "In each of the four stages, truck the shot right (or reduce fill) until no geometry crosses x = 160 px. amp.js already has a TRUCK_PX mechanism; power, streamer and preamp need the same treatment. Check the right boundary too \u2014 amp's rack currently runs past x = 1120.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "phono",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "\"at 5 cm/s, 50 Hz wants \u00b1159.2 \u00b5m against a 129 \u00b5m groove pitch\" is arithmetically right (0.05/(2\u03c0\u00b750)) but is the UN-pre-emphasised case, which is never cut. With RIAA record EQ the recorded velocity at 50 Hz is 16.94 dB down and the real displacement is \u00b122.6 \u00b5m \u2014 comfortably inside the pitch. As written the reader concludes that a real 50 Hz cut overruns its neighbour.",
+   "fix": "Add the consequence, which is the whole point: \"...which is why the record curve exists: pre-emphasis puts 50 Hz 16.9 dB down, so the cut is \u00b122.6 \u00b5m and the land survives.\"",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "dac",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "\"Shaping drops the one-bit floor 54.1 dB\" quotes NTF_20K \u2014 the noise-transfer-function magnitude at 20 kHz, which is the WEAKEST point of the shaping in band. At 1 kHz the same 2nd-order NTF is about 80 dB down. Stated bare, the figure understates the mechanism and cannot be checked by a reader who does not know which frequency it belongs to.",
+   "fix": "Print it as \"Shaping drops the one-bit floor 54.1 dB at 20 kHz, and 40 dB per decade below that\".",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "overview",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The overview lands 2.903 V / 1.053 W at the posts (integer ladder step \u221219 dB) while the phono chapter lands 2.828 V / 1.000 W (exact residual \u221219.23 dB) for the same source and the same volume setting. Both are defensible and the overview computes HEAD_DB = +0.226 dB, but the footer key 'AT THE POSTS 2.903 V rms' carries no note, so a reader comparing chapters sees the terminal voltage disagree.",
+   "fix": "Append the reconciliation to the readout unit or the eq commentary: u: 'V rms \u00b7 +0.23 dB over 2.828' \u2014 the level-diagram card already shows \"+0.23 dB over one watt\", so just make the footer agree with it.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "overview",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "Readout key 'MAINS \u00b7 FULL OUT' prints 0.92 A with unit 'A' and no reference, while power.js's equivalent correctly prints 'A \u00b7 5.18 rms'. 0.92 A beside the words \"full out\" reads as the system's full-output line current, which is 5.18 A rms / 7.32 A peak.",
+   "fix": "Change u to `A \u00b7 ${I_MAINS_PK.toFixed(2)} pk` (or the rms figure) so the instantaneous value has its scale.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "turntable",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "\"482 MPa, 4.9 tf/cm\u00b2\" is the Hertzian MEAN contact pressure (the code names it P_MEAN). The peak pressure at the centre of a Hertz contact is 1.5\u00d7 the mean \u2014 723 MPa. A tribologist reading this will assume peak unless told.",
+   "fix": "Print \"482 MPa mean (723 MPa peak), 4.9 tf/cm\u00b2\" or add \"mean\" to the word after the figure.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "sub",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The pressure key prints \"peak 5.1 Pa = 3.6 Pa rms = 105 dB SPL\" (correct: 3.606/2e-5 \u2192 105.12 dB) while the footer prints SEAT SPL 78.3 dB, and the drive is stated as 100 dB at 1 m. 100 dB at 1 m falling to 78.3 dB at ~3.4 m looks like a broken inverse-square law until the reader works out that the seat sits on the \u03a8\u2081\u2081\u2080 null. The 105 dB is the map's maximum, which is not stated either.",
+   "fix": "Label the key figure \"map maximum 105 dB SPL\" and add one clause to the SEAT SPL row or the plan label: \"seat is on the \u03a8\u2081\u2081\u2080 null \u2014 21.7 dB below the antinode\".",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "speaker",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "content()'s last line (\"...29.2 Hz, which the LR4 at 80 Hz never asks for\") sits under the panel's fade gradient in the shipped still. It is also the only place the excursion demonstration is reconciled with the crossover, so it is the wrong line to lose. Separately, \"Travel runs out below 29.2 Hz\" does not restate the 96 dB reference on which F_XMAX depends.",
+   "fix": "Cut ~15 words earlier in the panel (the \"coil fills in 146 ns\" clause can move to a label) and rewrite the last sentence as \"At 96 dB travel runs out below 29.2 Hz \u2014 which the LR4 at 80 Hz never asks for.\" Also add gX.addMarker(XOVER.fLow) to the excursion plot so the 80 Hz handover is visible on the curve.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "preamp",
+   "severity": "minor",
+   "confidence": "unsure",
+   "what": "The S/N-vs-setting trace has a sharp spike and reversal at roughly \u221240 dB on the solid (late) curve. Ladder Zout does vary non-monotonically with the relay word, so a bump is physically possible, but the drawn feature is a single-sample vertical kink rather than a smooth excursion, which is the signature of a plotting or state-caching artefact.",
+   "fix": "Print SNR_LATE[] for N = 0\u202663 and check for a discontinuity at the setting where the 32 dB relay first engages. If the array is smooth, the artefact is in the trace's sampling \u2014 force the Graph to evaluate on integer N. If the array really has a step, add a one-line caption saying why.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "amp",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The equipment rack occupies x \u2248 1290-1400 of a 1400 px frame (x > 1120 at 1600\u00d71000), running under and past the explanation panel, and an unidentified circular object is cut by the top-right frame edge. ADDENDUM \u00a7A forbids geometry past x = 1120.",
+   "fix": "Increase TRUCK_PX magnitude at amp.js:135 (currently \u2212132) until the rack clears x = 1120, or narrow the fov, and identify or remove the circular object at the top-right corner.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "power",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The small v/i plot (0-20 ms, \u00b11) carries two traces \u2014 one amber, one cyan, ~90\u00b0 apart \u2014 with no key, no axis kickers and no units on the y axis. The reader cannot tell which is line current (in phase with volts at the stated unity PF) and which is carrier displacement (quadrature), and the whole PF argument depends on that distinction.",
+   "fix": "Add a two-entry key above the plot: \"amber i \u00b7 cyan carrier x\", and label the y axis \"normalised to peak\". One extra line; without it the picture is decorative.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "streamer",
+   "severity": "minor",
+   "confidence": "likely",
+   "what": "SNR_20K adds 10\u00b7log10((fs/2)/20000) = +0.42 dB to the jitter SNR, i.e. it re-bands white jitter noise from 0-22.05 kHz into 0-20 kHz. At 44.1 kHz that correction is 0.42 dB and is quoted to one decimal beside a 110.1 dB figure, which implies a precision the premise (white jitter spectrum) does not support.",
+   "fix": "Either drop the 20 kHz line entirely \u2014 at 44.1 kHz it says nothing \u2014 or state the premise: \"assuming the jitter spectrum is white across the Nyquist band\".",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "core",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "src/core/dsp.js classABDissipation()'s doc comment states \"Total device dissipation, both halves: P_d = Vcc\u00b2/(\u03c0\u00b2\u00b7RL) at m = 2/\u03c0\". The total for both halves is 2\u00b7Vcc\u00b2/(\u03c0\u00b2\u00b7RL); Vcc\u00b2/(\u03c0\u00b2\u00b7RL) is the per-device figure. The code itself is correct and amp.js uses its own model, so nothing on screen is wrong today \u2014 but the comment is the reference a future stage author will read.",
+   "fix": "Report to the lead (core is frozen): correct the comment to \"per device; both halves total 2\u00b7Vcc\u00b2/(\u03c0\u00b2\u00b7RL)\". Also note CONTRACT \u00a73.6 states the bloom threshold as 0.92 while renderer.js uses 2.30.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "sub",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The plan map paints the room in large saturated fields of amber and cyan used as a SIGN convention (+p / \u2212p). Everywhere else in the piece cyan means signal and amber means energy/current/heat (CONTRACT \u00a73.5). A reader carrying that convention across eleven chapters will read the amber regions as \"where the energy is\", which is not what they mean.",
+   "fix": "Either state the local convention prominently in the map's own kicker (\"colour is pressure SIGN, not the piece's signal/energy accent\"), or repaint as a single-hue diverging ramp through the card's background value so the two lobes differ in value rather than hue.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "sub",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "For the flagship of the low-frequency chapter the subwoofer is under-detailed: a plain lacquer cube with four corner screws, a smooth grey cone with a featureless dome, a soft torus surround carrying one hard white specular crescent, no basket, no visible spider or motor, and a plate amp reduced to a strip with a bar-graph and two knobs on the pedestal.",
+   "fix": "Add a cast basket with open windows behind the cone, a distinct dust cap material, a machined trim ring with visible fasteners, and give the plate amp real controls (level, phase, low-pass defeat) with legends. Raise the surround's roughness so the crescent breaks up.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "overview",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The level diagram is captioned \"+80.17 dB in five steps\" but only about three risers are discernible in the drawn staircase \u2014 the \u22129.0 dB pre-amp step and the 0.0 dB crossover step are at or below one plot pixel, and the \u22120.83 dB loading loss is invisible. The reader is told to count five and can find three.",
+   "fix": "Label each riser with its own tick and value on the x axis (CART \u00b7 LOAD \u00b7 PHONO \u00b7 PRE \u00b7 XO \u00b7 POSTS), or change the caption to \"+80.17 dB, five gain blocks\" and stop asking the reader to count risers.",
+   "lens": "measurement editor / loudspeaker"
+  },
+  {
+   "stage": "core",
+   "severity": "minor",
+   "confidence": "certain",
+   "what": "The cyclorama renders as a large flat near-white field behind the rack in preamp (and pale flat grey in amp and xover), with no gradient and a visible boundary. It is brighter than most of the hardware, so the rack reads as a cut-out pasted on a card rather than an object in a room.",
+   "fix": "Report to the lead: the lit gradient added to seamlessBackdrop is not reaching these three framings. Per-stage, the cheapest mitigation is to re-aim so the bright part of the sweep falls behind the hero rather than beside it, and to check nothing behind the subject exceeds ~55 % luminance.",
+   "lens": "measurement editor / loudspeaker"
+  }
+ ]
+}

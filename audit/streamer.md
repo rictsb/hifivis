@@ -1,103 +1,80 @@
-# Round-3 audit — stage `streamer`
+# Round-4 audit — stage `streamer`
 
-## Art-director score: **36/100** (-3 from 39)
+## Art-director score: **31/100** (-5 from 36)
 
-> Regressed. fill 0.85 with a card wall covering roughly half the stage over an empty shelf; hero cropped at the bottom; blown-white shelf trim strips on every shelf; a stray chassis sliced by the frame bottom.
+> Regressed. The shot deliberately frames card-plus-chassis as one stack, so the card is the hero: an opaque black wall over half the rack with four plot regions in it. The display carries a blown white specular that buries its own content, and the display glass shows visible dither checkerboard at the corners.
 
 
 ## Findings for this stage (5)
 
 ### 1. [BLOCKER] (certain)
 
-**Wrong:** src/stages/streamer.js:712-713 uses `fill: 0.85`. The card wall covers ~55% x 60% of the safe box, floats over an EMPTY shelf (there is nothing behind it to relate to), the hero chassis is pushed to the bottom of the frame and partly cropped, and a further chassis is sliced by the frame bottom edge.
+**Wrong:** src/stages/streamer.js:858-861 — the shot deliberately frames `STACK_LO` (shelf line) to `STACK_HI` (card outer top) as one subject at fill 0.65, so the CARD is the hero and the streamer chassis is a band across the top. The card is an opaque black wall across the whole rack front containing four plot regions (bit strip, buffer trace, eye diagram, packet-arrival strip) against Addendum B's three-region maximum. The chassis's own display then carries a blown white specular that buries its content, and the display glass shows visible dither checkerboard at its lower-left and lower-right corners (broken alpha/stipple).
 
-**Fix:** streamer.js:713 -> `{ fill: 0.42, az: -0.14, el: 0.10, fov: 30 }`. Move the card so its lower edge sits above, not across, the streamer chassis, and shrink it to no more than 1.6x the chassis width.
+**Fix:** streamer.js:860 — frame the CHASSIS alone: `frameShot([-0.015, 0.290 + H_CH/2, -3.040], H_CH/2 + 0.02, { fill: 0.52, az: -0.15, el: 0.115, fov: 28 })`. Move the card to screen-right of the chassis, beside it, not below it. Drop one of the four plot regions (the packet-arrival strip duplicates what the buffer trace already says). Investigate the corner checkerboard — it is either a transparent material without `depthWrite:false` z-fighting against the bezel or an alpha-dithered material; give the display cover GEO.instrumentGlass instead.
 
-### 2. [MINOR] (certain)
+### 2. [BLOCKER] (certain)
 
-**Wrong:** The streamer card floats over an empty rack shelf, so the composition has a hole in it: there is nothing behind the most prominent element. Additionally the '44' of a neighbouring chassis display is clipped by the chapter rail at the left edge, breaking contract §A's x < 160 px rule.
+**Wrong:** A hard white specular flare with a bloom halo sits dead centre of the streamer's front-panel display (shots/streamer.png ~x 1400-1650, y 340-450), obliterating the buffer bar and any text on the hero's own face. Hard-edged rectangular grey/white patches also remain at the display window's corners. This is exactly the failure ADDENDUM §J describes and it is the brightest thing in the frame, on the hero.
 
-**Fix:** Either move the card so it sits over the streamer itself and the shelf below (giving it something to relate to), or fill the empty shelf. Pull the camera right so no lit display sits under the rail.
+**Fix:** In src/stages/streamer.js, replace the hand-rolled clear panel over the front display with GEO.instrumentGlass(w, h) placed 2-4 mm in front of the emissive, and delete the local convex-panel helper. If the flare persists, drop the panel's envMapIntensity to ~0.4. Verify at 1:1 that no highlight on the display has a straight edge and that the buffer bar is readable end to end.
 
-### 3. [MINOR] (certain)
+### 3. [MAJOR] (certain)
 
-**Wrong:** The buffer-fill plot has a second signal drawn inside the same axes with no key: below the buffer trace, a row of vertical cyan bars (packet arrival ticks) occupies the bottom of the plot box, sharing the 0–140 ms y axis to which they do not belong. The caption names only "BUFFER FILL VS TIME, MS, target 120, drained at 1000 ms/s".
+**Wrong:** The panel's .eq block overruns. 'over 0-22.05 kHz; 110.5 dB counted to 20 kHz' and '24-bit floor 146.3 dB, which 0.77 ps rms reaches' are both past Addendum C's 46-character limit and visibly touch the right rounded corner of the eq box. They are also rendered dimmed, which makes an overflowing line look like a rendering error.
 
-**Fix:** Give the arrival ticks their own thin strip below the plot box with its own one-line caption ("packet arrivals, 181.5/s nominal"), or add a second line to the caption naming them.
+**Fix:** streamer.js content() — recast as: line 1 'SNR = -20 log10(2 pi f t_j)', line 2 '    = 110.1 dB   f 10 kHz, t_j 50 ps rms', line 3 '24-bit floor 146.3 dB' and move the 0-22.05 kHz bandwidth caveat into the prose paragraph above. Count characters against 46 before re-shooting.
 
-### 4. [MINOR] (certain)
+### 4. [MAJOR] (certain)
 
-**Wrong:** The AES3 card states its time exaggeration as "at 1 : 2352 of the bit clock", which is ambiguous — it is 2352:1 ON TOP OF the stage's own 1 : 50, i.e. 117 600:1 against real time. content() gets this right ("at 1 : 2352 on top of the stage rate") but the card, which is what a reader looking at the picture sees, does not.
+**Wrong:** The .eq block's last two commentary lines are under the panel's fade in the still: "over 0-22.05 kHz; 110.5 dB counted to 20 kHz" and "24-bit floor 146.3 dB, which 0.77 ps rms reaches". Those two lines are the entire payoff of the jitter argument — without them the reader gets 110.1 dB with no reference band and no comparison to the word length.
 
-**Fix:** Change the card text to "1 : 2352 on top of the stage's 1 : 50 — 1 : 117 600 against real time", matching the honesty of power.js's FIELD_TOTAL_SLOW disclosure.
+**Fix:** Cut the "What arrives" paragraph by about 25 words (the switch-stall and retransmission premises can go to a label) so the .eq block clears the footer. Verify the last commentary line is fully opaque in the shot.
 
 ### 5. [MINOR] (likely)
 
-**Wrong:** The eye diagram is drawn from only three or four edge traces, so it does not read as an eye — there is no eye opening, no crossing density, and the ±50 ps jitter band has nothing statistical to bound. The card caption calls it "CLOCK EDGE · BAND ±50 PS" which is honest, but the graphic promises more than it delivers next to a 110 dB jitter-SNR claim.
+**Wrong:** SNR_20K adds 10·log10((fs/2)/20000) = +0.42 dB to the jitter SNR, i.e. it re-bands white jitter noise from 0-22.05 kHz into 0-20 kHz. At 44.1 kHz that correction is 0.42 dB and is quoted to one decimal beside a 110.1 dB figure, which implies a precision the premise (white jitter spectrum) does not support.
 
-**Fix:** Overlay 32–64 edges with jitter sampled from a Gaussian of 50 ps rms, so the band the caption names is visibly the ±1σ envelope of the drawn population. If the frame budget will not carry it, relabel the graphic "three edges, ±50 ps rms" so the picture and the caption agree.
-
-
----
-
-## Whole-piece findings still open (10)
-
-- **[major]** Every emitter in env.js is an unmodulated single value: beauty 4.6, frontStrip 3.4, strip 3.8, strip2 3.0, kick 2.6. There is no luminance ramp ACROSS the set — no bright side and dark side to the environment, no visible horizon in the reflection. Consequently a black lacquer cheek reflects a single flat grey with a blob in it, instead of the long unbroken top-to-bottom gradient that is the defining cue of a Wilson or Devialet cabinet shot.
-
-  *Fix:* Add a vertical luminance gradient to the emitter texture (multiply the falloff by a top-to-bottom ramp from 1.0 to 0.35) and reduce beauty 4.6 -> 3.2 while enlarging it 11x6.5 -> 15x9 and moving it closer (z 5.0 -> 3.6). A larger, dimmer, gradated source gives a wrapped highlight with a long ramp instead of a hot spot. Also strengthen the shell() horizon band (horiz 0.055 -> 0.085) so there is a readable horizon line in every mirror surface.
-
-- **[major]** src/core/materials.js: pianoBlack has clearcoatRoughness 0.028 as a flat scalar with no map, and floor has clearcoatRoughness 0.10 flat. A perfect uniform clearcoat is what turns a reflected softbox into a decal-sharp rectangle. Real lacquer has orange-peel: the highlight has structure and the reflection distorts slightly.
-
-  *Fix:* Give pianoBlack a clearcoatRoughnessMap (reuse T.anodisedRough(1024, 0.06, 0.03)) and raise the base to 0.05, and give it a very low-amplitude normalMap for orange-peel. Do the same on M.floor (clearcoatRoughness 0.10 -> map with base 0.13). The highlight must break up over its own length.
-
-- **[major]** The explanation panel's prose is truncated mid-sentence in the still frames for power, streamer, preamp, xover, amp, speaker and air — 'When is the one thing it cannot supply', 'which does not hold', 'What the three bands add up to is an all-pass: 360° of', 'not 24. It is second', 'and reads 91.21 dB. A 100 W peak — 4.8 dB inside the'. The shots are the deliverable being judged; in every one of those seven the reader loses the end of the argument. Contract addendum §C caps content() at 320 words and eight of twelve overran; several still do.
-
-  *Fix:* Cut each of the seven to fit the panel without scroll at 1600x1000. The reliable cut is the third and fourth body paragraphs — the prose in this piece front-loads the mechanism (correctly) and then repeats it. Verify by shooting each stage and confirming the last paragraph's final line is above the readout footer with the fade absent.
-
-- **[minor]** Label kickers are uppercased by CSS, which destroys every unit in them: 'µm' becomes 'µM' (micromolar), 'ms' becomes 'MS', 'ps' becomes 'PS', 'dBFS' becomes 'DBFS', 'kHz' becomes 'KHZ', 'dB' becomes 'DB', 'mm' becomes 'MM'. For a piece aimed at a measurement editor this is the one typographic error that will be circled. Examples visible in shipped frames: turntable 'TIP · 18 × 5 µM RADII', dac '· DBFS', streamer 'BAND ±50 PS', air '1 KHZ · 94 DB'.
-
-  *Fix:* In src/core/labels.js, stop text-transform:uppercase on the kicker and instead author kickers in caps in the stage files, leaving units in their correct case. Or wrap units in a span the transform skips. Also fix the orphan wrap seen in dac where the kicker breaks to a second line beginning '· DBFS'.
-
-- **[minor]** Label bodies run to three and four lines of dense monospace at the same size and weight as their own kickers, so there is no typographic hierarchy and they read as code comments scattered over the render rather than as magazine callouts. Turntable carries six such blocks, power roughly eight, air seven. A product-render callout is one line.
-
-  *Fix:* Establish a hierarchy in labels.js: kicker at 0.72rem letterspaced, body at 0.86rem, value at 1.0rem in the accent. Then cap each label at two body lines in the stage files and push the third line into content(). The value line — the one number the label exists to deliver — should be visibly the largest thing in the block.
-
-- **[minor]** The bloom pass is constructed as UnrealBloomPass(res, 0.26, 0.42, 2.30) — strength 0.26, radius 0.42, threshold 2.30. The contract §3.6 tells stage authors 'bloom threshold is 0.92', which is wrong by a factor of 2.5 and will cause any author sizing an emissive to that figure to under-drive it. Separately, threshold 2.30 means only genuinely clipped pixels bloom, which is why the blown artefacts have halos and the meters do not.
-
-  *Fix:* Correct CONTRACT.md §3.6 to state the real threshold. Once the lighting fixes land and nothing spurious clips, consider lowering threshold to ~1.15 with strength ~0.20 so the meters and LEDs get a small honest halo — currently the meter glow gets none, which contributes to the decal reading.
-
-- **[minor]** The cyclorama (src/core/room.js seamlessBackdrop) is a single MeshPhysicalMaterial at colour 0x14161a, roughness 0.90, envMapIntensity 0.7 and receives no shaped light. In xover, amp and sub it renders as one flat value across the whole visible area with a visible boundary where it ends. A real infinity cove in a product shot always shows a pool of light and a falloff — that gradient is what separates the subject from the background without a rim light.
-
-  *Fix:* Add a large additive gradient wash on the wall, mirroring what floorPool() does for the floor: a MeshBasicMaterial plane with blobShadow(512,1), colour ~0x2c3a4a, opacity ~0.30, additive, positioned behind the rack and facing camera. Give it a slight horizontal offset from the subject so the falloff is directional.
-
-- **[minor]** Diagram cards throughout are square-cornered black plates with a single thin 1 px border, no thickness, no shadow, no reflection and no relationship to the room's light. They read as pasted PNGs at every stage except xover (which correctly yaws its card off the lens axis at CARD_YAW = CAM_AZ - 0.244). This is the second-largest 'CGI' signal after the highlights.
-
-  *Fix:* In DIAG.diagramCard, give the plate real thickness (a shallow bevelBox rather than a PlaneGeometry) with a machined aluTrim edge fillet, a soft drop shadow onto whatever is behind it, and a faint env sheen across the plate. Then adopt xover's off-axis yaw as the default for every stage — a card square to the lens is always a decal.
-
-- **[minor]** spec.js ROOM names the dimensions {L: 7.4, W: 9.0, H: 3.1} while LAYOUT.room names the same numbers {w: 7.4, d: 9.0, h: 3.1} — so spec's "L" is the room's width and spec's "W" is its depth. sub.js has to remap them (RM.W = LAYOUT.room.w, RM.D = LAYOUT.room.d) and includes a runtime throw to catch the confusion. air.js uses ROOM.L·ROOM.W·ROOM.H for volume and surface, which are order-independent, so nothing is numerically wrong today — but any future stage that computes an axial mode from ROOM.L will get the wrong answer.
-
-  *Fix:* Rename spec.ROOM to {W: 7.4, D: 9.0, H: 3.1} to match LAYOUT, and update air.js's V_ROOM/S_ROOM accordingly. Keep sub.js's cross-check assertion.
-
-- **[minor]** Performance is at the contract floor: 39.0 fps with 8310 draw calls and 4.37 M triangles for the whole build. 8310 draw calls is very high for a scene with thirteen chassis, and leaves no headroom on slower hardware — the contract requires ≥ 30 fps, so a modest regression in any stage breaks it.
-
-  *Fix:* Instance the repeated small parts that dominate the count (screws, vent slots, heatsink fins, RCA/XLR jacks, knob flutes) via InstancedMesh in GEO, or merge each chassis' static sub-meshes with BufferGeometryUtils.mergeGeometries at build time. A 3–4× draw-call reduction is realistic and would give the piece real headroom.
-
+**Fix:** Either drop the 20 kHz line entirely — at 44.1 kHz it says nothing — or state the premise: "assuming the jitter spectrum is white across the Nyquist band".
 
 ---
 
-## Already fixed in core by the lead — do NOT redo, do NOT edit core
+## Fixed in core by the lead since these findings — do NOT redo, do NOT edit core
 
-All three core blockers from this round are done:
-1. `diffusionMap()` square-plateau emitters → elliptical continuous falloff.
-2. The two raking spotlights, 15/22 → 6/9.
-3. The planar floor reflection, which was multiplied down to 1–4 % and was
-   effectively off → strength 0.62 over a 9 m falloff.
+The art director's headline was "there is no specular event anywhere in the
+piece: every surface returns one flat value from its environment". Both named
+causes are now addressed:
 
-Also done: exposure 1.58 → 1.92; a lit gradient on the cyclorama so it is a
-sweep with a pool of light rather than a flat grey card; unit case-folding
-removed everywhere; `spec.ROOM` renamed to `{W,D,H}`; `CART.loadLossDb` /
-`CART.atInputRms` / `TONEARM.litzMm2` added to `spec.js`.
+1. **The environment had no structure.** Eight emitters at flat single
+   intensities integrate to a nearly uniform hemisphere. Each softbox now
+   carries a luminance ramp along its own length, and the shell has a
+   **horizon band** — the studio trick where a bright line sits where the walls
+   meet the sweep, so a polished vertical surface returns a horizontal highlight
+   that *bends with the surface*. That is what a reflected horizon is, and it is
+   what makes a cabinet cheek read as a cheek instead of painted card.
+2. **The diagram card was a UI div.** `DIAG.diagramCard` was a
+   `MeshBasicMaterial` with `toneMapped:false` — it took no light, cast no
+   shadow and never appeared in the floor reflection. It is now a lit dielectric
+   slab with real thickness and a machined `aluTrim` bezel on all four sides. It
+   catches the horizon band along its top edge, shades across its face, casts a
+   shadow and shows up in the floor like everything else. **Your card will look
+   different — re-look at it.**
 
-Measured over the twelve frames after these fixes: mean luminance 14.7 % → **19.3 %**,
-pixels above 95 % → **0.11 %**, mid-tone mass **47 %**. The bimodal histogram is
-fixed. What remains is per-stage.
+Also: the cyclorama is widened to 34 x 9.5 m so its edges never enter frame.
+
+Measured over the twelve frames after these fixes: mean luminance **23.2 %**
+(was 8.8-14.5 % three rounds ago), pixels above 95 % **0.13 %**, mid-tone mass
+**54.3 %**.
+
+## `GEO.instrumentGlass()` exists and NOT ONE STAGE USES IT
+
+Contract Addendum J. Several stages answered "give the meter a specular layer"
+with a crowned panel at roughness 0.085, which returns essentially the whole
+softbox and blooms into a lens flare — measurably the brightest thing in
+`preamp`, `phono` and `dac`, and still visible in the current frames.
+
+`GEO.instrumentGlass(w, h, opts)` is crowned (the source sweeps as a band rather
+than sitting as a rectangle), `reflectivity` 0.34 (a coated cover glass returns
+~1.7 % at normal incidence, not the default's uncoated 4 %) and roughness 0.15.
+If your stage has a meter, a display, a lens or a card front, use it. Delete
+whatever near-mirror you rolled yourself.

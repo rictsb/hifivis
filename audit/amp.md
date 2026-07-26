@@ -1,109 +1,80 @@
-# Round-3 audit — stage `amp`
+# Round-4 audit — stage `amp`
 
-## Art-director score: **44/100** (+12 from 32)
+## Art-director score: **47/100** (+3 from 44)
 
-> Biggest gain in the set. The monoblock is now a credible object — handles, fins, bevels, feet. Undone by a meter with no glass over it, a featureless grey backdrop, a card floating with no shadow or reflection, and a second amp half-cropped at the bottom edge.
+> The monoblock is the most credible object in the set — handles, fins, spikes, a real floor reflection. Undone by a meter that is a flat blue decal with an unshadowed needle and illegible printing, a cyclorama with a visible diagonal seam and a painted grey pool, and heatsink fins with no edge highlight.
 
 
-## Findings for this stage (6)
+## Findings for this stage (5)
 
-### 1. [BLOCKER] (certain)
+### 1. [MAJOR] (certain)
 
-**Wrong:** src/stages/amp.js builds a proper 1536 px dial texture (amp.js:318-397) but there is no cover glass reflection over it in the render — the lit face is flush behind a thin chrome bezel with nothing in front of the glow. This is precisely the McIntosh cue the brief names: the surface reflection must sit IN FRONT of the meter, or the glow reads as a decal. Right now it reads as a decal.
+**Wrong:** The cyclorama behind the monoblock has a hard diagonal boundary running from mid-left to upper-right separating a light grey from a darker grey, plus a soft grey blob upper-right that reads as a lens smudge. src/core/room.js:59-60 paints the lighting gradient into the backdrop's ALBEDO via cycGradient() as a `map`. A painted gradient does not move with the camera, shows a fixed hotspot, and creates exactly this kind of visible seam where the texture steps. It is the difference between a lit cyclorama and a printed backdrop card.
 
-**Fix:** Add the convex cover-glass layer amp.js is missing — power.js already has one (power.js:487-489, 'A shallow convex panel... whose reflection sits in front of the glow'). Port it: a slightly convex mats().clearGlass panel ~1 mm proud of the dial, receiving the env reflection at full envMapIntensity, so a soft gradient band crosses the dial and partly veils the ticks.
+**Fix:** room.js:59 — set the backdrop's map to a near-flat 0.72 grey with only a very low-amplitude noise for tooth, and get the gradient from actual light: add a broad, dim area emitter in env.js aimed at the cove (or a second wide spot in room.js with a large shadow-map radius) so the pool falls off physically. If the painted map is retained for performance, at minimum smooth the step that produces the diagonal and reduce its contrast by half.
 
 ### 2. [MAJOR] (certain)
 
-**Wrong:** The dial's silkscreen is illegible at 3200 px: 'POWER OUTPUT' is set at 36 px and 'WATTS INTO 8 Ω' at 27 px on a 1536 px canvas, which lands at ~7 screen px in the final frame. Worse, the numerals are drawn with `g.rotate(a * 0.6)` — neither upright nor radial — so they read as drunk. Real meter silkscreen at this scale is either all-upright or all-radial, never a 0.6 blend.
+**Wrong:** The heatsink fin block is a flat black comb with no highlight on the fin tips. Real extruded fins each catch a bright line along the tip, and that repetition at scale is most of what says '300 W class-AB monoblock'. Currently the fin block reads as one dark textured plate. The top plate is likewise a plain black slab with three shallow grooves — no vents, no fasteners, no badge on a chassis that must dissipate 199 W.
 
-**Fix:** amp.js:378-388: raise the canvas to 2048 and the legend sizes to 56 px / 40 px, and change the numeral rotation from `a * 0.6` to `0` (upright — correct for a 100-degree sweep). Verify at 1:1 that 'WATTS INTO 8 Ω' is readable.
+**Fix:** amp.js — break the top edge of every fin with a small chamfer (GEO.bevelBox with a 0.4 mm bevel, or add a 0.5 mm radiused cap strip in mats().anodGrey along each fin tip) so a specular line runs along it. Add a vented top panel over the output devices using GEO.ventSlots, and four GEO.screw fasteners on the top plate corners.
 
 ### 3. [MAJOR] (certain)
 
-**Wrong:** The monoblock floats. It sits on the ampStand plate with no darkening at the foot contacts, and the black-glass stand top returns almost nothing of the amp above it. A 60 kg monoblock on a polished plate must have a hard dark core shadow at each foot and a strong, vertically-compressed second image of the chassis in the plate.
+**Wrong:** The power meter is the hero's face and it fails at 1:1: the dial is a flat, near-blown light-blue radial gradient, "POWER OUTPUT" and "WATTS INTO 8 Ω" are illegible low-contrast grey on light blue, there is no red overload sector, no tick hierarchy, and no glass. The needle at 233 W mean lands essentially on the last graduation (300), which reads as pinned rather than as −1 dB.
 
-**Fix:** After the reflector uStrength/uFalloff fix (which does not cover the stand plate — it is above the reflector plane), add per-object grounding: a small GEO.contactShadow under each foot at high opacity, and raise the stand plate's material to a glossier variant (mats().pianoBlack clone, clearcoatRoughness 0.04) with envMapIntensity 1.2 so it picks up the chassis in the env. Consider a second small planar reflector at the plate's y.
+**Fix:** Darken the dial face and raise the silkscreen contrast (dark legends on a pale face, or pale legends on a dark face — not pale on pale); add a red sector above 300 W; add GEO.instrumentGlass over it. Consider extending the log scale one division past 300 so the operating point is not on the end stop.
 
-### 4. [MAJOR] (certain)
+### 4. [MINOR] (certain)
 
-**Wrong:** The frame is a collage rather than a composition: the diagram card floats free at the left with no shadow, no reflection and no depth relationship to the amp; a second monoblock is sliced by the bottom frame edge at roughly x 560-700 preview; rack hardware slivers appear at the extreme right beyond x 1120 px (1600 basis), which contract §A forbids; and the whole background is one value of grey with a visible vertical boundary.
+**Wrong:** The three interconnect cables leaving the monoblock are uniformly thick, uniformly grey-tan, have no visible connector where they meet the chassis, and the left-hand one passes straight through the bottom edge of the diagram card. They read as garden hose. They are also the only tan objects in the frame besides the backdrop seam.
 
-**Fix:** Truck the camera so the second monoblock is either fully in or fully out; kill the right-edge slivers by narrowing az; dock the card to the amp (yaw it 12-16 degrees off the lens axis and let its lower edge sit just above the stand plate so it reads as being IN the room); and add the cyclorama gradient wash described in the xover finding.
+**Fix:** amp.js — halve the cable radius, switch to mats().rubber (which is near-black with a sheen) so they stop competing with the chassis, add a GEO.bindingPost or a moulded strain relief where each leaves the chassis, and reroute the left cable behind the card rather than through it.
 
-### 5. [MAJOR] (certain)
+### 5. [MINOR] (certain)
 
-**Wrong:** The device-heat plot carries two traces and names only one. The caption reads "DEVICE HEAT · W VS SWING M / peak 151 W at m = 0.62 / now 23 W per device", but a second cyan trace (output power, rising monotonically to 360 W) shares the axes with no key, and two dots (opPoint amber, opOut cyan) mark two different quantities. A reader cannot tell which curve is which, and the y axis (0/180/360 W) is unlabelled as to unit on the plot itself.
+**Wrong:** The equipment rack occupies x ≈ 1290-1400 of a 1400 px frame (x > 1120 at 1600×1000), running under and past the explanation panel, and an unidentified circular object is cut by the top-right frame edge. ADDENDUM §A forbids geometry past x = 1120.
 
-**Fix:** Add a two-line colour key to the caption — amber = device dissipation, cyan = power into 8 Ω — or drop the cyan trace and state P_AT_PEAK in the caption instead (it is already computed and quoted in content()).
-
-### 6. [MINOR] (likely)
-
-**Wrong:** Two safe-box breaches. The instrument plate's left edge sits at about x = 144 in 1600×1000 terms (below the 160 px limit, under the chapter rail), and a ~35 px strip of live 3D scene shows to the right of the explanation panel at the frame's right edge, where a blown-out driver and two "24" displays from the rack intrude at the top-right corner.
-
-**Fix:** Increase TRUCK_PX slightly (currently −132) or narrow the plate by ~30 px so its left edge clears x = 160; re-check that nothing crosses x = 1120 on the right after the shift.
-
+**Fix:** Increase TRUCK_PX magnitude at amp.js:135 (currently −132) until the rack clears x = 1120, or narrow the fov, and identify or remove the circular object at the top-right corner.
 
 ---
 
-## Whole-piece findings still open (10)
+## Fixed in core by the lead since these findings — do NOT redo, do NOT edit core
 
-- **[major]** Every emitter in env.js is an unmodulated single value: beauty 4.6, frontStrip 3.4, strip 3.8, strip2 3.0, kick 2.6. There is no luminance ramp ACROSS the set — no bright side and dark side to the environment, no visible horizon in the reflection. Consequently a black lacquer cheek reflects a single flat grey with a blob in it, instead of the long unbroken top-to-bottom gradient that is the defining cue of a Wilson or Devialet cabinet shot.
+The art director's headline was "there is no specular event anywhere in the
+piece: every surface returns one flat value from its environment". Both named
+causes are now addressed:
 
-  *Fix:* Add a vertical luminance gradient to the emitter texture (multiply the falloff by a top-to-bottom ramp from 1.0 to 0.35) and reduce beauty 4.6 -> 3.2 while enlarging it 11x6.5 -> 15x9 and moving it closer (z 5.0 -> 3.6). A larger, dimmer, gradated source gives a wrapped highlight with a long ramp instead of a hot spot. Also strengthen the shell() horizon band (horiz 0.055 -> 0.085) so there is a readable horizon line in every mirror surface.
+1. **The environment had no structure.** Eight emitters at flat single
+   intensities integrate to a nearly uniform hemisphere. Each softbox now
+   carries a luminance ramp along its own length, and the shell has a
+   **horizon band** — the studio trick where a bright line sits where the walls
+   meet the sweep, so a polished vertical surface returns a horizontal highlight
+   that *bends with the surface*. That is what a reflected horizon is, and it is
+   what makes a cabinet cheek read as a cheek instead of painted card.
+2. **The diagram card was a UI div.** `DIAG.diagramCard` was a
+   `MeshBasicMaterial` with `toneMapped:false` — it took no light, cast no
+   shadow and never appeared in the floor reflection. It is now a lit dielectric
+   slab with real thickness and a machined `aluTrim` bezel on all four sides. It
+   catches the horizon band along its top edge, shades across its face, casts a
+   shadow and shows up in the floor like everything else. **Your card will look
+   different — re-look at it.**
 
-- **[major]** src/core/materials.js: pianoBlack has clearcoatRoughness 0.028 as a flat scalar with no map, and floor has clearcoatRoughness 0.10 flat. A perfect uniform clearcoat is what turns a reflected softbox into a decal-sharp rectangle. Real lacquer has orange-peel: the highlight has structure and the reflection distorts slightly.
+Also: the cyclorama is widened to 34 x 9.5 m so its edges never enter frame.
 
-  *Fix:* Give pianoBlack a clearcoatRoughnessMap (reuse T.anodisedRough(1024, 0.06, 0.03)) and raise the base to 0.05, and give it a very low-amplitude normalMap for orange-peel. Do the same on M.floor (clearcoatRoughness 0.10 -> map with base 0.13). The highlight must break up over its own length.
+Measured over the twelve frames after these fixes: mean luminance **23.2 %**
+(was 8.8-14.5 % three rounds ago), pixels above 95 % **0.13 %**, mid-tone mass
+**54.3 %**.
 
-- **[major]** The explanation panel's prose is truncated mid-sentence in the still frames for power, streamer, preamp, xover, amp, speaker and air — 'When is the one thing it cannot supply', 'which does not hold', 'What the three bands add up to is an all-pass: 360° of', 'not 24. It is second', 'and reads 91.21 dB. A 100 W peak — 4.8 dB inside the'. The shots are the deliverable being judged; in every one of those seven the reader loses the end of the argument. Contract addendum §C caps content() at 320 words and eight of twelve overran; several still do.
+## `GEO.instrumentGlass()` exists and NOT ONE STAGE USES IT
 
-  *Fix:* Cut each of the seven to fit the panel without scroll at 1600x1000. The reliable cut is the third and fourth body paragraphs — the prose in this piece front-loads the mechanism (correctly) and then repeats it. Verify by shooting each stage and confirming the last paragraph's final line is above the readout footer with the fade absent.
+Contract Addendum J. Several stages answered "give the meter a specular layer"
+with a crowned panel at roughness 0.085, which returns essentially the whole
+softbox and blooms into a lens flare — measurably the brightest thing in
+`preamp`, `phono` and `dac`, and still visible in the current frames.
 
-- **[minor]** Label kickers are uppercased by CSS, which destroys every unit in them: 'µm' becomes 'µM' (micromolar), 'ms' becomes 'MS', 'ps' becomes 'PS', 'dBFS' becomes 'DBFS', 'kHz' becomes 'KHZ', 'dB' becomes 'DB', 'mm' becomes 'MM'. For a piece aimed at a measurement editor this is the one typographic error that will be circled. Examples visible in shipped frames: turntable 'TIP · 18 × 5 µM RADII', dac '· DBFS', streamer 'BAND ±50 PS', air '1 KHZ · 94 DB'.
-
-  *Fix:* In src/core/labels.js, stop text-transform:uppercase on the kicker and instead author kickers in caps in the stage files, leaving units in their correct case. Or wrap units in a span the transform skips. Also fix the orphan wrap seen in dac where the kicker breaks to a second line beginning '· DBFS'.
-
-- **[minor]** Label bodies run to three and four lines of dense monospace at the same size and weight as their own kickers, so there is no typographic hierarchy and they read as code comments scattered over the render rather than as magazine callouts. Turntable carries six such blocks, power roughly eight, air seven. A product-render callout is one line.
-
-  *Fix:* Establish a hierarchy in labels.js: kicker at 0.72rem letterspaced, body at 0.86rem, value at 1.0rem in the accent. Then cap each label at two body lines in the stage files and push the third line into content(). The value line — the one number the label exists to deliver — should be visibly the largest thing in the block.
-
-- **[minor]** The bloom pass is constructed as UnrealBloomPass(res, 0.26, 0.42, 2.30) — strength 0.26, radius 0.42, threshold 2.30. The contract §3.6 tells stage authors 'bloom threshold is 0.92', which is wrong by a factor of 2.5 and will cause any author sizing an emissive to that figure to under-drive it. Separately, threshold 2.30 means only genuinely clipped pixels bloom, which is why the blown artefacts have halos and the meters do not.
-
-  *Fix:* Correct CONTRACT.md §3.6 to state the real threshold. Once the lighting fixes land and nothing spurious clips, consider lowering threshold to ~1.15 with strength ~0.20 so the meters and LEDs get a small honest halo — currently the meter glow gets none, which contributes to the decal reading.
-
-- **[minor]** The cyclorama (src/core/room.js seamlessBackdrop) is a single MeshPhysicalMaterial at colour 0x14161a, roughness 0.90, envMapIntensity 0.7 and receives no shaped light. In xover, amp and sub it renders as one flat value across the whole visible area with a visible boundary where it ends. A real infinity cove in a product shot always shows a pool of light and a falloff — that gradient is what separates the subject from the background without a rim light.
-
-  *Fix:* Add a large additive gradient wash on the wall, mirroring what floorPool() does for the floor: a MeshBasicMaterial plane with blobShadow(512,1), colour ~0x2c3a4a, opacity ~0.30, additive, positioned behind the rack and facing camera. Give it a slight horizontal offset from the subject so the falloff is directional.
-
-- **[minor]** Diagram cards throughout are square-cornered black plates with a single thin 1 px border, no thickness, no shadow, no reflection and no relationship to the room's light. They read as pasted PNGs at every stage except xover (which correctly yaws its card off the lens axis at CARD_YAW = CAM_AZ - 0.244). This is the second-largest 'CGI' signal after the highlights.
-
-  *Fix:* In DIAG.diagramCard, give the plate real thickness (a shallow bevelBox rather than a PlaneGeometry) with a machined aluTrim edge fillet, a soft drop shadow onto whatever is behind it, and a faint env sheen across the plate. Then adopt xover's off-axis yaw as the default for every stage — a card square to the lens is always a decal.
-
-- **[minor]** spec.js ROOM names the dimensions {L: 7.4, W: 9.0, H: 3.1} while LAYOUT.room names the same numbers {w: 7.4, d: 9.0, h: 3.1} — so spec's "L" is the room's width and spec's "W" is its depth. sub.js has to remap them (RM.W = LAYOUT.room.w, RM.D = LAYOUT.room.d) and includes a runtime throw to catch the confusion. air.js uses ROOM.L·ROOM.W·ROOM.H for volume and surface, which are order-independent, so nothing is numerically wrong today — but any future stage that computes an axial mode from ROOM.L will get the wrong answer.
-
-  *Fix:* Rename spec.ROOM to {W: 7.4, D: 9.0, H: 3.1} to match LAYOUT, and update air.js's V_ROOM/S_ROOM accordingly. Keep sub.js's cross-check assertion.
-
-- **[minor]** Performance is at the contract floor: 39.0 fps with 8310 draw calls and 4.37 M triangles for the whole build. 8310 draw calls is very high for a scene with thirteen chassis, and leaves no headroom on slower hardware — the contract requires ≥ 30 fps, so a modest regression in any stage breaks it.
-
-  *Fix:* Instance the repeated small parts that dominate the count (screws, vent slots, heatsink fins, RCA/XLR jacks, knob flutes) via InstancedMesh in GEO, or merge each chassis' static sub-meshes with BufferGeometryUtils.mergeGeometries at build time. A 3–4× draw-call reduction is realistic and would give the piece real headroom.
-
-
----
-
-## Already fixed in core by the lead — do NOT redo, do NOT edit core
-
-All three core blockers from this round are done:
-1. `diffusionMap()` square-plateau emitters → elliptical continuous falloff.
-2. The two raking spotlights, 15/22 → 6/9.
-3. The planar floor reflection, which was multiplied down to 1–4 % and was
-   effectively off → strength 0.62 over a 9 m falloff.
-
-Also done: exposure 1.58 → 1.92; a lit gradient on the cyclorama so it is a
-sweep with a pool of light rather than a flat grey card; unit case-folding
-removed everywhere; `spec.ROOM` renamed to `{W,D,H}`; `CART.loadLossDb` /
-`CART.atInputRms` / `TONEARM.litzMm2` added to `spec.js`.
-
-Measured over the twelve frames after these fixes: mean luminance 14.7 % → **19.3 %**,
-pixels above 95 % → **0.11 %**, mid-tone mass **47 %**. The bimodal histogram is
-fixed. What remains is per-stage.
+`GEO.instrumentGlass(w, h, opts)` is crowned (the source sweeps as a band rather
+than sitting as a rectangle), `reflectivity` 0.34 (a coated cover glass returns
+~1.7 % at normal incidence, not the default's uncoated 4 %) and roughness 0.15.
+If your stage has a meter, a display, a lens or a card front, use it. Delete
+whatever near-mirror you rolled yourself.

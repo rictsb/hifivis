@@ -22,7 +22,7 @@ import * as THREE from 'three';
  */
 
 // --- soft-edged emitter texture ---------------------------------------------
-let _diffuse = null;
+const _diffuse = {};
 /**
  * Softbox diffusion.
  *
@@ -38,8 +38,9 @@ let _diffuse = null;
  * running from soft white, through several stops of grey, into the flag: the
  * ramp a product render lives in.
  */
-function diffusionMap(size = 256) {
-  if (_diffuse) return _diffuse;
+function diffusionMap(size = 256, ramp = 0.0) {
+  const key = 'd' + ramp.toFixed(2);
+  if (_diffuse[key]) return _diffuse[key];
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const g = c.getContext('2d');
@@ -56,7 +57,10 @@ function diffusionMap(size = 256) {
       // continuous ramp, no plateau: bright core, long tail, hard zero at rim
       const core = Math.pow(1 - r, 1.30);
       const rim = 1 - Math.pow(r, 6);          // guarantees 0 at the very edge
-      const val = Math.max(0, Math.min(1, core * rim));
+      // luminance ramp along the panel's own length: one end hotter than the
+      // other, so a surface sweeping past it sees a CHANGING value
+      const grad = 1 - ramp * ((x / (size - 1)) * 0.72 + (y / (size - 1)) * 0.28);
+      const val = Math.max(0, Math.min(1, core * rim * grad));
       const i = (y * size + x) * 4;
       d[i] = d[i + 1] = d[i + 2] = (val * 255) | 0;
       d[i + 3] = 255;
@@ -66,14 +70,14 @@ function diffusionMap(size = 256) {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.needsUpdate = true;
-  _diffuse = t;
+  _diffuse[key] = t;
   return t;
 }
 
 /** A softbox: a plane whose emission falls off toward its own edges. */
-function box(w, h, colour, intensity) {
+function box(w, h, colour, intensity, ramp = 0.45) {
   const m = new THREE.MeshBasicMaterial({
-    color: colour, side: THREE.DoubleSide, map: diffusionMap(),
+    color: colour, side: THREE.DoubleSide, map: diffusionMap(256, ramp),
   });
   m.color.multiplyScalar(intensity);
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
@@ -105,6 +109,18 @@ function shell() {
         vec3 ceil   = vec3(0.030,0.032,0.036);
         vec3 c = mix(floorC, horiz, smoothstep(-0.55, 0.02, y));
         c = mix(c, ceil, smoothstep(0.02, 0.75, y));
+
+        // HORIZON BAND. A studio always has a bright line where the walls meet
+        // the sweep, and every polished vertical surface returns it as a
+        // horizontal highlight that bends with the surface. Without it a curved
+        // cheek reflects one flat value and reads as painted card.
+        float band = exp(-pow((y - 0.055) / 0.085, 2.0));
+        c += vec3(0.30, 0.335, 0.395) * band;
+
+        // and a second, dimmer one low down for the underside of overhangs
+        float band2 = exp(-pow((y + 0.30) / 0.13, 2.0));
+        c += vec3(0.055, 0.062, 0.072) * band2;
+
         gl_FragColor = vec4(c,1.0);
       }`,
   });

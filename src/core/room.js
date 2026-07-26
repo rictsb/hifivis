@@ -30,7 +30,7 @@ function seamlessBackdrop() {
   // Cyclorama: the floor sweeps up into the back wall with no horizon line —
   // the classic infinity-cove used for product photography. Profile is defined
   // explicitly in (z, y); the surface is then extruded across X.
-  const W = 22, H = 7.0, R = COVE_R, wallZ = LAYOUT.room.wallZ;
+  const W = 34, H = 9.5, R = COVE_R, wallZ = LAYOUT.room.wallZ;
   const prof = [];
   prof.push([wallZ + R + 5.0, 0]);                 // flat floor coming forward
   const N = 26;
