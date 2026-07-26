@@ -221,3 +221,71 @@ core files.
 Return a short structured report: what you built, the physics claims you make
 and where each number comes from, anything you could not do, and the fps/draw
 calls from your last run.
+
+---
+
+# ADDENDUM — revision 2 (read this; it supersedes conflicting text above)
+
+## A. Compose for the SAFE BOX, not the canvas
+
+The chapter rail owns the left ~145 px and the explanation panel the right
+~460 px. At 1600×1000 the clear stage is **x 160…1120, y 90…930 — 960 × 840**,
+centred at 0.40 of the width. The Director already applies a principal-point
+offset (a shift lens) so the camera axis lands at that centre. What your stage
+must still get right is the **size** of the subject inside that box.
+
+Use the helper:
+
+```js
+import { frameShot } from '../core/layout.js';
+shot: frameShot([x, y, z], radius, { fill: 0.52, az: 0.42, el: 0.20, fov: 32 })
+```
+
+`fill` is the fraction of the safe-box height the subject should occupy.
+Distance is derived as `radius / (fill · 0.84 · tan(fov/2))`.
+
+* **The hero must be the hero.** `fill` 0.50–0.62 when the hardware is the
+  subject; 0.34–0.42 when a diagram sits beside it.
+* **Point at your own object.** Several stages currently target the rack while
+  their subject is at the frame edge. `target` is your component's centre.
+* **Long lens on small things.** fov 28–33 for a 92 mm chassis, 34–38 for a
+  1.25 m loudspeaker, 40–45 only for the whole room.
+* Nothing may cross x < 160 px or x > 1120 px at 1600×1000. Check the render.
+
+## B. Halve the diagrams
+
+Density is roughly double what the format carries. **Maximum two diagram cards
+and three plot regions visible at once.** If you have more to say, say it in
+`content()` — the panel is for prose, the scene is for the one idea a picture
+tells better. Cards must not overlap the hero's silhouette; put them beside it.
+
+## C. Prose and readouts
+
+* `content()` is **320 words maximum**, excluding equations. Eight of twelve
+  stages currently overrun; cut.
+* Put the `.key` or `.myth` callout **early**, not at the end.
+* `.eq` lines: **46 characters maximum** or they clip.
+* `readouts()` are now pinned in a footer and always visible — they are the
+  instrument cluster. 4 or 6 entries, never 5 (two-column grid).
+
+## D. New core facilities
+
+* `frameShot(centre, radius, opts)` — see above.
+* The floor carries a **real planar reflection**. Anything you place near the
+  floor is mirrored: use it, and make sure nothing floats without a reflection
+  or a `GEO.contactShadow` beneath it.
+* Labels **depth-test**, avoid the UI, and avoid each other; they are dropped
+  rather than overprinted. Options now include `priority` (higher survives a
+  collision) and `occlude:false` (for labels anchored to a diagram card).
+  Kickers are ASCII-folded, so **µ, Ω, π and ° are safe to use**.
+* `cls:'plain'` on a label removes its scrim, for labels over empty space.
+* `DSP.butterHP` phase and `DSP.deltaSigmaStep` were **both wrong** and are now
+  fixed and numerically verified. If you worked around either, use the real
+  function now. `DSP.ntfInfinityNorm(n)` and `DSP.DS_MAX_ORDER` are exported.
+
+## E. Read your audit before you touch anything
+
+`audit/<your-stage-id>.md` holds every finding raised against your stage by an
+art director and a measurement editor, ranked, with the fix each wants. Work
+through them. Where you disagree with a finding, say so in your report with the
+reasoning — do not silently ignore it.

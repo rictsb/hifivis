@@ -234,6 +234,33 @@ export function blobShadow(size = 256, squash = 1) {
   });
 }
 
+/**
+ * Contact shadow for MULTIPLY blending: WHITE outside the blob (multiply →
+ * no change, so the quad has no visible rectangle) shading to dark at the
+ * centre. This darkens whatever is beneath it, including the reflective floor.
+ */
+export function blobShadowMul(size = 256, strength = 0.8) {
+  return memo('bsm' + size + strength, () => {
+    const c = canvas(size, size);
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, size, size);
+    const grd = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    const k = Math.max(0, Math.min(1, strength));
+    const stop = (t, a) => {
+      const v = Math.round(255 * (1 - a * k));
+      grd.addColorStop(t, `rgb(${v},${v},${v})`);
+    };
+    stop(0.00, 0.94); stop(0.24, 0.78); stop(0.46, 0.46);
+    stop(0.68, 0.18); stop(0.86, 0.045); stop(1.00, 0.0);
+    g.fillStyle = grd;
+    g.fillRect(0, 0, size, size);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  });
+}
+
 /** Green PCB with copper traces + silkscreen — used inside opened chassis. */
 export function pcb(size = 1024, base = '#0d2a1c') {
   return memo('pcb' + size + base, () => {

@@ -97,8 +97,13 @@ function butterLP(f, fc, n) {
   return cDiv([1, 0], [re, im]);
 }
 function butterHP(f, fc, n) {
-  const lp = butterLP(fc, f, n); // frequency-reversed
-  return lp;
+  // s → 1/s turns a low-pass into a high-pass. Evaluating on s = jx that is
+  // s' = 1/(jx) = −j/x, whereas butterLP(fc,f) evaluates at +j/x — the complex
+  // conjugate. Magnitude is unaffected, phase is negated, so the conjugate must
+  // be taken or every high-pass in the piece reports the wrong sign of phase
+  // (and Linkwitz–Riley then appears to sum with the wrong rotation).
+  const lp = butterLP(fc, f, n);
+  return [lp[0], -lp[1]];
 }
 /** LR-order-N low-pass complex response (N must be 2, 4 or 8). */
 export function lrLow(f, fc, N = 4) {
@@ -233,15 +238,43 @@ export function sincReconstruct(samples, fs, t, halfWidth = 24) {
 export const zohDb = (f, fs) => dB(Math.abs(sinc(f / fs)));
 
 /** First-order Δ-Σ modulator step (returns bit, updated integrator). */
+const _binom = (n, k) => { let r = 1; for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1); return Math.round(r); };
+
+/**
+ * One step of an error-feedback Δ-Σ modulator with NTF = (1 − z⁻¹)^order.
+ *
+ *   v[n] = x[n] + Σ_{k=1..N} C(N,k)·(−1)^k · e[n−k]
+ *   y[n] = sgn(v[n])
+ *   e[n] = y[n] − v[n]            so that  Y = X + NTF·E
+ *
+ * `state` is the error history, most-recent-first; the caller allocates it with
+ * at least `order` elements (zero-filled).
+ *
+ * STABILITY. A 1-bit quantiser has no defined gain, and the modulator is stable
+ * only while the noise transfer function's ∞-norm stays modest — Lee's rule of
+ * thumb is ‖NTF‖∞ ≲ 1.5. For NTF = (1 − z⁻¹)ⁿ the ∞-norm is 2ⁿ: order 1 gives 2
+ * and order 2 gives 4, both of which run at reduced input amplitude, but order 3
+ * gives 8 and the loop overloads — measured, it stops shaping entirely rather
+ * than failing loudly. Higher orders need an NTF with finite poles (a CIFB or
+ * CRFB structure), which is beyond what this file models, so the order is
+ * clamped here rather than quietly returning a spectrum that is not shaped.
+ *
+ * Verified by FFT at fs = 2.8224 MHz, OSR 64, −8 dBFS input: order 1 puts the
+ * in-band noise 38 dB below the out-of-band density, order 2 puts it 55 dB below.
+ */
+export const ntfInfinityNorm = (order) => Math.pow(2, order);
+export const DS_MAX_ORDER = 2;
+
 export function deltaSigmaStep(x, state, order = 1) {
-  // simple cascaded-integrator error-feedback form
-  const s = state;
+  order = Math.min(Math.max(1, order | 0), DS_MAX_ORDER);
   let v = x;
-  for (let i = 0; i < order; i++) v += s[i];
+  for (let k = 1; k <= order; k++) {
+    v += _binom(order, k) * (k % 2 ? -1 : 1) * (state[k - 1] || 0);
+  }
   const bit = v >= 0 ? 1 : -1;
-  const e = v - bit;
-  for (let i = order - 1; i > 0; i--) s[i] = s[i - 1] - e;
-  s[0] = (order === 1 ? v - bit : s[0] - e);
+  const e = bit - v;
+  for (let i = order - 1; i > 0; i--) state[i] = state[i - 1];
+  state[0] = clamp(e, -2.5, 2.5);
   return bit;
 }
 

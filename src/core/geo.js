@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { mats } from './materials.js';
-import { blobShadow } from './tex.js';
+import { blobShadowMul } from './tex.js';
 
 /**
  * Geometry helpers.
@@ -238,9 +238,16 @@ export function perfGrid(w, h, pitch = 0.004, r = 0.0013, mat = mats().plastic) 
 
 /** A soft fake contact shadow quad to sit under an object on the floor. */
 export function contactShadow(w, d, opacity = 0.75, y = 0.0012) {
+  // Multiply blending, with a texture that is WHITE outside the blob: white
+  // multiplies to no change, so the quad has no visible rectangle, and the dark
+  // centre darkens whatever is beneath — including the reflective floor, which
+  // NormalBlending black could not do.
   const m = new THREE.Mesh(
     new THREE.PlaneGeometry(w, d),
-    new THREE.MeshBasicMaterial({ map: blobShadow(256), transparent: true, opacity, depthWrite: false, blending: THREE.NormalBlending, color: 0x000000 }),
+    new THREE.MeshBasicMaterial({
+      map: blobShadowMul(256, opacity), transparent: true, premultipliedAlpha: true,
+      depthWrite: false, blending: THREE.MultiplyBlending, toneMapped: false,
+    }),
   );
   m.rotation.x = -Math.PI / 2;
   m.position.y = y;

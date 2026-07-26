@@ -19,7 +19,7 @@ const GradeShader = {
     tDiffuse: { value: null },
     uTime: { value: 0 },
     uGrain: { value: 0.030 },
-    uCA: { value: 0.0011 },
+    uCA: { value: 0.00032 },
     uVig: { value: 0.22 },
     uLift: { value: 0.0 },
   },
@@ -72,7 +72,7 @@ export function createRenderer(canvas) {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.30;
+  renderer.toneMappingExposure = 1.58;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.info.autoReset = false;
@@ -93,7 +93,7 @@ export function createComposer(renderer, scene, camera) {
 
   // Bloom: high threshold, small radius. Only the meter glow and LEDs should
   // ever bloom — a scene-wide haze is the classic "WebGL demo" tell.
-  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.42, 0.36, 0.92);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.30, 0.40, 1.06);
   composer.addPass(bloom);
 
   const output = new OutputPass();

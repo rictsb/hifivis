@@ -38,7 +38,9 @@ export function lineMaterial(color = PAL.cy, width = 2.0, opts = {}) {
     opacity: opts.opacity ?? 1,
     depthTest: opts.depthTest !== false,
     depthWrite: false,
-    alphaToCoverage: true,
+    // alphaToCoverage makes LineMaterial's shader overwrite `opacity` with a
+    // coverage term, so every stage fade-out silently stops working.
+    alphaToCoverage: false,
     toneMapped: opts.toneMapped ?? false,
   });
   m.resolution.copy(_res);
@@ -278,15 +280,17 @@ export class Graph extends THREE.Group {
  * hairline border. Keeps traces legible over any part of the scene.
  */
 export function diagramCard(w, h, opts = {}) {
-  const { opacity = 0.62, border = true, pad = 0.02 } = opts;
+  const { opacity = 0.90, border = true, pad = 0.02 } = opts;
   const g = new THREE.Group();
   const geo = new THREE.PlaneGeometry(w + pad * 2, h + pad * 2);
+  // depthWrite must be ON: with it off the card is a ghost and the hardware
+  // behind it prints straight through, which reads as a bug, not a diagram.
   const mat = new THREE.MeshBasicMaterial({
-    color: 0x080a0d, transparent: true, opacity, depthWrite: false, toneMapped: false,
+    color: 0x080a0d, transparent: true, opacity, depthWrite: true, toneMapped: false,
   });
   const p = new THREE.Mesh(geo, mat);
   p.position.set(w / 2, h / 2, -0.001);
-  p.renderOrder = 4;
+  p.renderOrder = 3;
   g.add(p);
   if (border) {
     const b = new Trace(5, 0x39414c, 1.0, { opacity: 0.85, renderOrder: 5 });
@@ -394,7 +398,11 @@ export function dimension(a, b, { color = PAL.ink3, width = 1.2, head = 0.006 } 
 export function fadeTree(root, o) {
   root.traverse((c) => {
     if (c.userData && typeof c.userData.setOpacity === 'function') { c.userData.setOpacity(o); return; }
-    if (c.setOpacity && (c.isLine2 || c instanceof Swarm)) { c.setOpacity(o); return; }
+    if (c.setOpacity && (c.isLine2 || c instanceof Swarm)) {
+      c.setOpacity(o);
+      c.visible = o > 0.002;      // additive particles at opacity 0 still leak
+      return;
+    }
     if (c.isMesh || c.isSprite || c.isLine || c.isPoints) {
       const m = c.material;
       if (!m) return;

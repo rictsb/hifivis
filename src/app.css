@@ -48,12 +48,25 @@ body{
 .wlab{
   position:absolute;transform:translate(-50%,-50%);
   font-size:10.5px;letter-spacing:.055em;line-height:1.34;
-  color:var(--ink-2);white-space:nowrap;
-  text-shadow:0 1px 3px rgba(0,0,0,.85),0 0 12px rgba(0,0,0,.6);
+  color:var(--ink-2);white-space:nowrap;max-width:36ch;
+  padding:4px 8px 5px;border-radius:4px;
+  background:rgba(7,8,11,.60);
+  -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
+  box-shadow:0 0 0 1px rgba(255,255,255,.055),0 2px 10px rgba(0,0,0,.45);
+  text-shadow:0 1px 2px rgba(0,0,0,.9);
   opacity:0;transition:opacity .35s var(--ease);will-change:transform,opacity;
 }
+/* opt out of the scrim where the label sits over dead space already */
+.wlab.plain{background:none;box-shadow:none;padding:0;
+  -webkit-backdrop-filter:none;backdrop-filter:none;
+  text-shadow:0 1px 3px rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.8)}
 .wlab.on{opacity:1}
-.wlab .k{display:block;font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-4);margin-bottom:1px}
+/* NB: no text-transform. Labels are ASCII-folded in JS so µ, Ω and π survive;
+   CSS uppercase turns "µV" into "ΜV" (Greek capital Mu). */
+.wlab .k{display:block;font-family:JBMono,monospace;font-size:9px;letter-spacing:.13em;
+  color:rgba(238,240,244,.54);margin-bottom:2px}
+.wlab .t{display:block;font-size:10.5px;line-height:1.35;color:var(--ink-2);
+  white-space:normal;max-width:30ch}
 .wlab .v{font-family:JBMono,monospace;font-size:11.5px;color:var(--ink);font-feature-settings:"tnum" 1}
 .wlab.acc .v{color:var(--cy)}
 .wlab.am .v{color:var(--am)}
@@ -93,6 +106,7 @@ body.ready #chapters{opacity:1}
 /* ---------- explanation panel ---------- */
 #panel{
   position:absolute;right:24px;top:24px;bottom:24px;width:min(31.5vw,436px);z-index:6;
+  display:flex;flex-direction:column;
   background:linear-gradient(180deg,rgba(20,22,26,.80),rgba(12,13,16,.86));
   -webkit-backdrop-filter:blur(22px) saturate(135%);backdrop-filter:blur(22px) saturate(135%);
   border:1px solid var(--hair);border-radius:9px;box-shadow:var(--shadow);
@@ -100,8 +114,11 @@ body.ready #chapters{opacity:1}
   transition:opacity .8s var(--ease) .35s,transform .8s var(--ease) .35s;
 }
 body.ready #panel{opacity:1;transform:none}
-#panel-scroll{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;
-  padding:24px 24px 26px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+#panel-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  padding:16px 24px 18px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+/* fade the foot of the prose when there is more to read */
+#panel-scroll.more{-webkit-mask-image:linear-gradient(180deg,#000 calc(100% - 34px),transparent 100%);
+  mask-image:linear-gradient(180deg,#000 calc(100% - 34px),transparent 100%)}
 #panel-scroll::-webkit-scrollbar{width:7px}
 #panel-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:4px;
   border:2px solid transparent;background-clip:content-box}
@@ -115,7 +132,7 @@ body.ready #panel{opacity:1;transform:none}
   text-wrap:balance}
 #stage-standfirst{margin:9px 0 0;font-size:14.5px;line-height:1.5;color:var(--ink-2);
   letter-spacing:-.004em;text-wrap:pretty}
-#panel-head{padding-bottom:18px;border-bottom:1px solid var(--hair);margin-bottom:18px}
+#panel-head{flex:none;padding:24px 24px 16px;border-bottom:1px solid var(--hair)}
 
 /* prose */
 #panel-body{max-width:var(--measure)}
@@ -152,15 +169,20 @@ body.ready #panel{opacity:1;transform:none}
 /* equations */
 .eq{font-family:JBMono,monospace;font-size:12.5px;line-height:1.75;color:var(--ink);
   background:rgba(255,255,255,.032);border:1px solid var(--hair);border-radius:6px;
-  padding:11px 13px;margin:14px 0;overflow-x:auto;letter-spacing:-.012em;white-space:pre}
+  padding:10px 12px;margin:14px 0;overflow-x:auto;letter-spacing:-.02em;white-space:pre;
+  font-size:11.5px;line-height:1.68}
 .eq .c{color:var(--ink-3)}
 .eq .hl{color:var(--cy)}
 
 /* readouts */
-#panel-readouts{margin-top:20px;padding-top:16px;border-top:1px solid var(--hair);
-  display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);border-radius:6px;overflow:hidden}
-#panel-readouts:empty{display:none;border:0;padding:0;margin:0}
-.ro{background:#0e1013;padding:9px 11px 10px;min-height:52px}
+/* Pinned footer: the live instrument cluster must never be below the fold —
+   it is what makes the piece feel measured rather than illustrated. */
+#panel-readouts{flex:none;padding:13px 20px 16px;border-top:1px solid var(--hair);
+  display:grid;grid-template-columns:1fr 1fr;gap:6px;
+  background:linear-gradient(180deg,rgba(255,255,255,.014),rgba(0,0,0,.18))}
+#panel-readouts:empty{display:none;padding:0;border:0}
+.ro{background:rgba(255,255,255,.030);border:1px solid var(--hair);border-radius:5px;
+  padding:8px 10px 9px;min-height:50px}
 .ro .k{display:block;font-size:9px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--ink-4);margin-bottom:3px;font-family:JBMono,monospace}
 .ro .v{font-family:JBMono,monospace;font-size:15px;font-weight:500;color:var(--ink);
@@ -168,7 +190,9 @@ body.ready #panel{opacity:1;transform:none}
 .ro .u{font-size:10px;color:var(--ink-3);font-weight:400;letter-spacing:0}
 .ro.acc .v{color:var(--cy)}
 .ro.am .v{color:var(--am)}
-.ro .bar{margin-top:5px;height:2px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden}
+/* a <span> with a height needs display:block or the bar has no box at all */
+.ro .bar{display:block;margin-top:5px;height:2px;background:rgba(255,255,255,.07);
+  border-radius:2px;overflow:hidden}
 .ro .bar i{display:block;height:100%;background:var(--cy);border-radius:2px;
   transform-origin:left;transition:transform .12s linear}
 

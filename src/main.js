@@ -3,6 +3,7 @@ import { createRenderer, createComposer, resize } from './core/renderer.js';
 import { makeEnvironment } from './core/env.js';
 import { buildMaterials, applyEnv, mats, PAL } from './core/materials.js';
 import { buildRoom, floorPool } from './core/room.js';
+import { addGlossFloor } from './core/reflector.js';
 import { LAYOUT, SHOTS } from './core/layout.js';
 import { Director } from './core/director.js';
 import { LabelLayer } from './core/labels.js';
@@ -36,6 +37,7 @@ function boot() {
 
   buildRoom(scene);
   floorPool(scene);
+  addGlossFloor(scene, renderer);
 
   const { composer, bloom, grade, smaa } = createComposer(renderer, scene, camera);
   const director = new Director(camera, canvas);
@@ -57,7 +59,7 @@ function boot() {
     const st = Object.create(def);
     st.reveal = 0;
     st._t = 0;
-    st.labels = new LabelLayer(labelHost, camera);
+    st.labels = new LabelLayer(labelHost, camera, scene);
     st.ctx = Object.assign(Object.create(app), { stage: st, labels: st.labels });
     let built = {};
     try {

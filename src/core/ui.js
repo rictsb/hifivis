@@ -6,6 +6,14 @@
 
 const $ = (s) => document.querySelector(s);
 
+/**
+ * ASCII-only uppercase. `String.toUpperCase()` maps µ (U+00B5) to Greek capital
+ * Mu and ß to SS, so a CSS `text-transform:uppercase` silently corrupts every SI
+ * prefix in a label — "µV" becomes "ΜV". Units live in these strings, so the
+ * transform is done here and only on a–z.
+ */
+export const up = (s) => String(s).replace(/[a-z]/g, (c) => c.toUpperCase());
+
 function fmtRatio(scale) {
   if (scale >= 0.999 && scale <= 1.001) return 'real time';
   if (scale > 1) return `${scale < 10 ? scale.toFixed(1) : Math.round(scale)}× faster`;
@@ -30,6 +38,7 @@ export class UI {
     this.titleEl = $('#stage-title');
     this.sfEl = $('#stage-standfirst');
     this.scroll = $('#panel-scroll');
+    this._rateEl = $('#rate');
     this._roCells = new Map();
     this._buildRail();
     this._bind();
@@ -75,6 +84,8 @@ export class UI {
     // time-scale scrubber
     const track = $('#scrub-track'), fill = $('#scrub-fill'), knob = $('#scrub-knob');
     this._scrub = { track, fill, knob, val: $('#scrub-val') };
+    this.scroll.addEventListener('scroll', () => this._syncScrollHint(), { passive: true });
+    window.addEventListener('resize', () => this._syncScrollHint(), { passive: true });
     const set = (clientX) => {
       const r = track.getBoundingClientRect();
       const t = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
@@ -86,6 +97,13 @@ export class UI {
     track.addEventListener('pointermove', (e) => { if (dragging) set(e.clientX); });
     track.addEventListener('pointerup', (e) => { dragging = false; try { track.releasePointerCapture(e.pointerId); } catch (_) {} });
     this.setScrubPos(0.73);
+  }
+
+  /** Show a fade at the foot of the prose when there is more below. */
+  _syncScrollHint() {
+    const el = this.scroll;
+    const more = el.scrollHeight - el.clientHeight - el.scrollTop > 6;
+    el.classList.toggle('more', more);
   }
 
   setScrubPos(t) {
@@ -101,8 +119,8 @@ export class UI {
   /** Cross-fade the panel to a new stage's copy. */
   showStage(stage, i) {
     const el = this.scroll;
-    el.style.transition = 'opacity .20s ease';
-    el.style.opacity = '0';
+    const fade = [this.panelHead, el, this.ro];
+    for (const e of fade) { e.style.transition = 'opacity .20s ease'; e.style.opacity = '0'; }
     setTimeout(() => {
       this.idxEl.textContent = String(i).padStart(2, '0');
       this.kickEl.textContent = stage.kicker || '';
@@ -111,7 +129,8 @@ export class UI {
       this.body.innerHTML = typeof stage.content === 'function' ? stage.content() : (stage.content || '');
       this._buildReadouts(stage);
       el.scrollTop = 0;
-      el.style.opacity = '1';
+      for (const e of fade) e.style.opacity = '1';
+      this._syncScrollHint();
     }, 200);
   }
 
@@ -123,7 +142,7 @@ export class UI {
     for (const r of list) {
       const d = document.createElement('div');
       d.className = 'ro ' + (r.cls || '');
-      d.innerHTML = `<span class="k">${r.k}</span><span class="v"><span class="vv">${r.v ?? '—'}</span>${r.u ? `<span class="u">${r.u}</span>` : ''}</span>` +
+      d.innerHTML = `<span class="k">${up(r.k)}</span><span class="v"><span class="vv">${r.v ?? '—'}</span>${r.u ? `<span class="u">${r.u}</span>` : ''}</span>` +
         (r.bar !== undefined ? '<span class="bar"><i></i></span>' : '');
       this.ro.appendChild(d);
       this._roCells.set(r.k, { v: d.querySelector('.vv'), bar: d.querySelector('.bar i') });
@@ -146,6 +165,11 @@ export class UI {
 
   setRateLabel(effective) {
     this._scrub.val.textContent = fmtRatio(effective);
+    // the transport chip shows the user's own multiplier, not the stage's scale
+    const r = this.app.rate;
+    const txt = r >= 1 ? `${r < 10 ? r.toFixed(1).replace(/\.0$/, '') : Math.round(r)}×`
+      : `${r.toFixed(r < 0.1 ? 2 : 2)}×`;
+    if (this._rateEl.textContent !== txt) this._rateEl.textContent = txt;
   }
 
   setPaused(p) {

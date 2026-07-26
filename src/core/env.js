@@ -4,33 +4,79 @@ import * as THREE from 'three';
  * Procedural studio environment.
  *
  * This is the single biggest lever on whether the render reads as "product
- * photography" or "WebGL demo". Real high-end audio photography is lit with a
- * handful of very large, very soft sources plus one long narrow strip that
- * rakes across brushed metal to produce the signature elongated highlight.
- * We build that as an emissive-geometry scene and PMREM it, so every material
- * gets physically-consistent reflections instead of a generic gradient.
+ * photography" or "WebGL demo".
+ *
+ * Two rules, both learned the hard way:
+ *
+ * 1. THERE MUST BE LIGHT IN FRONT OF THE SUBJECT. A rig of top, back and side
+ *    softboxes leaves every camera-facing surface reflecting a black hemisphere,
+ *    so brushed aluminium renders at ~10 % grey and reads as dark plastic. Real
+ *    product sets are built around a large frontal source just off the lens axis
+ *    — that is what fills a fascia and gives lacquer its depth.
+ *
+ * 2. EVERY EMITTER NEEDS SOFT EDGES. A flat untextured plane reflects as a
+ *    hard-edged block of one value — literal white rectangles pasted on dust
+ *    caps and driver domes. Real softboxes have a diffusion panel that is
+ *    brightest at the centre and rolls off at the frame, and the reflection of
+ *    that roll-off is what makes a highlight look photographed.
  */
 
-function lightBox(w, h, d, colour, intensity) {
-  const g = new THREE.BoxGeometry(w, h, d);
-  const m = new THREE.MeshBasicMaterial({ color: colour, side: THREE.BackSide });
-  m.color.multiplyScalar(intensity);
-  return new THREE.Mesh(g, m);
+// --- soft-edged emitter texture ---------------------------------------------
+let _diffuse = null;
+/** Softbox diffusion: hot centre, gentle falloff, fast ramp at the very edge. */
+function diffusionMap(size = 128, feather = 0.30, centre = 1.0, edge = 0.55) {
+  if (_diffuse) return _diffuse;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const img = g.createImageData(size, size);
+  const d = img.data;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // distance from the edge, normalised 0 (edge) .. 1 (centre)
+      const u = Math.min(x, size - 1 - x) / (size * 0.5);
+      const v = Math.min(y, size - 1 - y) / (size * 0.5);
+      const e = Math.min(u, v);
+      const ramp = Math.min(1, e / feather);
+      const soft = ramp * ramp * (3 - 2 * ramp);          // smoothstep to zero at the rim
+      const body = edge + (centre - edge) * Math.min(1, e * 1.35); // gentle centre hotspot
+      const val = Math.max(0, Math.min(1, soft * body));
+      const i = (y * size + x) * 4;
+      d[i] = d[i + 1] = d[i + 2] = (val * 255) | 0;
+      d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.needsUpdate = true;
+  _diffuse = t;
+  return t;
 }
 
-function panel(w, h, colour, intensity) {
-  const m = new THREE.MeshBasicMaterial({ color: colour, side: THREE.DoubleSide });
+/** A softbox: a plane whose emission falls off toward its own edges. */
+function box(w, h, colour, intensity) {
+  const m = new THREE.MeshBasicMaterial({
+    color: colour, side: THREE.DoubleSide, map: diffusionMap(),
+  });
   m.color.multiplyScalar(intensity);
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
 }
 
-/** Vertical-gradient shell: charcoal ceiling, faint horizon lift, near-black floor. */
+/** A flag: pure black, no texture. Subtracts light, shapes falloff. */
+function flag(w, h) {
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide }),
+  );
+}
+
+/** Vertical-gradient shell: dim neutral ceiling, faint horizon, near-black floor. */
 function shell() {
-  const geo = new THREE.SphereGeometry(28, 48, 32);
+  const geo = new THREE.SphereGeometry(30, 48, 32);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
-    uniforms: {},
     vertexShader: /* glsl */`
       varying vec3 vP;
       void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -38,10 +84,9 @@ function shell() {
       varying vec3 vP;
       void main(){
         float y = normalize(vP).y;
-        // near-black floor, subtle cool lift at the horizon, dim neutral ceiling
-        vec3 floorC = vec3(0.006,0.007,0.009);
-        vec3 horiz  = vec3(0.040,0.046,0.058);
-        vec3 ceil   = vec3(0.018,0.019,0.022);
+        vec3 floorC = vec3(0.010,0.011,0.014);
+        vec3 horiz  = vec3(0.055,0.062,0.076);
+        vec3 ceil   = vec3(0.030,0.032,0.036);
         vec3 c = mix(floorC, horiz, smoothstep(-0.55, 0.02, y));
         c = mix(c, ceil, smoothstep(0.02, 0.75, y));
         gl_FragColor = vec4(c,1.0);
@@ -54,65 +99,87 @@ export function buildEnvScene() {
   const s = new THREE.Scene();
   s.add(shell());
 
-  // --- KEY: large soft box, high and to camera-left, slightly warm-neutral.
-  const key = panel(9, 6.0, 0xfff3e2, 5.4);
-  key.position.set(-6.2, 6.4, 3.4);
-  key.lookAt(0, 0.9, 0);
-  s.add(key);
+  // ======================= FRONT HEMISPHERE ================================
+  // Everything the camera sees reflects this half. Without it the whole scene
+  // is dark plastic.
 
-  // --- STRIP: long, narrow, high, running left→right behind the system. This is
-  // the one that draws the elongated streak down a brushed-aluminium fascia.
-  const strip = panel(16, 0.62, 0xeaf4ff, 13.0);
-  strip.position.set(0.6, 5.0, -4.6);
+  // BEAUTY: the big frontal source, just above and slightly camera-left of the
+  // lens axis. This is the light that actually fills a brushed fascia.
+  const beauty = box(11, 6.5, 0xfff4e6, 4.6);
+  beauty.position.set(-1.6, 4.1, 5.0);
+  beauty.lookAt(0, 0.85, -2.4);
+  s.add(beauty);
+
+  // FRONT STRIP: wide, shallow, in front and low. On a vertical brushed panel
+  // this draws the long horizontal streak that says "machined aluminium".
+  const frontStrip = box(18, 0.85, 0xf2f6ff, 11.0);
+  frontStrip.position.set(0.4, 2.35, 4.2);
+  frontStrip.rotation.x = -0.14;
+  s.add(frontStrip);
+
+  // FRONT-LEFT WRAP: broad, dim, low — keeps the left cheeks of every chassis
+  // from falling into the shadow side entirely.
+  const wrapL = box(7, 5, 0xd8e4f4, 1.9);
+  wrapL.position.set(-6.4, 1.9, 3.0);
+  wrapL.lookAt(0, 0.9, -2.4);
+  s.add(wrapL);
+
+  // FRONT-RIGHT WRAP: tighter and warmer, opposite side.
+  const wrapR = box(5.5, 4.2, 0xffe6c8, 1.5);
+  wrapR.position.set(6.6, 2.1, 2.4);
+  wrapR.lookAt(0, 0.9, -2.4);
+  s.add(wrapR);
+
+  // ======================= TOP AND BACK ====================================
+
+  // TOP STRIP: long, narrow, high, behind — the rim/edge definer.
+  const strip = box(17, 0.7, 0xeaf4ff, 12.0);
+  strip.position.set(0.6, 5.2, -4.4);
   strip.rotation.x = -Math.PI * 0.40;
   s.add(strip);
 
-  // --- SECOND STRIP: shorter, camera-right and forward, catches side panels.
-  const strip2 = panel(7.5, 0.42, 0xdfeaff, 9.0);
-  strip2.position.set(6.4, 4.0, 1.2);
+  // SIDE STRIP: camera-right and back, rakes the side panels.
+  const strip2 = box(8, 0.5, 0xdfeaff, 8.0);
+  strip2.position.set(6.8, 4.2, 0.6);
   strip2.rotation.set(-Math.PI * 0.16, -Math.PI * 0.5, 0);
   s.add(strip2);
 
-  // --- FILL: broad, dim, front-low. Keeps shadow sides from going to mud.
-  const fill = panel(12, 5, 0xbfd4ee, 0.62);
-  fill.position.set(2.0, 1.4, 7.2);
-  fill.lookAt(0, 1.0, 0);
-  s.add(fill);
-
-  // --- KICKER: tight warm source low-right, separates cabinets from backdrop.
-  const kick = panel(2.6, 1.4, 0xffd9a8, 2.4);
-  kick.position.set(4.4, 0.55, -2.4);
-  kick.lookAt(0, 0.6, 0);
+  // KICKER: tight warm source low-right behind, separates cabinets from backdrop.
+  const kick = box(3.0, 1.6, 0xffd9a8, 2.6);
+  kick.position.set(4.6, 0.6, -3.0);
+  kick.lookAt(0, 0.6, -1.0);
   s.add(kick);
 
-  // --- NEGATIVE FILL: black flags either side keep the metal from washing out
-  // and give the falloff that makes an object look solid.
-  const flagL = panel(9, 7, 0x000000, 1);
-  flagL.position.set(-7.6, 2.4, -0.6);
-  flagL.rotation.y = Math.PI * 0.5;
-  s.add(flagL);
-  const flagR = panel(9, 7, 0x000000, 1);
-  flagR.position.set(7.6, 2.4, -0.6);
-  flagR.rotation.y = -Math.PI * 0.5;
-  s.add(flagR);
-
-  // --- CEILING BOUNCE: very dim, very large, prevents pure-black top faces.
-  const ceil = panel(20, 20, 0x99aabb, 0.20);
-  ceil.position.set(0, 7.4, 0);
+  // CEILING BOUNCE: very dim, very large — no pure-black top faces.
+  const ceil = box(22, 22, 0x9fb0c2, 0.26);
+  ceil.position.set(0, 7.6, -0.5);
   ceil.rotation.x = Math.PI * 0.5;
   s.add(ceil);
 
-  // --- FLOOR CARD: the polished floor already reflects, but a dim upward card
-  // gives under-chassis surfaces a believable lift.
-  const under = panel(14, 12, 0x8899aa, 0.10);
-  under.position.set(0, -0.35, 0);
+  // FLOOR CARD: dim upward lift so under-chassis surfaces are not voids.
+  const under = box(16, 14, 0x8fa2b6, 0.14);
+  under.position.set(0, -0.45, -1.0);
   under.rotation.x = -Math.PI * 0.5;
   s.add(under);
 
-  // A couple of dim volumes far back read as "room" in reflective surfaces.
-  const backBox = lightBox(24, 9, 0.6, 0x0d1014, 1.0);
-  backBox.position.set(0, 3.0, -9.5);
-  s.add(backBox);
+  // ======================= NEGATIVE FILL ===================================
+  // Black flags well outboard. They give the falloff that makes an object look
+  // solid — but they must not swallow the front hemisphere, so they sit wide
+  // and slightly behind the frontal sources.
+  const flagL = flag(8, 7);
+  flagL.position.set(-8.8, 2.6, -1.2);
+  flagL.rotation.y = Math.PI * 0.5;
+  s.add(flagL);
+  const flagR = flag(8, 7);
+  flagR.position.set(8.8, 2.6, -1.2);
+  flagR.rotation.y = -Math.PI * 0.5;
+  s.add(flagR);
+  // A gobo directly above the lens keeps the very top of the frame from
+  // flattening out, and stops the beauty box wrapping right over the subject.
+  const gobo = flag(6, 4);
+  gobo.position.set(0, 6.6, 4.4);
+  gobo.rotation.x = Math.PI * 0.5;
+  s.add(gobo);
 
   return s;
 }
@@ -121,8 +188,7 @@ export function makeEnvironment(renderer) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
   const envScene = buildEnvScene();
-  const rt = pmrem.fromScene(envScene, 0.018, 0.1, 60);
-  // free the throwaway scene
+  const rt = pmrem.fromScene(envScene, 0.022, 0.1, 70);
   envScene.traverse((o) => {
     if (o.geometry) o.geometry.dispose();
     if (o.material) o.material.dispose();
