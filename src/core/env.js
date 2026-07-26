@@ -112,7 +112,7 @@ export function buildEnvScene() {
 
   // FRONT STRIP: wide, shallow, in front and low. On a vertical brushed panel
   // this draws the long horizontal streak that says "machined aluminium".
-  const frontStrip = box(18, 0.85, 0xf2f6ff, 11.0);
+  const frontStrip = box(18, 2.60, 0xf2f6ff, 3.4);
   frontStrip.position.set(0.4, 2.35, 4.2);
   frontStrip.rotation.x = -0.14;
   s.add(frontStrip);
@@ -133,13 +133,13 @@ export function buildEnvScene() {
   // ======================= TOP AND BACK ====================================
 
   // TOP STRIP: long, narrow, high, behind — the rim/edge definer.
-  const strip = box(17, 0.7, 0xeaf4ff, 12.0);
+  const strip = box(17, 2.20, 0xeaf4ff, 3.8);
   strip.position.set(0.6, 5.2, -4.4);
   strip.rotation.x = -Math.PI * 0.40;
   s.add(strip);
 
   // SIDE STRIP: camera-right and back, rakes the side panels.
-  const strip2 = box(8, 0.5, 0xdfeaff, 8.0);
+  const strip2 = box(8, 1.35, 0xdfeaff, 3.0);
   strip2.position.set(6.8, 4.2, 0.6);
   strip2.rotation.set(-Math.PI * 0.16, -Math.PI * 0.5, 0);
   s.add(strip2);

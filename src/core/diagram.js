@@ -262,6 +262,37 @@ export class Graph extends THREE.Group {
     mesh.userData.update();
     return mesh;
   }
+  /**
+   * Axis numerals. A plot without numbers on its axes is a decoration, not a
+   * measurement — a measurement editor will not read a curve they cannot take a
+   * value off. Creates DOM labels (crisp at any zoom) anchored to empty objects
+   * parented to the graph, so they track it if it moves.
+   *
+   *   g.tickLabels(ctx.labels, { xVals:[20,100,1e3,1e4], yVals:[-20,0,20],
+   *                              xFmt: DSP.fHz, yFmt: v => v.toFixed(0) })
+   */
+  tickLabels(labels, opts = {}) {
+    const {
+      xVals = null, yVals = null,
+      xFmt = (v) => String(v), yFmt = (v) => String(v),
+      xOffset = [0, 13], yOffset = [-16, 0],
+      priority = 2, cls = 'plain',
+    } = opts;
+    const made = [];
+    const mk = (lx, ly, text, offset) => {
+      const o = new THREE.Object3D();
+      o.position.set(lx, ly, 0.0006);
+      this.add(o);
+      made.push(labels.add(o, {
+        value: text, cls, occlude: false, priority, offset,
+      }));
+    };
+    if (xVals) for (const v of xVals) mk(this.x(v), 0, xFmt(v), xOffset);
+    if (yVals) for (const v of yVals) mk(0, this.y(v), yFmt(v), yOffset);
+    this.userData.tickLabels = made;
+    return made;
+  }
+
   setOpacity(o) {
     if (this._gridMat) this._gridMat.opacity = 0.55 * o;
     if (this._frameTrace) this._frameTrace.setOpacity(o);

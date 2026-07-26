@@ -1,138 +1,180 @@
-# Audit findings — stage `dac`
+# Round-2 audit — stage `dac`
 
-## Art-director scores (0-100; 100 = indistinguishable from a product photograph)
+## Art-director score: **47/100** (-7 from round 1's 54)
 
-- **52** — Composition, framing and staging
-  The hardware crop is the best in the deck; the framing wastes it. Card touches the top frame edge, seven graphs, and the monoblock's lit meter outranks the subject.
-
-- **45** — Materials, lighting and render quality
-  Best-lit rack stage; the fascia, display and knobs are legible. Ruined by rack posts clipping to white with bloom halos and by the diagram card ghosting the preamp display through it.
-
-- **64** — Typography, information design and UI
-  Good card-caption discipline, but the top caption crowds the masthead at y=43 and the Δ-Σ caption is printed over the graph above it.
+> −7. Seven plot regions on one card against an addendum limit of three; card crosses the top frame edge and the rail.
 
 
-## Findings for this stage (17)
+## Findings for this stage (6)
 
-### 1. [BLOCKER] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
+### 1. [BLOCKER] (certain)
 
-**What is wrong:** src/stages/dac.js quotes an SNR with no signal level and then blames the discrepancy on the wrong cause. SPEC.snrMeas measures a signal that is 9.89 dB below a full-scale sine (MOD_GAIN = 0.5 and the three-tone composite has amplitudes 0.275/0.14/0.085, total tone power 0.0512 against 0.5 for FS), while DSP.noiseShapedSnrDb is defined for a full-scale sine. I reran the modulator and the FFT: snrMeas = 67.42 dB, in-band noise = −77.32 dBFS, so the modulator's dynamic range referred to full scale is 77.32 dB. The gap to the 85.19 dB model is therefore 7.9 dB, not 17.8. Both the panel D2 label ('in-band 67.4 dB · model 85.2 dB') and the content() bullet ('this modulator measures 67.4 dB — white-noise assumptions flatter a one-bit quantiser') attribute the whole 17.8 dB to the white-noise assumption, overstating the real penalty by a factor of 2.25.
+**Wrong:** content() and the SHAPED NOISE label print 'in-band 67.4 dB · model 85.2 dB' and explain the gap as 'white-noise assumptions flatter a one-bit quantiser'. The model, DSP.noiseShapedSnrDb(1, 2, 64), is defined for a FULL-SCALE sine. The measured figure comes from a three-tone signal at MOD_GAIN = 0.5 whose rms is 0.2264 against a full-scale sine's 0.7071 — i.e. the input is 9.9 dB below full scale. About 10 dB of the 17.8 dB 'gap' is just input level. The stated conclusion is therefore not supported by the measurement.
 
-**Fix:** Report dynamic range, not SNR at an arbitrary level: change SPEC.snrMeas to 10*log10(0.5/noise) so it is referred to a full-scale sine (77.3 dB), and change the label to 'DR 77.3 dB re FS, 0–22.05 kHz · model 85.2 dB'. Rewrite the content bullet as: the model assumes the 1-bit quantisation error is white and uncorrelated with the input; it is not, and a real 2nd-order 1-bit loop falls 7.9 dB short. If you keep the −9.9 dBFS SNR number as well, state the input level next to it.
+**Fix:** In src/stages/dac.js analyseStream(), report dynamic range referred to full scale: SPEC.snrMeas + 20·log10(0.7071/rms_of_input) — or re-run the modulator at an input whose rms equals a full-scale sine and quote that. Then restate the residual gap (which will be ~8 dB, not 18) and keep the sentence about idle tones / white-noise assumptions honest to that number.
 
-### 2. [BLOCKER] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
+### 2. [BLOCKER] (certain)
 
-**What is wrong:** Panel D2 is captioned 'Shaped noise · measured FFT' but the trace it plots contains the signal tones, and they are the two dominant features of the panel. SPEC.floorAt() takes a plain 1/12-octave mean of every bin, tone bins included. I evaluated it: floorAt(4500) = −25.5 dB and floorAt(9000) = −32.5 dB against an adjacent floor of −115.7 dB at 6 kHz and −104.3 dB at 15 kHz — spikes of 90 and 72 dB standing out of a curve labelled 'noise'. Both spikes are clearly visible in shots/dac.png. The 1 kHz tone is hidden only because xRange starts at 3000 Hz, which is itself an accident rather than a decision.
+**Wrong:** shots/dac.png: the diagram card is transparent to the hardware behind it. The rack's chrome posts (device x ≈ 650 and 1210) and its shelf edges (y ≈ 240, 437, 690) print straight through the plots, and the streamer/DAC fasciae bleed through around (900,530). This is the exact round-1 blocker ('rack shelves clearly visible through the graph plate'). The card also extends to device x ≈ 95, burying chapter-rail items 00–03, and two labels sit at y = 36 and 39, inside the masthead keep-out (y < 90).
 
-**Fix:** In SPEC.floorAt, skip every bin within ±16 of a tone bin (toneK is already computed in analyseStream — hoist it to module scope), or use the median of the band instead of the mean. Then draw the three tones the way panel C draws its images: separate amber 2-point stems at their true dBFS heights (1 kHz −11.2, 4.5 kHz −17.1, 9 kHz −21.4 dBFS), and drop xRange to 800 Hz so the 1 kHz tone is not silently cropped out.
+**Fix:** In src/stages/dac.js: raise the card plate's opacity to 1.0 and make sure it writes depth AND that every rack mesh is depth-tested against it (the posts are being drawn with depthTest disabled or at a higher renderOrder). Shrink the card's world width by ~15 % and shift it right so its projected left edge clears x = 160. Move the RECONSTRUCTION and APERTURE labels below their plots (offset [0, +26]) so nothing lands above y = 90.
 
-### 3. [MAJOR] (certain) — Composition, framing and staging
+### 3. [MAJOR] (certain)
 
-**What is wrong:** The diagram card touches the top frame edge (device y ~30) so there is zero sky, and it carries seven graph regions — reconstruction sinc sum, zero-order hold, 20 kHz sampled sine, amplitude floor, aperture/images, 1-bit stream, shaped-noise FFT. dac.js declares 7 DIAG.Graph instances. A magazine spread does not put seven plots on one page. The hero DAC is a 440 x 70 px strip two-thirds down the frame while the card owns the top 60%.
+**Wrong:** src/stages/dac.js: seven DIAG.Graph instances on one card. ADDENDUM B caps this at two cards and three plot regions. The card also crosses the top frame edge (clipped at y=0) and extends left across the chapter rail past the x<160 safe-box limit, so the rail's inactive items become unreadable, and its lower edge covers the DAC chassis that is the subject.
 
-**Fix:** In src/stages/dac.js, cut to three graphs on one card: the sinc sum (the argument), the zero-order hold with the filter removing it (the myth), and the shaped-noise FFT (the number). Move the aperture, 1-bit stream, amplitude-floor and 20 kHz panels into content() as prose plus one eq block. Then pull the card down and left so its top edge sits at device y >= 130 and reframe dac.js:557 to fov 26 with target [0.06, 0.72, -2.94] so the DAC chassis, not the card, is the largest element.
+**Fix:** Keep three plots and move the rest into content(): retain the sinc-sum reconstruction, the ZOH-and-its-removal pair, and the shaped-noise FFT. Delete the aperture/images plot, the Δ-Σ bit stream, the amplitude-floor plot and the 20 kHz-sampled plot from the scene — the last is a duplicate of the first idea. Shrink the card to fit inside x 160…1120, y 90…930 at 1600×1000 and raise its lower edge clear of the hero chassis.
 
-### 4. [MAJOR] (certain) — Composition, framing and staging
+### 4. [MAJOR] (certain)
 
-**What is wrong:** The monoblock at bottom-left is the brightest, highest-contrast object in the frame — a lit blue meter on a chromed chassis — and it is not the subject. It is clipped at the left frame edge and sits directly under chapter-rail items 09/10/11, which become illegible grey-on-light-metal. The same problem recurs in preamp (monoblock centre-bottom), phono (monoblock clipped at right) and speaker (monoblock at right).
+**Wrong:** Six plot regions on one card (reconstruction, ZOH, near-Nyquist, aperture/images, Δ-Σ bit stream, measured FFT) plus an amplitude-floor bar. ADDENDUM §B caps this at two cards and three plot regions. The result is unreadable at 1600×1000 and the DAC chassis itself is entirely hidden behind the card — the hardware chapter shows no hardware.
 
-**Fix:** Either reframe so the monoblock leaves the shot, or in each of those stages dim the off-subject monoblock's meterGlow emissive by ~70% when the stage is not 'amp'. The cheap version: in dac.js/preamp.js/phono.js/speaker.js set the camera so no lit meter falls inside the left 20% or the SAFE box's brightest quadrant. The subject must be the brightest thing in the frame; right now it never is.
+**Fix:** Keep three: the sinc reconstruction (the stage's one idea), the ZOH-as-intermediate, and the shaped-noise FFT. Move the near-Nyquist demonstration, the aperture/images plot and the amplitude-floor bar into content() as prose (the 2.205-points-per-cycle claim already survives as a sentence). Then reframe so the DAC chassis occupies at least a third of the safe-box height beside the card.
 
-### 5. [MAJOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
+### 5. [MAJOR] (certain)
 
-**What is wrong:** Panel D2's ordinate is dBFS per FFT bin and the resolution bandwidth is never stated. bin = FS_MOD/N_FFT = 43.066 Hz, and SPEC.floorAt returns mean power per bin divided by 0.5. So the −98.0 dB the reader sees at 20 kHz is 'dBFS in 43.1 Hz', while the actual integrated in-band noise 0–22.05 kHz is −77.32 dBFS. A reader who takes the plotted floor as the in-band figure is 21 dB out. No axis title, no RBW note, no bandwidth in the label — this is dB with the reference omitted.
+**Wrong:** The pinned readout 'ZOH 20 kHz −3.17 dB' is the non-oversampling figure, while the same chapter states the converter interpolates ×8 and holds at 352.8 kHz where the aperture costs −0.046 dB. The instrument cluster therefore reports a droop this converter does not have. Additionally all six DAC readouts are constants — the cluster shows nothing live on the one stage with the most animation.
 
-**Fix:** Add the resolution bandwidth to the panel D2 label: 'Shaped noise · measured FFT · dBFS in 43.1 Hz (65 536-point Blackman–Harris)'. Better, convert floorAt to a true density in dBFS/√Hz by subtracting 10*log10(binHz) and label the axis accordingly, then state separately that integrating it 0–22.05 kHz gives −77.3 dBFS.
+**Fix:** Change the readout to 'ZOH 20 kHz' = ZOH_20K_OS (−0.046 dB) with u: 'dB · ×8 hold', or label it 'ZOH (NOS)'. Replace two of the six constants with live values from the animation — e.g. the current kernel count in the sinc build-up and the instantaneous reconstructed sample value.
 
-### 6. [MAJOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
+### 6. [MINOR] (certain)
 
-**What is wrong:** The myth box in content() says the reconstruction filter removes the zero-order hold. It does not. The analogue reconstruction filter removes the IMAGES; the aperture droop is a passband amplitude error that survives it untouched. I evaluated the stage's own recFiltDb (3rd-order Butterworth, fc = 80 kHz) at 20 kHz: −0.0038 dB. The −3.17 dB of ZOH droop at 20 kHz is still there afterwards. Droop is removed by inverse-sinc digital pre-compensation or, as the stage itself later says correctly, by moving the hold to 352.8 kHz.
+**Wrong:** content() states 'Cyan is the reconstruction; red the hold and the sub-thermal region'. CONTRACT §3.5 reserves red for marking a myth. Using it for the zero-order hold — which the same page is at pains to say is a legitimate intermediate, not the myth — and for the sub-thermal amplitude band inverts the piece's own colour language.
 
-**Fix:** Change the myth-box sentence from 'the reconstruction filter removes it' to something like: 'the reconstruction filter removes the images the hold creates; the hold's own −3.92 dB droop at fs/2 is a passband error and survives it, so a converter either pre-compensates it digitally or, as here, interpolates ×8 so the hold runs at 352.8 kHz and the droop falls to 0.046 dB at 20 kHz.'
-
-### 7. [MAJOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** Panel C draws two incompatible converters on one set of axes and labels it with the oversampled one. The label reads 'Aperture and images · hold ×8: −0.046 dB at 20 kHz' and the cyan trace is zohDb(f, 352800), but the seven amber image stems are drawn at n·44100 ± 9000 with heights taken from zohDb(fi, FS) — i.e. the non-oversampled case. In a real ×8 DAC those images do not exist: the digital interpolation filter suppresses them by ~100 dB and the surviving images sit at 352.8 kHz ± 9 kHz, off the right of the axis. As drawn, the 35.1 kHz image reads −12.4 dB and the green analogue filter attenuates it by only 0.031 dB, so the panel tells a reader that this DAC emits a 35 kHz image barely 12 dB below the music.
-
-**Fix:** Decide which converter panel C depicts. If NOS: relabel it 'no oversampling — the images the aperture leaves' and keep the stems, then add the ×8 curve as an explicitly-marked comparison. If ×8 (which is what the label claims): keep the amber stems as the pre-interpolation images but add the digital interpolation filter's stopband as a fourth trace (flat 0 dB to 20 kHz, −100 dB above 24.1 kHz) and show the stems being cut down to it, then put the surviving 352.8 kHz ± 9 kHz images on the axis by extending xRange to 400 kHz.
-
-### 8. [MAJOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** readouts() reports 'ZOH 20 kHz −3.17 dB' as a live property of this converter, which directly contradicts the stage's own panel C label ('hold ×8: −0.046 dB at 20 kHz') and its content() bullet ('interpolating ×8 moves the hold to 352.8 kHz, where the aperture costs −0.046 dB'). The persistent readout strip is read as the instrument's current state; it cannot show the figure for an architecture the stage has just said it does not use.
-
-**Fix:** Change the readout key/value to 'ZOH 20 kHz (×8)' / −0.046 dB, and if you want the NOS figure kept visible put it in panel B's label only, where it is already correctly framed as the intermediate.
-
-### 9. [MAJOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** An LSB step size is compared with an rms noise voltage and the difference is quoted in dB as if the two were commensurable. content() says 'The 24-bit LSB over ±2 V is 238.4 nV; a 1 kΩ resistor makes 569 nV of its own noise in 20 kHz, so the bottom bit sits 7.6 dB below one component's floor.' LSB24 = 238.42 nV is a quantisation step; V_JOHNSON = 569.0 nV is an rms. The like-for-like comparison is the quantisation noise rms, LSB/√12 = 68.83 nV, which sits 18.35 dB below the resistor — the stage understates its own margin by 10.8 dB. Panel E repeats the error graphically, putting a step size, an rms noise voltage and a peak full-scale voltage on one 'amplitude' axis with no distinction.
-
-**Fix:** Quote the quantisation noise as an rms: 'the 24-bit LSB is 238.4 nV, so the quantisation noise is LSB/√12 = 68.8 nV rms — 18.4 dB below the 569 nV rms a single 1 kΩ resistor makes in 20 kHz.' On panel E, draw the LSB/√12 stem alongside the LSB stem and mark VFS as '2.000 V peak = 1.414 V rms' so peak and rms are not silently mixed.
-
-### 10. [MAJOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** The stage quotes a 146.3 dB floor beside a converter whose own measured dynamic range is 77.3 dB and never reconciles them. readouts() shows 'SNR 24-BIT 146.3 dB', content() shows the same, panel E scales the amplitude ruler to the 24-bit LSB — and the modulator drawn in panels D and D2 is 2nd-order 1-bit at OSR 64, which I measured at 77.3 dB DR (85.2 dB by the white-noise model). Word length and converter dynamic range are different quantities, but placed side by side with no comment they read as the same claim, and a reader is entitled to ask what the 238 nV LSB is for.
-
-**Fix:** Add one sentence to content(): the 24-bit word sets the arithmetic floor at 146.3 dB (0–22.05 kHz, full-scale sine); the modulator drawn here is a deliberately simple 2nd-order 1-bit loop and reaches 77.3 dB; production converters use 5th-order multi-bit loops at the same OSR to get within ~25 dB of the word length. Also add the measurement band to the SNR readout key ('SNR 24-BIT, 0–22.05 kHz').
-
-### 11. [MINOR] (certain) — Composition, framing and staging
-
-**What is wrong:** The label "ANALOGUE | DIGITAL / screened clock, split ground" prints across a shelf front whose chrome highlight runs straight through the middle of the text — the word ANALOGUE is bisected by the highlight and effectively unreadable at full resolution.
-
-**Fix:** Move the anchor down and left onto the dark shelf underside with offset [-40, +22], or suppress it once the depth test lands. Any label whose projected position lands on a specular streak needs to move; this is the most visible instance.
-
-### 12. [MINOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** The instrument board's backing plate is 4 % transparent and the rack's chrome uprights ghost through it. In dac.js build(), `plate(BW + pad*2, BDH + pad*2, 0x05070a, 0.96, ...)` — at 0.96 in linear space the rack post's specular highlight punches through the right column of the board and reads as a vertical grey smear across panels C, D and D2 in shots/dac.png. The streamer's author hit exactly this and documented the fix (`P_OP = 1.0 // at 0.93 the rack's specular highlights punch through in linear space and read as ghosts`).
-
-**Fix:** Set the back plate opacity to 1.0 in the plate() call for `back` in dac.js. Leave the per-panel 0.55 tint plates alone.
-
-### 13. [MINOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** The two amplitude-ruler labels hang off the bottom of the board. Both are anchored at PAN.E.y + PAN.E.h = 0.038 with offset dy = −15 px, which puts them below the board's bottom edge (root y = 0) so 'Amplitude floor, ±2 V / LSB 238.4 nV · 1 kΩ kTB 569 nV' and 'Full scale / 2.000 V · 16-bit LSB 61.04 µV' render over the rack and the chrome pillar. In shots/dac.png 'FULL SCALE' is half-swallowed by the rack rail.
-
-**Fix:** Anchor both at PAN.E.y + PAN.E.h + 0.006 with offset [x, +14] so they sit inside the board above the ruler, or enlarge PAN.E's tint plate and the back plate's bottom pad by 0.030 m so the labels fall on dark ground.
-
-### 14. [MINOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** Panel B draws the zero-order hold with no sample dots, so the one thing the reader needs to check — that each step's left corner sits exactly on a sample and on the cyan curve — cannot be checked. Panels A and F both get dots from the S.dots Swarm; B is skipped (the Swarm is sized N_WIN*2 + 6 and its update() only covers A, F and the four ruler stems). It also matters here because the ZOH's inherent T/2 group delay makes the staircase visibly lag the reconstruction, which without dots reads as 'the staircase is drawn wrong'.
-
-**Fix:** Grow the dots Swarm to N_WIN*3 + 7 and add a third branch in S.dots.update() placing dots at B.x + gB.x(n), B.y + gB.y(smp(n)). Add a short note to panel B's label that the hold also delays by T/2 = 11.34 µs, which the reconstruction filter's phase corrects.
-
-### 15. [MINOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** The kernel-count label overstates what is being withheld. reconstruct(x, kMax) skips only kernels with 0 <= n <= N_WIN and n > kMax; all 80 context kernels from n = −40..−1 and 17..56 are always summed. So at the moment S.labA reads '1 of 17 kernels' the drawn curve is already the sum of 81 kernels. I measured the residual with zero visible kernels: peak |sum| = 0.125 against a full-scale 0.913, so the build-up still reads correctly, but the caption is not literally true.
-
-**Fix:** Change the label to '<n> of 17 shown · 80 off-screen kernels always summed', or gate the context kernels too and accept the edge error (which grows the truncation error at x = 0 and x = 16).
-
-### 16. [MINOR] (likely) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** The green trace in panel D is a single 64-tap boxcar, drawn in the colour the contract reserves for 'the correct answer', and its code comment claims 'Its output is the audio.' A sinc-1 decimator is the wrong order for a 2nd-order modulator — the rule is order n+1, i.e. sinc-3 — so it leaves out-of-band shaped noise folding into the band, and it also imposes its own aperture droop (sinc(9000·64/2 822 400) = −0.61 dB at 9 kHz) that is never mentioned.
-
-**Fix:** Cascade three 64-tap boxcars (sinc-3) for the green trace and change the code comment and, if you add a label, the caption, to 'sinc-3 decimator, order = modulator order + 1'. If you keep the single boxcar for cheapness, draw it in PAL.cyDim rather than PAL.gr and label it 'a single boxcar is not enough — a 2nd-order loop needs sinc-3'.
-
-### 17. [MINOR] (certain) — THE DIGITAL CHAIN — streamer + dac (loudspeaker engineer / measurement editor)
-
-**What is wrong:** The noise-shaping model's band is never stated, so the 85.2 dB cannot be checked. DSP.noiseShapedSnrDb(1, 2, 64) is defined with OSR = fs_mod/(2·BW); with fs_mod = 2.8224 MHz and OSR = 64 the implied band is 22.05 kHz, which happens to match the measurement window (analyseStream integrates k = 2 to floor(NYQ/bin)). Correct, but the reader is given neither the band nor the OSR definition, and 'in-band' in the panel D2 label is undefined.
-
-**Fix:** Extend the panel D2 label to 'in-band = 0–22.05 kHz, OSR 64' and add the OSR definition to the content() bullet: OSR = fs_mod/(2·BW) = 2 822 400/(2 x 22 050) = 64.
+**Fix:** Draw the ZOH staircase in amber (energy/intermediate) and the sub-thermal band in a dim neutral; keep red for the staircase-as-myth callout only, if it appears at all.
 
 
 ---
 
-## Core findings (already fixed by the lead — for context only, do NOT edit core)
+## Whole-piece (core) findings that constrain you (14)
 
-The following were found across the whole piece and have been repaired in `src/core/*` and `src/app.css`:
+**1. [BLOCKER]** src/core/env.js: `frontStrip` (18 × 0.85 m at intensity 11.0, line 115) and `strip` (17 × 0.7 m at 12.0, line 136) are narrow enough that every alloy edge in the set returns a clipped 100%-white line rather than a highlight with a rolloff. Count them in one frame: preamp has ~12 blown shelf-lip bars plus four full-length blown rack posts; turntable has a blown plinth chamfer and a blown tonearm; sub has a blown surround ring; the rack in sub and preamp is a neon wireframe. This single pair of emitters is why the piece reads as CGI.
+
+*Intended fix:* Widen and dim both: frontStrip to 18 × 2.6 m at ~3.4, strip to 17 × 2.2 m at ~3.8. Keep the same positions and rotations. The reflected image of the source then spans enough of each fillet to produce a gradient instead of a clipped line. Re-shoot preamp and phono to confirm the shelf trims read as a bright-to-mid ramp, not a bar. If the scene then reads flat, raise `beauty` (line 108) from 4.6 to ~6.0 rather than putting the strips back.
+
+**2. [BLOCKER]** src/app.css line 51: `.wlab` is `white-space:nowrap; max-width:36ch` with no overflow rule, and `.wlab .k` (line 66) inherits nowrap. Any kicker longer than 36 characters spills outside its own scrim onto the render. Visible in air ('FLOOR BOUNCE · SOURCE 0.985 M BELOW THE FLOOR' — 'THE FLOOR' prints over the rack chassis with no backing), power ('THE FIRST TWO AT TRUE ×26 · THE THIRD THAT SAME SWING ~3000 MORE' overprints the neighbouring label), and turntable ('45/45 GROOVE — 1800 : 1 · MOTION 1 : 1000' runs under the adjacent card).
+
+*Intended fix:* In src/app.css: remove `max-width:36ch` from `.wlab` and add `white-space:normal; max-width:34ch` to `.wlab .k`. Long kickers then wrap to a second line inside the scrim and the box grows to fit. Keep `white-space:nowrap` on `.wlab .v` only, so values never break.
+
+**3. [BLOCKER]** The same hardware carries different primaries in different chapters. (a) Voice-coil dc resistance: speaker.js TS.Re = 6.2 Ω and air.js TS.Re = 6.2 Ω, but amp.js RE_COIL = 5.4 Ω (line 60) and xover.js RE_COIL = 5.4 Ω (line 58) — and both use it for the damping-resistance argument. (b) Sensitivity: speaker.js and air.js both derive 91.38 dB @ 2.83 V/1 m; overview.js:45 asserts SENS = 89, and its 89.5 dB / 75.8 dB SPL figures follow from the wrong number. (c) Cartridge output: turntable.js derives E_RMS = 285 µV at 5 cm/s; phono.js V_CART = 0.30 mV and overview.js V_CART = 0.30 mV. (d) Phono gain: phono.js G_STAGE_DB = 64.0; overview.js G_PHONO = 60.0. (e) Amplifier: amp.js is 300 W into 8 Ω and every load in the piece is 8 Ω nominal, but power.js:25 and overview.js:50 compute the headline 2281.8 W / 9.92 A mains draw from 'two 600 W monoblocks' (the 4 Ω rating). At 8 Ω the true full-output draw is (2×300)/0.55 + 100 = 1191 W, 5.2 A rms — half the number the whole mains chapter is built on.
+
+*Intended fix:* Pick one set and propagate. Suggested: Re = 6.2 Ω everywhere (update amp.js RE_COIL and xover.js RE_COIL, and recompute DAMP_PEN / RD_ACT / RD_PAS / RD_PCT); overview SENS = 91.4 (import or restate the derivation); overview G_PHONO = 64.0 and re-solve G_LADDER so the total still lands on an integer-dB ladder setting; cartridge 285 µV rms in all three; and in power.js/overview.js either state the operating point as '2 × 300 W into 8 Ω' and recompute P_SYS = 1191 W, I_RMS = 5.18 A, I_PK = 7.33 A (and every drift figure that follows), or say explicitly on screen that the mains figure is the 4 Ω worst case, not this system's load.
+
+**4. [BLOCKER]** Only xover.js adds DOM numerals to its plot axes. phono's RIAA graph (yRange −25…+25 dB, xRange 20–20 k), preamp's S/N graph (55…125 dB, 0…63), speaker's sealed-response (−27…+6 dB) and excursion (0…14 mm) graphs, sub's pressure map, air's comb plot and all six DAC plots carry tick marks with no values. Every one of these is presented as a measurement and none can be read to a value; the argument rests entirely on captions.
+
+*Intended fix:* Copy the xover pattern (xover.js:508-531, the `tick()` helper with cls:'plain', occlude:false, priority:2) into phono (0, ±20 dB and 20 Hz / 20 kHz), preamp (60, 100, 120 dB and 0 / 63), speaker (0, −12, −24 dB; 0, 8, 14 mm; 15 Hz / 400 Hz and 24 / 200 Hz) and dac's two most load-bearing plots. Three to five short labels each; prune redundant captions to stay inside the ≲10-label budget.
+
+**5. [MAJOR]** Every one of the twelve panels ends mid-sentence under the `#panel-scroll.more` fade mask (src/app.css line 120). Xover loses its entire 'COMMONLY GOT WRONG' block — only the red title survives; sub loses the last line of its mode arithmetic; amp, speaker, air, streamer, phono, preamp, overview and dac all cut mid-word. In a still frame a fade that truncates mid-glyph reads as a crop, not as a scroll affordance. Twelve of twelve stages also exceed the 320-word ceiling in ADDENDUM C.
+
+*Intended fix:* Two changes. (1) In app.css move the mask start from `calc(100% - 34px)` to `calc(100% - 56px)` and add a visible affordance — a hairline rule plus a small chevron — so a reader sees 'there is more' rather than 'this is broken'. (2) Instruct every stage to cut content() to what fits above the fold at 1600×1000, roughly 230 words at 13.5 px/1.66, and to place .key or .myth in the first third per ADDENDUM C. Xover and sub are the urgent two: their callouts are entirely invisible.
+
+**6. [MAJOR]** The chapter rail is illegible in half the stages. Its inactive items are var(--ink-3) grey on the raw canvas, so they vanish against a matte black diagram card (power, dac, sub, preamp, air) and again against a blown-white rack shelf (sub). In power, ten of twelve rail rows are effectively unreadable.
+
+*Intended fix:* In src/app.css give the rail its own scrim independent of what is behind it — on the `#rail` container add `background:linear-gradient(90deg,rgba(7,8,11,.72) 0,rgba(7,8,11,.55) 62%,transparent 100%)` with a 4 px backdrop blur — and lift the inactive `.chap .t` colour from var(--ink-3) to var(--ink-2) at 0.62 alpha. The rail is chrome; it must never depend on the render behind it.
+
+**7. [MAJOR]** src/core/reflector.js: the planar floor reflection is incomplete and inconsistent. In overview the speakers' drivers reflect but the cabinets do not, leaving floating dark rings on a grey field; in speaker the cabinet is absent from its own reflection while unrelated pale rectangles appear; in air the rack reflects as disconnected pale fragments rather than a coherent mirror image. The result reads as smudge, and a broken reflection is worse than none — it is the first thing a retoucher would flag.
+
+*Intended fix:* Check the reflector's camera layers/frustum and its near/far planes: the missing objects are the tall ones, which suggests the mirror camera's frustum or its clip plane is cutting geometry above a height. Also confirm every stage's hardware is on the layer the reflector renders. Then bring the blur down — the current radius destroys the silhouette; a product-floor reflection wants a sharp first 200 mm falling to blur over ~600 mm, not uniform mush.
+
+**8. [MAJOR]** src/core/room.js ttPlinth() line ~160: the `under` slab uses mats().wood and, lit by the current rig, renders as a saturated bright-orange strip along the plinth's front edge. It is the most saturated element in both the overview and speaker frames and is a hue outside the permitted palette. It reads as an accident, not as a material.
+
+*Intended fix:* Either darken and desaturate it — clone mats().wood with `color.setHex(0x1a1410)` and `roughness 0.7` — or replace it with mats().anodBlack. Nothing in this set should carry a warm saturated hue except PAL.am used deliberately as a diagram accent.
+
+**9. [MAJOR]** Every rack stage frames the whole rack instead of its own chassis, because `fill` is applied to a bounding RADIUS that is dominated by the chassis width (0.555 m) while `fill` is a fraction of the safe-box HEIGHT. phono.js uses HERO_R = 0.354 with fill 0.55: the 112 mm chassis ends up ~85 px tall in a 1250-px frame. Measured heights of the subject chassis in the current shots: phono ≈ 85 px, preamp ≈ 80 px, xover ≈ 145 px, streamer ≈ 80 px, dac hidden. In phono, preamp, streamer and xover a reader cannot tell which of the six identical rack units is the subject, and in phono and preamp the identifying label sits over a neighbouring unit's shelf.
+
+*Intended fix:* For the six rack stages, pass frameShot a radius equal to the chassis HALF-HEIGHT plus a small margin (e.g. 0.09 for a 112 mm box) rather than its bounding sphere, and take fill 0.30–0.40 so the chassis is 250–340 px tall with the card beside it. Then anchor the identifying label to the subject chassis's own fascia with a short leader, not to the shelf above it.
+
+**10. [MAJOR]** The pinned readouts and the world labels disagree in the same still frame on every animated stage, because the readouts refresh at 10 Hz while labels update every frame. Measured from the current shots: power reads CURRENT −6.31 A in the footer while the LIVE label on the same conductor says −11.75 A; air reads PARTICLE DISPL +0.265 µm while the parcel label says ξ = +0.544 of 0.546 µm peak (and the footer's +3.00 mm/s velocity is only consistent with its own 0.265, not with the label); sub reads CONE X −3.09 mm against a label of −3.37 mm; speaker reads COIL I −3.06 A against a label of −3.19 A. Since the piece is judged from stills, this reads as an arithmetic error.
+
+*Intended fix:* Have update() write the SAME cached state object that readouts() reads, and drive the labels from that cached state rather than from the instantaneous phase — i.e. latch the display state at the readout tick. Alternatively raise the readout refresh to the frame rate. Either way, a screenshot must show one consistent instant.
+
+**11. [MAJOR]** content() overruns the 320-word cap (ADDENDUM §C) on eight of twelve stages, measured from the rendered DOM with .eq blocks excluded: amp 428, power 400, streamer 385, air 359, xover 357, phono 347, turntable 343, preamp 338. sub 321 is borderline. Only overview (293), speaker (291) and dac (314) comply. In every one of these the prose scrolls out of sight below the pinned readouts.
+
+*Intended fix:* Cut to 320. amp: drop the Damping section entirely (it duplicates the xover argument) and compress the Heat paragraph. power: cut the Fermi-velocity/mean-free-path sentence to one clause. streamer: cut the buffer/master-clock paragraph. air: cut the reverberant-field paragraph to one sentence. xover: cut the passive-network paragraph to the .eq plus one sentence.
+
+**12. [MINOR]** src/app.css .wlab: the label scrims read as operating-system notification toasts, not as editorial annotation — 60% black fill, 4 px backdrop blur, 4 px radius, a white 1 px ring and a 10 px drop shadow. In a magazine a callout over a photograph is a hairline leader plus set text, or a clean flat rule-bounded box. The current treatment is the single most 'web app' element in every frame.
+
+*Intended fix:* Flatten it: drop the box-shadow, drop the border-radius to 2 px, drop the white ring to rgba(255,255,255,.03), and raise the fill to rgba(7,8,11,.74) so the type carries on contrast rather than on blur. Add the leader dot (.wlab.lead already exists) to every label that annotates a world point, and use cls:'plain' wherever the label sits over dead space.
+
+**13. [MINOR]** Dead instrument clusters. All six DAC readouts are compile-time constants (FS, WORD, NYQUIST, LSB, SNR 24-BIT, ZOH). Four of six streamer readouts are constants (PAYLOAD, BIT CLOCK, JITTER, SNR 10 kHz). xover has two (CROSSOVER, SLOPE), sub has three (MODE, DRIVE, SCHROEDER), speaker's SPL @ 1 m never moves because it is the drive premise, turntable's PLATTER and CONTACT P never move. The footer is described in the addendum as 'the instrument cluster'; a cluster where two thirds of the dials are painted on is not one.
+
+*Intended fix:* Cap constants at two per stage and give the rest live values. DAC: current kernel count, instantaneous reconstructed voltage, live in-band noise at the cursor, ZOH droop at the cursor frequency. streamer: live buffer occupancy (already there), live arrival rate (already there), live Δt and its dBFS error from the eye. sub: live seat SPL as the second sub fades in, live Ψ sum.
+
+**14. [MINOR]** src/core/dsp.js:196-201, classABDissipation: the comment says 'Total device dissipation, both halves: P_d = Vcc²/(π²·RL) at m = 2/π'. The function is correct but the total at m = 2/π is 2·Vcc²/(π²·RL) — the quoted expression is the per-half figure. Not displayed anywhere, but amp.js reimplements this and a future author reading the comment would be off by 2×.
+
+*Intended fix:* Correct the comment to 'P_d(total) = 2·Vcc²/(π²·RL) at m = 2/π, i.e. Vcc²/(π²·RL) per half'. Core is frozen, so report only.
 
 
-- The studio environment had **no front hemisphere** — every camera-facing surface reflected black. `env.js` now has a beauty box, a front strip and two front wraps, and every emitter has a soft-edged diffusion map (the hard white squares on dust caps are gone).
-- The floor now carries a **real planar reflection** (`src/core/reflector.js`), blurred with distance, with a soft knee so emissives do not clip.
-- Exposure 1.30 → **1.58**; bloom threshold 0.92 → **1.06**, strength 0.42 → 0.30; chromatic aberration 0.0011 → **0.00032**.
-- `DIAG.diagramCard` now writes depth and defaults to opacity **0.90**, so cards no longer ghost the hardware behind them.
-- `GEO.contactShadow` now uses multiply blending against a white-surround texture, so contact shadows actually darken (including over the reflective floor).
-- `lineMaterial` had `alphaToCoverage:true`, which made every stage fade-out silently fail. Fixed.
-- **`DSP.butterHP` returned the complex conjugate** — every high-pass phase in the piece had the wrong sign. Fixed and verified: LR4 now sums to 0.000000 dB error across the band, −6.021 dB at fc, LP and HP in phase; LR2 summed in positive polarity nulls at −46.7 dB, confirming it needs one driver inverted.
-- **`DSP.deltaSigmaStep` was broken.** Rewritten as a proper error-feedback modulator with NTF = (1−z⁻¹)ⁿ, FFT-verified: order 1 puts in-band noise 38 dB below the out-of-band density, order 2 puts it 55 dB below. Order ≥3 is now clamped, because an unscaled 3rd-order NTF has ‖NTF‖∞ = 8, far past Lee's rule for a 1-bit quantiser — measured, it stops shaping entirely. `DSP.ntfInfinityNorm(n)` and `DSP.DS_MAX_ORDER` are exported.
-- **Labels are rebuilt** (`src/core/labels.js`): they now depth-test against opaque geometry, are pushed out of keep-out rects for the chapter rail / masthead / panel / transport, are nudged apart from each other, and are dropped rather than overprinted. Kickers are ASCII-folded in JS so **µ, Ω and π survive** (CSS `text-transform:uppercase` was turning "µV" into "ΜV"). Labels have a subtle scrim; pass `cls:'plain'` to opt out where the background is already dead space.
-- **The panel is restructured**: head and readouts are now pinned, and only the prose scrolls. `.key` callouts and the live readouts are no longer below the fold. `.ro .bar` was a `<span>` with a height and no `display:block` — the meters never rendered. Fixed.
-- The transport `#rate` chip now updates.
-- `.eq` blocks are 11.5 px so longer lines survive the 388 px content box.
+---
+
+## What the lead has ALREADY fixed in core since these findings (do not redo, do not edit core)
+
+- **The specular ramp.** The art director's headline finding was that nothing in
+  the piece had a specular layer with a *gradient*: every bright thing was a
+  clipped 100 %-white line or a flat emissive patch, giving a bimodal histogram
+  with no mid-grey. Proximate cause was two very narrow emitters. `env.js` now
+  runs `frontStrip` at 18 x 2.60 m / 3.4 and `strip` at 17 x 2.20 m / 3.8
+  (was 0.85 m / 11.0 and 0.7 m / 12.0), and `strip2` at 8 x 1.35 / 3.0. The
+  reflected image of a source now spans a fillet instead of clipping across it.
+  **Consequence for you:** re-look at your stage. Materials you darkened to fight
+  blown highlights may now be too dark, and emissive patches you brightened to
+  compete may now be too hot.
+- **`src/core/spec.js` — a single source of truth for the system's primaries.**
+  See below. This is mandatory.
+- **`DIAG.Graph.prototype.tickLabels(labels, opts)`** — axis numerals. See below.
+- `.wlab` no longer clips long kickers (the `max-width:36ch` + `nowrap`
+  combination spilled text outside its own scrim).
+
+## MANDATORY: import your primaries from `src/core/spec.js`
+
+The measurement editor caught the piece quoting the same hardware differently in
+different chapters: voice coil 6.2 Ω vs 5.4 Ω, sensitivity 91.4 vs 89 dB,
+cartridge 285 vs 300 µV, phono 64 vs 60 dB, and a mains draw computed from
+"600 W into 4 Ω" while every other chapter ran an 8 Ω load. That is fatal to
+trust and it is the first thing a reader can catch you on.
+
+```js
+import { MAINS, DRIVER, TS, SPEAKER, AMP, CABLE, DAMPING,
+         CART, TT, PHONO, PREAMP, XOVER, DIGITAL, ROOM, CHAIN } from '../core/spec.js';
+```
+
+Verified values (all derived, and the gain ladder closes to 79.945882 dB both ways):
+
+| quantity | value |
+|---|---|
+| `TS.Cms` | 659.37 µm/N |
+| `TS.Qes` / `TS.Qts` | 0.37116 / 0.34102 |
+| `TS.Vas` | 111.95 L |
+| `TS.alpha` / `TS.fc` / `TS.Qtc` | 3.7318 / 60.907 Hz / 0.74182 |
+| `TS.eta0` | 0.647 % |
+| `TS.spl1W` | 90.11 dB @ 1 W / 1 m |
+| `TS.spl283` (= `SPEAKER.sens`) | 91.21 dB @ 2.83 V / 1 m |
+| `AMP.vRms` / `vPk` / `iPk` (300 W into 8 Ω) | 48.990 V / 69.282 V / 8.6603 A |
+| `CABLE.rLoop` | 41.376 mΩ (there AND back) |
+| `DAMPING.atTerminals` / `atDriver` | 400.00 / 130.34 |
+| `CART.outRms` | 284.61 µV |
+| `TT.vOuter` / `vInner` | 0.50964 / 0.20944 m/s |
+| `CHAIN.totalDb` / `volumeDb` | 79.946 dB / −20.054 dB |
+
+**Note the two sensitivities.** `spl1W` is one watt at one metre; `spl283` is
+2.83 V at one metre, which is one watt into 8 Ω *by definition* but 1.29 W into
+this 6.2 Ω coil, so it reads 1.11 dB higher. Quoting one with the other's
+reference is the classic sensitivity fiddle. Use the right one and name it.
+
+If your stage needs a primary that is not in `spec.js`, derive it locally from
+what is, and say so in a comment. Do not re-declare a primary.
+
+## MANDATORY: put numerals on your axes
+
+Only `xover` did. A plot a reader cannot take a value off is a decoration, not a
+measurement. Every `DIAG.Graph` you keep must call:
+
+```js
+graph.tickLabels(ctx.labels, {
+  xVals: [20, 100, 1000, 10000], yVals: [-20, 0, 20],
+  xFmt: DSP.fHz, yFmt: (v) => v.toFixed(0),
+});
+```
+It creates `cls:'plain'`, `occlude:false`, `priority:2` labels parented to the
+graph, so they track it and survive the collision pass. Keep the tick count low
+(3–5 per axis) and state the unit once, in the graph's own caption label.
