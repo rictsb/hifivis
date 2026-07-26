@@ -342,3 +342,16 @@ must fit **without scrolling at 1600 x 1000**. That is roughly 260 words
 including headings, less if you use an `.eq` block. Front-load: the callout and
 the arithmetic first, the elaboration last, because the elaboration is what gets
 cut.
+
+## J. Instrument glass — use the helper, do not roll your own
+
+Several stages answered "give the meter a specular layer" with a crowned panel
+at **roughness 0.085**. On a flat panel that returns essentially the whole
+softbox and blooms into a lens flare across a third of the frame — measurably
+the brightest thing in `preamp`, `phono` and `dac`.
+
+Use `GEO.instrumentGlass(w, h, opts)`. It is crowned (so the source sweeps as a
+band rather than sitting as a rectangle), `reflectivity` 0.34 (a coated cover
+glass returns ~1.7 % at normal incidence, not the 4 % of the default), and
+roughness 0.15 — glass in a room, not a laser optic. Place it 2–4 mm in front of
+the emissive it covers.

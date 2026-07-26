@@ -236,6 +236,51 @@ export function perfGrid(w, h, pitch = 0.004, r = 0.0013, mat = mats().plastic) 
   return im;
 }
 
+/**
+ * Instrument glass — the specular layer that goes IN FRONT of an emissive.
+ *
+ * A lit meter or display with nothing over it reads as a decal; that was the
+ * art director's headline note. But the first attempts at fixing it used a
+ * near-mirror (roughness ~0.085) on a large flat panel, which returns the whole
+ * softbox at almost full intensity and blooms into a lens flare across a third
+ * of the frame.
+ *
+ * Real instrument glass is subtler than either:
+ *  - it is slightly CROWNED, so the reflected source sweeps across it as a band
+ *    rather than sitting still as a rectangle;
+ *  - it is not a mirror. `reflectivity` 0.34 puts the normal-incidence return at
+ *    about 1.7 %, which is what a coated cover glass actually does — uncoated
+ *    would be 4 %, and the default 0.5 gives an uncoated 4 % that is too hot
+ *    against a bright softbox;
+ *  - it has a little roughness, because it is glass in a room, not a laser optic.
+ *
+ * @param w,h    panel size in metres
+ * @param crown  sagitta in metres — 3–6 mm across a 100 mm lens is right
+ */
+export function instrumentGlass(w, h, opts = {}) {
+  const { crown = Math.min(w, h) * 0.045, roughness = 0.15, tint = 0x05070b,
+    reflectivity = 0.34, segs = 24 } = opts;
+  const g = new THREE.PlaneGeometry(w, h, segs, segs);
+  const pos = g.attributes.position;
+  const hw = w / 2, hh = h / 2;
+  for (let i = 0; i < pos.count; i++) {
+    const u = pos.getX(i) / hw, v = pos.getY(i) / hh;
+    // paraboloid crown, zero at the rim
+    pos.setZ(i, crown * Math.max(0, 1 - u * u) * Math.max(0, 1 - v * v));
+  }
+  pos.needsUpdate = true;
+  g.computeVertexNormals();
+  const m = new THREE.MeshPhysicalMaterial({
+    color: tint, metalness: 0, roughness,
+    clearcoat: 1.0, clearcoatRoughness: roughness * 0.6,
+    reflectivity, envMapIntensity: 0.85,
+    transparent: true, opacity: 0.30, depthWrite: false,
+  });
+  const mesh = new THREE.Mesh(g, m);
+  mesh.renderOrder = 18;
+  return mesh;
+}
+
 /** A soft fake contact shadow quad to sit under an object on the floor. */
 export function contactShadow(w, d, opacity = 0.75, y = 0.0012) {
   // Multiply blending, with a texture that is WHITE outside the blob: white

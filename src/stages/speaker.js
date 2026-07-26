@@ -4,7 +4,7 @@ import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
-import { DRIVER, TS as SPECTS, SPEAKER } from '../core/spec.js';
+import { DRIVER, TS as SPECTS, SPEAKER, XOVER } from '../core/spec.js';
 
 /* ===========================================================================
    MOTOR & CABINET  —  two floorstanders, one motor opened up beside them.
@@ -208,12 +208,17 @@ let _cab = null;
 function cabMat() {
   if (_cab) return _cab;
   _cab = mats().pianoBlack.clone();
-  _cab.color.setHex(0x050608);
-  _cab.roughness = 0.24;
+  // The emitters were widened and dimmed after the last round, so a lacquer
+  // tuned to survive the old narrow-and-hot rig now renders as a silhouette.
+  // Lifting the base a stop and the environment response with it puts the long
+  // top-to-bottom ramp back on the cheek, which is the whole reason to build a
+  // gloss cabinet. clearcoatRoughness stays low — orange peel is a core job.
+  _cab.color.setHex(0x0a0b0e);
+  _cab.roughness = 0.22;
   _cab.clearcoat = 1.0;
-  _cab.clearcoatRoughness = 0.024;
-  _cab.envMapIntensity = 1.85;
-  _cab.reflectivity = 0.62;
+  _cab.clearcoatRoughness = 0.030;
+  _cab.envMapIntensity = 2.25;
+  _cab.reflectivity = 0.66;
   return _cab;
 }
 
@@ -253,24 +258,46 @@ function glassPanel(w, h, bulge = 0.006) {
 }
 
 /**
- * A library metal with its roughness and normal maps stripped out.
+ * SATIN — the only material a small part on a driver is allowed to be.
  *
- * `alu`, `anodBlack` and `steel` all carry a procedural roughnessMap that
- * MULTIPLIES the scalar (final = roughness x map.g, and the map sits around
- * 0.26–0.40) plus a normalMap. On a chassis panel that is exactly right. On a
- * 4 mm trim ring or an 8 mm flange chamfer, one blotch of the map covers the
- * whole part, so a stated roughness of 0.8 renders at 0.2 and the perturbed
- * normal guarantees that somewhere on the ring the key light mirrors straight
- * down the lens. That is where every blown white square on the drivers came
- * from. Small parts get flat, honest roughness.
+ * This is the fix for the hard white squares that have been pasted across the
+ * drivers since round 1, and the diagnosis took a pixel probe to pin down.
+ * Hiding one mesh at a time and re-reading the framebuffer showed the peak
+ * always sat on a `ring()` annulus — the tweeter faceplate rim and the woofer
+ * mounting flange — and killing the rim DirectionalLight alone took that peak
+ * from 240 to 94 in sRGB. Setting metalness to 0 with specularIntensity 0 took
+ * it to 168 with the light still on.
+ *
+ * The reason is the F0 term. For a METAL, F0 is the albedo — 0.3 to 0.8 — and a
+ * flat annulus normal to the driver axis satisfies the mirror condition for a
+ * punctual light along a whole arc at once, so it returns several units of
+ * linear radiance. ACES prints that as paper white, and because UnrealBloom
+ * upsamples its coarse mips bilinearly, a 7 px clipped core comes back as a
+ * 20 px BOX with corners. That box, repeated eight times across two cabinets,
+ * is what the art director has been circling.
+ *
+ * Anodised and powder-coated alloy is physically a dielectric coat over metal:
+ * F0 = 0.04 · specularIntensity, which cannot exceed 1 whatever the geometry
+ * does. The part still reads as machined — the value contrast and the broken
+ * edge do that — but it can no longer clip.
+ *
+ * The maps go too. `alu`, `anodBlack` and `steel` all carry a procedural
+ * roughnessMap that MULTIPLIES the scalar, plus a normalMap. On a chassis panel
+ * that is right; on a 4 mm ring one blotch of the map covers the whole part, so
+ * a stated roughness of 0.8 renders at 0.2 and the perturbed normal points
+ * somewhere the author never chose.
  */
-function matt(key, hex, rough, env, metal = 1.0) {
-  const m = hw()[key].clone();
+function satin(hex, rough, spec = 0.55, env = 0.55, cc = 0) {
+  const m = hw().anodBlack.clone();
   m.roughnessMap = null; m.normalMap = null; m.aoMap = null;
   m.color.setHex(hex);
+  m.metalness = 0.0;
   m.roughness = rough;
-  m.metalness = metal;
+  m.specularIntensity = spec;
   m.envMapIntensity = env;
+  m.anisotropy = 0;
+  m.clearcoat = cc;
+  m.clearcoatRoughness = 0.32;
   return m;
 }
 
@@ -287,11 +314,11 @@ function matt(key, hex, rough, env, metal = 1.0) {
  */
 function fastener(r) {
   const g = new THREE.Group();
-  const m = matt('anodBlack', 0x3c4147, 0.86, 0.18, 0.25);
-  const head = new THREE.Mesh(GEO.bevelCyl(r, r * 1.03, 0.0011, 20, 0.00026), m);
+  const head = new THREE.Mesh(GEO.bevelCyl(r, r * 1.03, 0.0011, 20, 0.00026),
+    satin(0x3c4147, 0.72, 0.42, 0.30));
   g.add(head);
   const hex = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.46, r * 0.46, 0.0009, 6),
-    matt('anodBlack', 0x16181b, 0.92, 0.10, 0.0));
+    satin(0x121417, 0.92, 0.20, 0.10));
   hex.position.y = 0.00030;
   g.add(hex);
   return g;
@@ -326,8 +353,9 @@ function makeDriver(o) {
    * as what it physically is: a POWDER-COATED alloy, a mostly dielectric
    * surface, rather than a bare polished metal.
    */
-  const cast = matt('anodBlack', 0x272a2f, 0.80, 0.34, 0.35);
-  const sinkM = matt('anodBlack', 0x2a2e33, 0.90, 0.12, 0.0);
+  const cast = satin(0x2b2f35, 0.62, 0.60, 0.60);          // powder-coated alloy casting
+  const land = satin(0x33383e, 0.50, 0.55, 0.50, 0.22);    // machined land: one value up
+  const sinkM = satin(0x171a1e, 0.86, 0.30, 0.16);         // shadowed countersink
   const basket = GEO.driverBasket(rOuter * 0.995, depth * 1.12, 6, cast);
   // GEO.driverBasket builds its rim with bevelCyl, which is a *solid* disc and
   // therefore caps the driver opening. Swap it for a true annulus.
@@ -336,25 +364,28 @@ function makeDriver(o) {
   basket.position.y = -0.021;
   inner.add(basket);
 
-  // --- mounting flange + fixings ---------------------------------------------
-  const fl = ring(rOuter * 0.985, flangeR, 0.0075, cast, 0.0007);
+  /*
+   * --- mounting flange -------------------------------------------------------
+   *
+   * The MACHINED LAND is back, and it is a dielectric.
+   *
+   * The last revision deleted every bright ring on the driver because they all
+   * clipped to white. The clipping was never the ring's shape, it was its
+   * metalness: a bare metal annulus has F0 = albedo and returns several units of
+   * linear radiance along the whole arc where it mirrors a punctual source. As a
+   * satin dielectric (F0 = 0.04 · specularIntensity) it cannot, so the flange
+   * gets back the one detail that carries the driver's scale — a bright machined
+   * face a clear value above the casting behind it, with the countersinks cut
+   * into it as dark punctuation.
+   */
+  const fl = ring(rOuter * 0.985, flangeR, 0.0075, land, 0.0007);
   fl.position.y = -0.0018;
   inner.add(fl);
-  /*
-   * THERE IS NO POLISHED TRIM RING, and that is a deliberate deletion.
-   *
-   * A bevelled metal ANNULUS is the worst possible specular shape in this rig:
-   * a sphere that mirrors a source returns a two-pixel glint and reads as
-   * jewellery, but a ring satisfies the mirror condition along a whole arc and
-   * returns a blown patch. Every roughness and albedo that still read as
-   * "machined trim" clipped to 100 % white somewhere on the circle of every
-   * driver in the frame — and because the bloom threshold is 0.92, that patch
-   * then washed a halo across the entire cabinet, which is why the lacquer read
-   * mid-grey in the wide shot instead of black. Deleting it fixed both. The
-   * cast flange with eight countersunk fasteners carries the detail on its own.
-   */
 
-  // Machined countersinks with a real fastener in each: at 220 mm the head is
+  // Machined countersinks with a real fastener in each. The cone is 210 mm
+  // EFFECTIVE, not 220: Sd = π·rEff² with rEff = 105 mm is 0.0346 m², which is
+  // exactly DRIVER.Sd. (spec.js's comment on that line still says 220 mm; the
+  // number is right and the comment is not — flagged to the lead.) The head is
   // ~9 mm across, which is what gives the driver its sense of size.
   const boltR = (rOuter + flangeR) / 2;
   for (let i = 0; i < bolts; i++) {
@@ -422,7 +453,7 @@ function makeDriver(o) {
       const t = i / 16;
       pp.push(new THREE.Vector2(plug * Math.cos((Math.PI / 2) * t), plug * 1.35 * Math.sin((Math.PI / 2) * t) - depth * 0.55));
     }
-    const pm = new THREE.Mesh(new THREE.LatheGeometry(pp, 48), matt('alu', 0x5b626a, 0.82, 0.20));
+    const pm = new THREE.Mesh(new THREE.LatheGeometry(pp, 48), satin(0x5b626a, 0.52, 0.70, 0.60, 0.25));
     pm.castShadow = true;
     inner.add(pm);
   }
@@ -465,7 +496,9 @@ function makeDriver(o) {
 
 /** 25 mm dome tweeter in a machined faceplate with a shallow waveguide. */
 function makeTweeter(faceR = 0.052, domeR = 0.0125) {
-  const face = matt('alu', 0x555b63, 0.74, 0.30);
+  // Dielectric, for the reason in satin(): as a metal this faceplate rim was
+  // one of the two surfaces that printed a clipped white square on every frame.
+  const face = satin(0x3f454c, 0.48, 0.60, 0.52, 0.24);
   const g = new THREE.Group();
   const inner = new THREE.Group();
   inner.rotation.x = Math.PI / 2;
@@ -486,9 +519,10 @@ function makeTweeter(faceR = 0.052, domeR = 0.0125) {
   rim.position.y = -0.0022;
   inner.add(rim);
 
-  // dome + half-roll surround
-  const domeM = hw().dome.clone();
-  domeM.color.setHex(0x9a9587); domeM.roughness = 0.34; domeM.envMapIntensity = 0.55;
+  // dome + half-roll surround. A 25 mm convex mirror collapses the whole studio
+  // into one point, so the dome is the single most clip-prone surface in the
+  // frame; it keeps its bright glint from a clearcoat rather than from F0.
+  const domeM = satin(0x8e8a7d, 0.30, 0.90, 0.70, 0.55);
   const dm = new THREE.Mesh(new THREE.SphereGeometry(domeR, 40, 20, 0, TAU, 0, Math.PI * 0.52), domeM);
   dm.position.y = -0.0031;
   dm.castShadow = true;
@@ -519,6 +553,7 @@ function makeTweeter(faceR = 0.052, domeR = 0.0125) {
     inner.add(s);
   }
   GEO.shadowed(g);
+  g.traverse((c) => { if (c.isMesh) c.castShadow = false; });
   return g;
 }
 
@@ -563,7 +598,7 @@ function bafflePlate(w, h, T, holes, mat) {
   });
   g.translate(0, 0, -T + 0.0026);
   const m = new THREE.Mesh(g, mat);
-  m.castShadow = m.receiveShadow = true;
+  m.castShadow = true; m.receiveShadow = true;
   return m;
 }
 
@@ -578,12 +613,18 @@ function makeCabinet() {
   const g = new THREE.Group();
 
   // --- spikes and machined plinth --------------------------------------------
+  // Spikes and lock collars are satin for the same reason as the flange: a
+  // 3 mm polished cone is narrower than the reflected image of any source in
+  // the rig, so as a metal it returns a clipped point and four white sparks sit
+  // along the bottom of the frame.
+  const spikeM = satin(0x555b63, 0.42, 0.60, 0.55, 0.30);
+  const lockM = satin(0x3f454c, 0.50, 0.55, 0.48, 0.20);
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    const spike = new THREE.Mesh(GEO.bevelCyl(0.0016, 0.0155, 0.044, 26, 0.0008), hw().steel);
+    const spike = new THREE.Mesh(GEO.bevelCyl(0.0016, 0.0155, 0.044, 26, 0.0008), spikeM);
     spike.position.set(sx * 0.163, 0.022, sz * 0.215);
     spike.castShadow = true;
     g.add(spike);
-    const lock = new THREE.Mesh(GEO.bevelCyl(0.021, 0.021, 0.0065, 30, 0.0006), hw().alu);
+    const lock = new THREE.Mesh(GEO.bevelCyl(0.021, 0.021, 0.0065, 30, 0.0006), lockM);
     lock.position.set(spike.position.x, 0.0415, spike.position.z);
     g.add(lock);
   }
@@ -597,8 +638,7 @@ function makeCabinet() {
   g.add(bass, head);
   // The alloy gantry is the joint between the two modules and it has to be
   // brighter and proud of both, or the cabinet reads as three stacked boxes.
-  const gantM = hw().alu.clone();
-  gantM.color.setHex(0x9aa0a8); gantM.envMapIntensity = 1.25; gantM.roughness = 0.26;
+  const gantM = satin(0x32373d, 0.48, 0.50, 0.48, 0.22);
   const gant = prism(PLAN_GANT, GANT_H, { y0: GANT_Y0, corner: 0.010, bevel: 0.0022, mat: gantM });
   g.add(gant);
   const capM = hw().anodGrey.clone(); capM.color.setHex(0x2b2f34); capM.roughness = 0.50;
@@ -710,7 +750,8 @@ function makeCabinet() {
   g.add(rear);
 
   // --- badge -------------------------------------------------------------------
-  const badge = new THREE.Mesh(GEO.bevelCyl(0.0155, 0.0155, 0.0022, 40, 0.0005), hw().alu);
+  const badge = new THREE.Mesh(GEO.bevelCyl(0.0155, 0.0155, 0.0022, 40, 0.0005),
+    satin(0x565c64, 0.46, 0.60, 0.55, 0.25));
   badge.rotation.x = Math.PI / 2 - RAKE_BASS;
   badge.position.set(0, 0.118, zBass(0.118) + 0.0006);
   g.add(badge);
@@ -815,16 +856,16 @@ function buildSection() {
    */
   const st = hw().steel.clone();                            // machined low-carbon steel
   st.roughnessMap = null; st.normalMap = null;
-  st.color.setHex(0xb0b8c2); st.roughness = 0.32; st.metalness = 1.0; st.envMapIntensity = 0.60;
+  st.color.setHex(0xa8b0ba); st.roughness = 0.34; st.metalness = 1.0; st.envMapIntensity = 0.55;
   const po = st.clone();                                    // pole piece + back plate
-  po.color.setHex(0x6a717a); po.roughness = 0.50; po.envMapIntensity = 0.40;
+  po.color.setHex(0x474d55); po.roughness = 0.58; po.envMapIntensity = 0.28;
   // Ferrite is a dielectric, but a dielectric in this rig returns almost no
   // light at all and the ring magnets went black against a black card. Given a
   // little metalness it picks the environment up at a mid value and the four
   // parts of the circuit finally separate.
   const mg = hw().lamination.clone();
   mg.roughnessMap = null; mg.normalMap = null;
-  mg.color.setHex(0x3c424a); mg.roughness = 0.70; mg.metalness = 0.72; mg.envMapIntensity = 0.55;
+  mg.color.setHex(0x22272d); mg.roughness = 0.78; mg.metalness = 0.68; mg.envMapIntensity = 0.40;
   const cw = hw().magnetWire.clone();
   cw.color.setHex(0xb2632f); cw.roughness = 0.24; cw.envMapIntensity = 1.0;
   const pl = hw().plastic.clone(); pl.color.setHex(0x2a2f36); pl.envMapIntensity = 0.5;
@@ -832,7 +873,14 @@ function buildSection() {
   cn.map = null; cn.color.setHex(0x3a4048); cn.metalness = 0.0; cn.roughness = 0.62;
   cn.clearcoat = 0.20; cn.clearcoatRoughness = 0.40; cn.envMapIntensity = 0.60;
 
-  const card = DIAG.diagramCard(SEC_CARD_W, SEC_CARD_H, { opacity: 0.985, pad: SEC_PAD });
+  /*
+   * opacity 1.0, not 0.985. diagramCard is a TRANSPARENT plate, so it blends
+   * over whatever the opaque pass already wrote — and 1.5 % of a near-white
+   * subwoofer dust cap standing behind it printed as a grey sphere floating on
+   * the card with nothing to explain it. That is the art director's finding 7,
+   * and it is a compositing bug rather than a stray object.
+   */
+  const card = DIAG.diagramCard(SEC_CARD_W, SEC_CARD_H, { opacity: 1.0, pad: SEC_PAD });
   card.position.set(SEC_X0, SEC_Y0, -0.018);
   g.add(card);
 
@@ -846,7 +894,7 @@ function buildSection() {
 
   // hairline outlines: without them the gap slot vanishes at this scale
   const OUT = 0xbcc4ce;
-  const box = (x0, x1, y0, y1, w = 1.4, o = 0.92, col = OUT) => {
+  const box = (x0, x1, y0, y1, w = 1.2, o = 0.55, col = OUT) => {
     const t = new DIAG.Trace(5, col, w, { opacity: o, renderOrder: 12 });
     const P = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
     t.write((i) => [P[i][0], P[i][1], 0.0075]);
@@ -910,11 +958,11 @@ function buildSection() {
     const K = [[-0.0535, s * 0.0110], [-0.0535, s * 0.0520], [-0.0400, s * 0.0560],
       [-0.0243, s * 0.0520], [-0.0243, s * 0.0295], [-0.0243, s * 0.0180],
       [-0.0330, s * 0.0110], [-0.0450, s * 0.0100], [-0.0535, s * 0.0110]];
-    const t = new DIAG.Trace(K.length, PAL.cy, 1.6, { opacity: 0.62, renderOrder: 11 });
+    const t = new DIAG.Trace(K.length, PAL.cy, 1.4, { opacity: 0.34, renderOrder: 11 });
     t.write((i) => [K[i][0], K[i][1], 0.0082]);
     g.add(t);
     const head = new THREE.Mesh(new THREE.ConeGeometry(0.0026, 0.0068, 10),
-      new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true, opacity: 0.70 }));
+      new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true, opacity: 0.45 }));
     head.position.set(-0.0243, s * 0.0255, 0.0082);
     head.rotation.z = s > 0 ? Math.PI : 0;          // flux crosses the gap radially inward
     g.add(head);
@@ -981,7 +1029,7 @@ function buildSection() {
    * clear of the winding — so it reads as F = Bl·i acting on the moving
    * assembly, not as free-floating interface chrome.
    */
-  const ARR = 0xd6dce4;
+  const ARR = 0xaeb6c1;
   const fArrow = new DIAG.Trace(2, ARR, 2.6, { opacity: 0.95, renderOrder: 16 });
   const fHead = new THREE.Mesh(new THREE.ConeGeometry(0.0038, 0.0098, 14),
     new THREE.MeshBasicMaterial({ color: ARR, toneMapped: false, transparent: true }));
@@ -1071,15 +1119,22 @@ function screenPt(dx, dy, dist) {
 
 const SEC_D = 2.90, GRA_D = 2.60;
 const SEC_C = screenPt(300, -180, SEC_D);        // motor cutaway card, screen ~(954, 320)
-const GRA_C = screenPt(248, 230, GRA_D);         // graph card,         screen ~(905, 730)
+// The graph card sits FLUSH under the cutaway card. At a 45 px gap the
+// subwoofer's dust cap showed through between them as an unexplained grey
+// sphere — the art director's finding 7 — and a gap that small reads as a
+// misalignment rather than as space anyway.
+const GRA_C = screenPt(248, 192, GRA_D);         // graph card,         screen ~(888, 692)
 // A flat card square to the lens still projects ~5 % wider than the on-axis
 // arithmetic says, because its corners are further off axis than its centre.
 // These two constants are the measured request, not the nominal size.
 const SEC_S = (435 * mPerPx(SEC_D)) / (SEC_CARD_H + SEC_PAD * 2);   // → ~435 px tall
 
-// graph card: plot box 0.60 wide, a wide left margin for the y-axis numerals
-const GW = 0.60, GH = 0.200;
-const GX0 = -0.085, GY0 = -0.010, GCW = 0.703, GCH = 0.540;
+// Graph card: plot box 0.60 wide, a wide left margin for the y-axis numerals.
+// The two plots are pushed 0.13 apart — 72 px on screen — because at the old
+// 0.07 the upper plot's x numerals and the lower plot's top y numeral landed
+// within 30 px of each other and read as one bunched column of digits.
+const GW = 0.60, GH = 0.175;
+const GX0 = -0.085, GY0 = -0.022, GCW = 0.703, GCH = 0.640;
 const GRA_S = (392 * mPerPx(GRA_D)) / GCW;       // → ~400 px wide
 
 /** Orient a flat XY group so it squarely faces the stage camera. */
@@ -1158,13 +1213,13 @@ export default {
     ov.add(secLamp);
     const U = sec.userData;
 
-    // dashed leader from the cutaway back to the driver it is a cut of
-    const wp = new T3.Vector3(0, W_HI_Y, zBass(W_HI_Y) + 0.130);
-    wp.applyAxisAngle(new T3.Vector3(0, 1, 0), near.rotation.y).add(near.position);
-    const lead0 = SEC_C.clone().addScaledVector(RIGHTV, -(SEC_CARD_W / 2 + SEC_PAD) * SEC_S);
-    const leader = new DIAG.Trace(2, PAL.cy, 1.1, { opacity: 0.22, dashed: true, dashSize: 0.020, gapSize: 0.016 });
-    leader.write((i) => (i === 0 ? [lead0.x, lead0.y, lead0.z] : [wp.x, wp.y, wp.z]));
-    ov.add(leader);
+    /*
+     * The long dashed leader from the card back to the woofer is GONE. It ran
+     * the full width of the clear stage at a shallow diagonal and read as a
+     * stray rule crossing the picture rather than as a tie between a part and
+     * its section. The cut is tied to the driver by being a recognisable cut of
+     * it, and by the four short leaders below.
+     */
 
     // (b) two plots on one card: what the box does, and what it costs in travel
     const gwrap = new T3.Group();
@@ -1175,7 +1230,7 @@ export default {
     const inner = new T3.Group();
     inner.position.set(-(GX0 + GCW / 2), -(GY0 + GCH / 2), 0);
     gwrap.add(inner);
-    const gcard = DIAG.diagramCard(GCW - 0.036, GCH - 0.036, { opacity: 0.985, pad: 0.018 });
+    const gcard = DIAG.diagramCard(GCW - 0.036, GCH - 0.036, { opacity: 1.0, pad: 0.018 });
     gcard.position.set(GX0, GY0, 0);
     inner.add(gcard);
 
@@ -1186,7 +1241,7 @@ export default {
       w: GW, h: GH, xLog: true, xRange: [15, 400], yRange: [-27, 6],
       yTicks: [-24, -18, -12, -6, 0, 6], zeroLine: 0,
     });
-    gR.position.set(0, 0.300, 0.001);
+    gR.position.set(0, 0.415, 0.001);
     inner.add(gR);
     gR.addTrace((f) => DSP.sealedResponseDb(f, TS.fs, Qts), { color: PAL.cyDim, width: 1.6, dashed: true });
     gR.addTrace((f) => DSP.sealedResponseDb(f, AL.fc, AL.Qtc), { color: PAL.cy, width: 2.8 });
@@ -1197,24 +1252,35 @@ export default {
     gR.tickLabels(ctx.labels, {
       xVals: [15, 400], yVals: [0, -12, -24],
       xFmt: fTick, yFmt: (v) => v.toFixed(0),
-      xOffset: [0, 12], yOffset: [-19, 0], priority: 5,
+      xOffset: [0, 12], yOffset: [-22, 0], priority: 5,
     });
 
-    // excursion at constant SPL, one driver
+    /*
+     * Excursion at constant SPL, ONE driver — and the 80 Hz marker that says
+     * this driver is never asked for most of it.
+     *
+     * The measurement editor's objection to the last revision was that the whole
+     * chapter demonstrates a band the active LR4 at XOVER.fLow has already handed
+     * to the subwoofers, so a reader coming from the crossover chapter reads the
+     * excursion curve as a claim about the assembled system. It is not: it is
+     * what this driver could do. The marker and its numeral put that on the plot
+     * instead of burying it in the prose.
+     */
     const gX = new DIAG.Graph({
-      w: GW, h: GH, xLog: true, xRange: [24, 200], yRange: [0, 14], yTicks: [0, 4, 8, 12],
+      w: GW, h: GH, xLog: true, xRange: [24, 200], yRange: [0, 12], yTicks: [0, 4, 8, 12],
     });
-    gX.position.set(0, 0.030, 0.001);
+    gX.position.set(0, 0.105, 0.001);
     inner.add(gX);
-    gX.addBand(TS.Xmax * 1000, 14, PAL.am, 0.13);
+    gX.addBand(TS.Xmax * 1000, 12, PAL.am, 0.13);
     gX.addTrace(() => TS.Xmax * 1000, { color: PAL.am, width: 1.3, dashed: true, n: 2 });
     gX.addTrace((f) => DSP.excursionForSpl(SPL_REF, f, TS.Sd) * 1000, { color: PAL.am, width: 2.8 });
     gX.addMarker(F_XMAX, { color: PAL.am, opacity: 0.5 });
+    gX.addMarker(XOVER.fLow, { color: PAL.cy, opacity: 0.75, dashed: false, width: 1.6 });
     const dotX = gX.addDot(PAL.cy, 0.006);
     gX.tickLabels(ctx.labels, {
-      xVals: [24, 200], yVals: [0, 8, 14],
-      xFmt: fTick, yFmt: (v) => (v === 8 ? '8 = Xmax' : v.toFixed(0)),
-      xOffset: [0, 12], yOffset: [-24, 0], priority: 5,
+      xVals: [24, XOVER.fLow, 200], yVals: [0, 8, 12],
+      xFmt: fTick, yFmt: (v) => v.toFixed(0),
+      xOffset: [0, 12], yOffset: [-22, 0], priority: 5,
     });
 
     // the specular layer over the plots, matching the one over the cutaway
@@ -1228,41 +1294,83 @@ export default {
       inner.add(o);
       return o;
     };
-    // Captions go in each plot's genuinely empty quadrant: the sealed response
-    // rises left to right, so the space under it on the right is free; the
-    // excursion curve falls, so the space under it on the left is free.
-    const aR = anch(gR, 130, -17.5), aX = anch(gX, 78, 11.4);
+    /*
+     * Captions go where the trace is not.
+     *
+     * The sealed response rises left to right and is flat along the top by
+     * 130 Hz, so the bottom-right quadrant of that plot is empty. The excursion
+     * curve falls left to right and is under 0.7 mm above 100 Hz, so the band
+     * between the curve and the Xmax shading on the right is empty. Both
+     * captions are anchored to the right-hand edge and pulled left by half their
+     * own width, so neither ever sits on the curve it describes.
+     */
+    const aR = anch(gR, Math.sqrt(15 * 400), -27), aX = anch(gX, Math.sqrt(24 * 200), 0);
 
     // ---------------- labels --------------------------------------------------
-    // Four annotations on the cutaway, stacked in the clear column between the
-    // cabinet and the card with leader dots, plus one caption per plot. Nothing
-    // sits on top of the part it names.
+    /*
+     * Four annotations on the cutaway.
+     *
+     * They were 240–360 px from the parts they name, with no leader, floating
+     * over the cabinet and over empty space. Now each one is anchored to a fixed
+     * point in the clear column between cabinet and card, stacked in the same
+     * order as the parts run down the drawing, and each has a SHORT drawn leader
+     * ending on its own part. One body line each: a callout on a product render
+     * is one line, and the third line belongs in the panel.
+     */
     const L = ctx.labels;
-    const secAnchor = (x, y, z) => { const o = new T3.Object3D(); o.position.set(x, y, z || 0.012); sec.add(o); return o; };
-    const lF = L.add(secAnchor(0.044, 0.0), {
-      kicker: 'Motor force', text: 'F = Bl · i, on the moving assembly',
-      value: '0.0 N', cls: 'am', offset: [-360, -122], occlude: false, priority: 4,
+    const LEAD_COL = 68;                        // px right of the camera axis
+    /**
+     * Anchor a label at a fixed screen position and rule a leader from its right
+     * edge to a point in the section's own local frame.
+     * @param dy   px below the camera axis
+     * @param lx,ly  the part, in section-local metres
+     */
+    const call = (dy, lx, ly, opts) => {
+      const a = new T3.Object3D();
+      a.position.copy(screenPt(LEAD_COL, dy, SEC_D));
+      ov.add(a);
+      const part = new T3.Vector3(lx, ly, 0.012).applyMatrix4(sec.matrixWorld);
+      const from = screenPt(LEAD_COL + 118, dy, SEC_D);
+      const t = new DIAG.Trace(3, 0xa7b0bb, 1.2, { opacity: 0.50, renderOrder: 9 });
+      t.write((i) => (i === 0 ? [from.x, from.y, from.z]
+        : i === 1 ? [from.x + (part.x - from.x) * 0.34, from.y, from.z]
+          : [part.x, part.y, part.z]));
+      ov.add(t);
+      const dot = new T3.Mesh(new T3.CircleGeometry(mPerPx(SEC_D) * 2.6, 12),
+        new T3.MeshBasicMaterial({ color: 0xc3cad3, toneMapped: false, transparent: true, opacity: 0.5 }));
+      dot.position.copy(part);
+      faceCamera(dot);
+      dot.renderOrder = 10;
+      ov.add(dot);
+      return L.add(a, Object.assign({ offset: [0, 0], occlude: false }, opts));
+    };
+    sec.updateMatrixWorld(true);
+
+    const lC = call(-330, 0.016, 0.078, {
+      kicker: 'CHARGE CARRIERS', text: 'they oscillate; they never arrive',
+      value: `±0 µm · shown ×${EXAG}`, cls: 'am', priority: 3,
     });
-    const lI = L.add(secAnchor(X_BACK1, 0.0), {
-      kicker: 'Voice coil', text: `${WIRE_LEN.toFixed(1)} m of 0.32 mm wire in ${B_GAP.toFixed(2)} T`,
-      value: 'i = 0.00 A', cls: 'am', offset: [-238, 26], occlude: false, priority: 3,
+    const lI = call(-232, X_GAPC, R_COIL, {
+      kicker: 'VOICE COIL', text: `${L_IN_GAP.toFixed(1)} m of wire in ${B_GAP.toFixed(2)} T`,
+      value: 'i = 0.00 A', cls: 'am', priority: 3,
     });
-    const lX = L.add(secAnchor(X_GAPC, -0.092, 0.008), {
-      kicker: 'Cone travel', text: 'Xmax 8.0 mm in an 8.5 mm gap',
-      value: '±0.00 mm at 30.0 Hz', cls: 'acc', offset: [-262, 46], occlude: false, priority: 4,
+    const lF = call(-134, 0.029, 0.0, {
+      kicker: 'MOTOR FORCE', text: 'F = Bl · i, on 49 g of moving mass',
+      value: '0.0 N', cls: 'am', priority: 4,
     });
-    const lC = L.add(secAnchor(0.030, -0.086), {
-      kicker: 'Charge carriers', text: 'they oscillate, they never arrive',
-      value: `±0 µm · ×${EXAG} (cone 1 : 1)`, cls: 'am', offset: [-88, 72], occlude: false, priority: 3,
+    const lX = call(-32, X_GAPC, -0.092, {
+      kicker: 'CONE TRAVEL',
+      text: `Xmax ${(TS.Xmax * 1000).toFixed(1)} mm in an ${(H_GAP * 1000).toFixed(1)} mm gap`,
+      value: '±0.00 mm at 30.0 Hz · one of four', cls: 'acc', priority: 4,
     });
     const lR = L.add(aR, {
-      kicker: 'Sealed 30 L · dB · −12 dB/oct',
-      value: `fc ${AL.fc.toFixed(1)} · Qtc ${AL.Qtc.toFixed(2)} · f₃ ${F3.toFixed(1)} Hz`,
-      cls: 'acc', offset: [-16, 4], occlude: false, priority: 2,
+      kicker: `SEALED ${(Vb * 1000).toFixed(0)} L · −12 dB/octave`,
+      value: `fc ${AL.fc.toFixed(1)} Hz · Qtc ${AL.Qtc.toFixed(3)} · f₃ ${F3.toFixed(1)} Hz`,
+      cls: 'acc', offset: [0, 44], occlude: false, priority: 2,
     });
     const lXg = L.add(aX, {
-      kicker: `Excursion · mm · ${SPL_REF} dB at 1 m, 1 driver`,
-      value: '—', cls: 'am', offset: [-14, 0], occlude: false, priority: 2,
+      kicker: `EXCURSION · mm · ${SPL_REF} dB, 1 m`,
+      value: '—', cls: 'am', offset: [0, 44], occlude: false, priority: 2,
     });
 
     S = {
@@ -1321,9 +1429,12 @@ export default {
     U.markT.userData.setInto(into);
     U.markB.userData.setInto(!into);
     // Force vector, drawn from the coil itself, just clear of the winding.
-    const fl = DSP.clamp(Math.abs(S.F) / 45, 0, 1) * 0.026 + 0.003;
+    // The arrow lives in the empty axial corridor between the pole piece and
+    // the cone neck. Sprung from x = 0.031 it reached 0.077 at full swing and
+    // drove its head straight through the source symbol at x = 0.045.
+    const fl = DSP.clamp(Math.abs(S.F) / 45, 0, 1) * 0.019 + 0.003;
     const dir = S.F >= 0 ? 1 : -1;
-    const x0 = 0.031 + S.x, yA = 0.0;
+    const x0 = 0.003 + S.x, yA = 0.0;
     U.fArrow.write((i) => [i === 0 ? x0 : x0 + dir * fl, yA, 0.012]);
     U.fHead.position.set(x0 + dir * (fl + 0.005), yA, 0.012);
     U.fHead.rotation.z = dir > 0 ? -Math.PI / 2 : Math.PI / 2;
@@ -1369,41 +1480,35 @@ export default {
     S.lamp.intensity = 1.7 * k;
   },
 
+  /*
+   * 250 words, and it has to STAY there. The still frame is the deliverable and
+   * the panel does not scroll in it: the previous revision ran to 320 and was
+   * cut mid-sentence at "It is second". The elaboration is what gets lost, so
+   * the mechanism and the arithmetic go first and the consequence last.
+   */
   content() {
     return `
 <h3>The motor</h3>
-<div class="key"><span class="lab">The idea</span><p>The coil turns current into
-force and velocity back into voltage with the same constant, <b>Bl</b>.
-Everything else here follows from that one number.</p></div>
-<p><span class="num">${WIRE_LEN.toFixed(1)} m</span> of 0.32 mm copper hangs in a radial gap of
-<span class="num">${B_GAP.toFixed(2)} T</span>. Only the <span class="num">${L_IN_GAP.toFixed(1)} m</span>
-inside the ${(H_GAP * 1000).toFixed(1)} mm gap does any work, so Bl = ${TS.Bl.toFixed(1)} T·m.</p>
-<div class="eq">F = Bl · i        e = Bl · v
-${F_LO} Hz at ${SPL_REF} dB:  F̂ = <span class="hl">${F30.toFixed(1)} N</span>
-        î = F̂/Bl = <span class="hl">${I30.toFixed(2)} A</span></div>
-<p>Current is a <b>loop</b>: in on one tinsel lead, ${N_TURNS.toFixed(0)} turns round the
-former, out on the other. Nothing travels down it — at ${F_LO} Hz the carriers
-oscillate about a fixed point by <span class="num">${(DR30 * 1e6).toFixed(1)} µm</span> while the
-cone moves <span class="num">${(X30 * 1000).toFixed(2)} mm</span>,
-<span class="num">${(X30 / DR30).toFixed(0)}×</span> further. The field fills the winding in
-<span class="num">${(T_FILL * 1e9).toFixed(0)} ns</span>.</p>
+<p><span class="num">Bl</span> = <span class="num">${TS.Bl.toFixed(1)} T·m</span>: of the coil's
+${WIRE_LEN.toFixed(1)} m of 0.32 mm copper, <span class="num">${L_IN_GAP.toFixed(1)} m</span> lies in
+an ${(H_GAP * 1000).toFixed(1)} mm gap at ${B_GAP.toFixed(2)} T.</p>
+<div class="eq">F = Bl·i = <span class="hl">${F30.toFixed(1)} N</span> at ${F_LO} Hz, ${SPL_REF} dB
+i = F/Bl = <span class="hl">${I30.toFixed(2)} A</span>   coil fills in ${(T_FILL * 1e9).toFixed(0)} ns</div>
+<p>Current is a <b>loop</b> — in on one tinsel lead, ${N_TURNS.toFixed(0)} turns, out on the
+other — and nothing travels down it: carriers oscillate
+<span class="num">${(DR30 * 1e6).toFixed(1)} µm</span>, the cone moves
+<span class="num">${(X30 * 1000).toFixed(2)} mm</span>.</p>
 
 <h3>The cabinet</h3>
 <div class="myth"><span class="lab">Commonly got wrong</span><p>A sealed box rolls off at
-<b>12 dB/octave</b>, not 24. It is second order: one moving mass, one compliance
-of suspension plus trapped air.</p></div>
-<div class="eq">Vas = ρc²·Sd²·Cms = ${(Vas * 1000).toFixed(0)} L
-α  = Vas/Vb = ${(Vas * 1000).toFixed(0)}/${(Vb * 1000).toFixed(0)} = ${AL.alpha.toFixed(2)}
-fc = fs·√(α+1) = <span class="hl">${AL.fc.toFixed(1)} Hz</span>  Qtc ${AL.Qtc.toFixed(3)}
-f₃ ${F3.toFixed(1)} Hz  |Z|max ${ZMAX.toFixed(0)} Ω  η₀ ${(ETA0 * 100).toFixed(2)} %
-<span class="c">→ ${SENS.toFixed(1)} dB at 2.83 V/1 m (${P_283.toFixed(2)} W here)
-   ${SPL_1W.toFixed(1)} dB at a true 1 W</span></div>
-<p>Far-field pressure follows volume <em>acceleration</em>, so holding SPL flat
-forces <b>x ∝ 1/f²</b>: <span class="num">${(X30 * 1000).toFixed(2)} mm</span> at ${F_LO} Hz
-against <span class="num">${(X100 * 1000).toFixed(2)} mm</span> at ${F_HI} Hz. Xmax is
-(${(H_COIL * 1000).toFixed(1)} − ${(H_GAP * 1000).toFixed(1)})/2 =
-<span class="num">${(XMAX_CHK * 1000).toFixed(1)} mm</span>, so below
-<span class="num">${F_XMAX.toFixed(1)} Hz</span> it runs out of travel.</p>`;
+<b>12 dB/octave</b>, not 24 — second order: one mass, one compliance.</p></div>
+<div class="eq">α = Vas/Vb = ${(Vas * 1000).toFixed(0)}/${(Vb * 1000).toFixed(0)} = ${AL.alpha.toFixed(2)}
+fc = fs·√(α+1) = <span class="hl">${AL.fc.toFixed(1)} Hz</span>    Qtc ${AL.Qtc.toFixed(3)}
+f₃ ${F3.toFixed(1)} Hz  η₀ ${(ETA0 * 100).toFixed(2)} %  ${SENS.toFixed(1)} dB at 2.83 V</div>
+<p>Each woofer has its own sealed ${(Vb * 1000).toFixed(0)} L chamber. Every figure is
+<b>per driver</b>: four are 12 dB louder. Travel runs out below
+<span class="num">${F_XMAX.toFixed(1)} Hz</span>, which the LR4 at
+<span class="num">${XOVER.fLow} Hz</span> never asks for.</p>`;
   },
 
   readouts() {
@@ -1426,9 +1531,9 @@ against <span class="num">${(X100 * 1000).toFixed(2)} mm</span> at ${F_HI} Hz. X
     const L = s.labels;
     L.lF.setValue(`${sgn(d.F, 1)} N`);
     L.lI.setValue(`i = ${sgn(d.i, 2)} A`);
-    L.lC.setValue(`±${(d.dr * 1e6).toFixed(1)} µm · ×${EXAG} (cone 1 : 1)`);
-    L.lX.setValue(`±${(d.xp * 1000).toFixed(2)} mm at ${d.f.toFixed(1)} Hz`);
-    L.lXg.setValue(`${(d.xp * 1000).toFixed(2)} mm at ${d.f.toFixed(0)} Hz`);
+    L.lC.setValue(`±${(d.dr * 1e6).toFixed(1)} µm · shown ×${EXAG}`);
+    L.lX.setValue(`±${(d.xp * 1000).toFixed(2)} mm at ${d.f.toFixed(1)} Hz · one of four`);
+    L.lXg.setValue(`${(d.xp * 1000).toFixed(2)} mm at ${d.f.toFixed(0)} Hz · LR4 hands over at ${XOVER.fLow} Hz`);
     const sg = sgn;
     return [
       { k: 'DRIVE', v: d.f.toFixed(1), u: 'Hz' },
@@ -1436,7 +1541,7 @@ against <span class="num">${(X100 * 1000).toFixed(2)} mm</span> at ${F_HI} Hz. X
       { k: 'FORCE', v: sg(d.F, 1), u: 'N', cls: 'am', bar: Math.abs(d.F) / Math.max(s.Fp, 1e-6) },
       { k: 'BACK-EMF', v: sg(d.e, 1), u: 'V', cls: 'acc' },
       { k: 'CONE X', v: sg(d.x * 1000, 2), u: 'mm', cls: 'acc', bar: Math.abs(d.x) / TS.Xmax },
-      { k: 'TERMINAL V', v: sg(d.v, 1), u: 'V · 1 drv', cls: 'acc' },
+      { k: 'TERMINAL V', v: sg(d.v, 1), u: 'V', cls: 'acc' },
     ];
   },
 };

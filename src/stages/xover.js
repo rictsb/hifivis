@@ -15,11 +15,10 @@ import { XOVER, SPEAKER, AMP, CABLE, DRIVER, DAMPING } from '../core/spec.js';
        mid  = HP4(fL) · LP4(fH)
        high = HP4(fL) · HP4(fH)
 
-   One instrument panel, two plot regions. The panel carries the only picture
-   that beats prose: the three bands, each −6.02 dB at its own crossover, the
-   green sum on 0 dB, and the LR2-every-driver-positive mistake in red beside
-   it. Phase, the passive-network arithmetic and the acoustic caveat are in
-   content().
+   One instrument panel, two plot regions, everything docked inside it — the
+   legend included. The panel carries the only picture that beats prose: the
+   three bands, each −6.02 dB at its own crossover, the green sum on 0 dB, and
+   the LR2-every-driver-positive mistake beside it as two deep bowls.
 
    EVERY PRIMARY COMES FROM ../core/spec.js. Nothing here re-declares a
    crossover frequency, a nominal impedance, a cable resistance, an output
@@ -36,9 +35,13 @@ const SLOPE_DB_OCT = 20 * ORDER * Math.log10(2);   // 24.0824 dB/oct
 const XO_DB = DSP.dB(0.5);              // −6.0206 dB — each band at its own fc
 
 // --- the passive network this box exists to avoid ---------------------------
-// A passive LR4 low-pass is TWO cascaded 2nd-order Butterworth sections, not
-// one coil. Each section, into a resistive R at ω_c:
+// A passive LR4 low-pass is TWO cascaded 2nd-order sections, not one coil. The
+// textbook Butterworth pair, into a resistive R at ω_c, is
 //     L = √2·R/ω_c      C = 1/(√2·R·ω_c)
+// but two of those cascaded directly do NOT realise LR4: the first section is
+// terminated by the second's finite input impedance, not by R, so a real ladder
+// has four different element values and has to be co-designed. What survives is
+// the PART COUNT and the series copper, which is the whole argument here.
 const Z_NOM = SPEAKER.nominalZ;         // 8 Ω nominal load
 const W_C = DSP.TAU * FL;               // 502.65 rad/s
 const L_SEC = (Math.SQRT2 * Z_NOM) / W_C;          // 22.51 mH per section
@@ -52,16 +55,19 @@ const R_NET = N_SEC * R_SEC;            // 1.00 Ω of series copper
 // chapter and the monoblock chapter quote the same wire.
 const RS_ACT = AMP.zOut + CABLE.rLoop;             // 61.4 mΩ
 const RS_PAS = RS_ACT + R_NET;                     // 1.0614 Ω
-const DF_ACT = DAMPING.atDriver;                   // 130.3 — at the driver, not the terminals
-const DF_TERM = DAMPING.atTerminals;               // 400.0 — the number brochures print
+// Damping factor AT THE DRIVER, which is the only place it means anything: the
+// 400 that DAMPING.atTerminals returns ignores the cable that is always there.
+const DF_ACT = DAMPING.atDriver;                   // 130.3
 const DF_PAS = DSP.dampingFactor(Z_NOM, RS_PAS);   // 7.5
 const RE_COIL = DRIVER.Re;                         // 6.2 Ω, voice-coil dc resistance
 const RD_ACT = RE_COIL + RS_ACT;                   // 6.261 Ω — what actually damps the cone
 const RD_PAS = RE_COIL + RS_PAS;                   // 7.261 Ω
 const RD_PCT = 100 * (RD_PAS / RD_ACT - 1);        // +16.0 %
-// Insertion loss: the level lost to the extra series copper, both cases loaded
-// by the same nominal Z.
+// Insertion loss. A loss is a positive quantity; the signed level change is
+// negative. Print the magnitude and call it a loss, or the reader is invited to
+// think the passive network has a decibel of gain.
 const INSERT_DB = DSP.dB(Z_NOM / (Z_NOM + RS_PAS)) - DSP.dB(Z_NOM / (Z_NOM + RS_ACT));
+const INSERT_LOSS = Math.abs(INSERT_DB);           // 1.02 dB
 // The NETWORK'S OWN share of the power in the loop — not the cable's, not the
 // amplifier's. Those two are present in the active case as well.
 const LOSS_PCT = (100 * R_NET) / (Z_NOM + RS_PAS); // 11.0 %
@@ -80,16 +86,15 @@ const bHigh = (f) => DSP.cMul(HP(f, FL, ORDER), HP(f, FH, ORDER));
 const bSum = (f) => DSP.cAdd(DSP.cAdd(bLow(f), bMid(f)), bHigh(f));
 
 // The same three-way built as LR2 with every driver positive — the myth trace.
+// It is not a copy of any band limb: it rides within a decibel of 0 dB across
+// most of the band and collapses into two bowls, −28.8 dB at fL and −57.6 dB at
+// fH, which is a shape nothing else on the plot has.
 const b2Sum = (f) => DSP.cAdd(
   LP(f, FL, 2),
   DSP.cAdd(DSP.cMul(HP(f, FL, 2), LP(f, FH, 2)), DSP.cMul(HP(f, FL, 2), HP(f, FH, 2))),
 );
 
-/* Magnitude in dB, floored at the bottom of the magnitude axis. The Graph's own
-   clip allows a 4 % overshoot outside the frame, which would leave the mid and
-   high bands drawing stray horizontal lines in the gap below the plot box. */
-const DB_FLOOR = -30;
-const dbOf = (fn) => (f) => Math.max(DB_FLOOR, DSP.dB(DSP.cAbs(fn(f))));
+const dbOf = (fn) => (f) => DSP.dB(DSP.cAbs(fn(f)));
 
 /* Phase of the sum is not a product, so it is unwrapped numerically on a log
    grid and group delay taken as −dφ/dω by central difference. */
@@ -129,9 +134,20 @@ for (let i = 0; i < NTAB; i++) {
   if (Math.abs(d) > Math.abs(SUM_ERR)) { SUM_ERR = d; SUM_ERR_F = TAB_F[i]; }
   if (TAB_GD[i] > GD_PEAK) { GD_PEAK = TAB_GD[i]; GD_PEAK_F = TAB_F[i]; }
 }
-const GD_FH = groupDelay(FH);
-const GD_MAX_MS = 8;                                    // group-delay axis top
+const GD_FH = groupDelay(FH);                           // 0.212 ms
 const PHASE_SPAN = sumPhaseDeg(20) - sumPhaseDeg(20000); // 660°
+
+/* The group-delay axis is LOGARITHMIC in milliseconds. On a linear 0–8 ms axis
+   the trace is flat on zero from 200 Hz up — two thirds of the plot dead, and
+   the 2.2 kHz crossover's own 0.21 ms contribution invisible. Three decades of
+   ms put both quoted figures on the same picture. */
+const GD_LO_MS = 0.01, GD_HI_MS = 10;
+const gdMs = (f) => groupDelay(f) * 1e3;
+const gdLog = (f) => Math.log10(Math.max(1e-9, gdMs(f)));
+
+// Magnitude axis. −36 dB puts every band's own −36 dB crossing inside the box,
+// so no trace is ever floored along the bottom axis.
+const DB_LO = -36, DB_HI = 6;
 
 const fmtF = (f) => (f >= 1000 ? `${(f / 1000).toFixed(2)} kHz` : `${f.toFixed(0)} Hz`);
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
@@ -145,11 +161,11 @@ const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
  *
  * A lit meter with nothing over it reads as a decal, because a real instrument
  * is seen through glass and the glass carries the room. The panel is spherical
- * with a very long radius, so the reflected image of the studio's front strip
- * sweeps across it as one soft band rather than sitting still. Additive
- * blending with a black base colour is the honest model: the Fresnel reflection
- * ADDS to what is transmitted, it does not multiply it, so the trace underneath
- * keeps its contrast.
+ * with a long radius, so the reflected image of the studio's front strip sweeps
+ * across it as one soft band rather than sitting still. Additive blending with
+ * a black base colour is the honest model: the Fresnel reflection ADDS to what
+ * is transmitted, it does not multiply it, so the trace underneath keeps its
+ * contrast.
  */
 function lensPanel(w, h, opts = {}) {
   const {
@@ -165,7 +181,7 @@ function lensPanel(w, h, opts = {}) {
   g.computeVertexNormals();
   const m = new THREE.MeshPhysicalMaterial({
     color: 0x000000, metalness: 0.0, roughness: rough,
-    clearcoat: 1.0, clearcoatRoughness: 0.05,
+    clearcoat: 1.0, clearcoatRoughness: 0.04,
     envMapIntensity: envI, transparent: true, opacity: 1,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
@@ -178,8 +194,8 @@ function lensPanel(w, h, opts = {}) {
 
 /**
  * The instrument panel the plots live on: a bevelled slab with a lit rim, an
- * inset screen and glass over it. Local origin is the bottom-left of the plot
- * area, so the Graphs can be positioned in panel coordinates.
+ * inset screen and glass over it. Local origin is the bottom-left of the panel,
+ * so the Graphs can be positioned in panel coordinates.
  *
  * NOT `DIAG.diagramCard`: `DIAG.fadeTree` calls a group's `userData.setOpacity`
  * and then *keeps traversing into its children*, so a card's plate mesh has its
@@ -191,17 +207,17 @@ function lensPanel(w, h, opts = {}) {
  * rack shelves print straight through the graph.
  */
 function panel(w, h, opts = {}) {
-  const { bezel = 0.013, thick = 0.008 } = opts;
+  const { bezel = 0.014, thick = 0.009 } = opts;
   const g = new THREE.Group();
 
   // Bevelled body — a real 3 mm fillet, so the rim takes a highlight and the
   // panel stops reading as a compositing layer.
   const body = mats().anodBlack.clone();
-  body.color = new THREE.Color(0x0b0d11);
-  body.roughness = 0.38;
-  body.envMapIntensity = 0.95;
+  body.color = new THREE.Color(0x0c0e13);
+  body.roughness = 0.36;
+  body.envMapIntensity = 1.05;
   const slab = new THREE.Mesh(
-    GEO.bevelBox(w + bezel * 2, h + bezel * 2, thick, 0.0030, 4), body,
+    GEO.bevelBox(w + bezel * 2, h + bezel * 2, thick, 0.0032, 4), body,
   );
   slab.position.set(w / 2, h / 2, -thick / 2);
   slab.castShadow = false;
@@ -226,13 +242,63 @@ function panel(w, h, opts = {}) {
   b.write((i) => [[x0, y0], [x0 + W, y0], [x0 + W, y0 + H], [x0, y0 + H], [x0, y0]][i].concat(0.0008));
   g.add(b);
 
-  // The specular layer.
-  const lens = lensPanel(w + 0.006, h + 0.006, { R: 1.2, rough: 0.06, envI: 2.0 });
-  lens.position.set(w / 2, h / 2, 0.0034);
+  // The specular layer: the studio's front strip sweeps across the glass as one
+  // soft band, so the traces sit BEHIND something instead of being printed on
+  // the backdrop.
+  const lens = lensPanel(w + 0.008, h + 0.008, { R: 0.90, rough: 0.060, envI: 1.95 });
+  lens.position.set(w / 2, h / 2, 0.0036);
   g.add(lens);
   g.userData.lens = lens;
 
   return g;
+}
+
+/**
+ * Draw a function as ONE POLYLINE PER RUN that is inside the plot box, with the
+ * ends carried exactly to the bottom axis.
+ *
+ * `Graph.addTrace` clamps out-of-range samples, which is right for a curve that
+ * dips off-scale once and wrong for a filter band: an LR4 high-pass is 200 dB
+ * down at 20 Hz, so the clamp lays a solid horizontal line along the bottom of
+ * the box for most of its width and three of those on top of each other read as
+ * a real trace. Segmenting is the only honest fix.
+ */
+function runTraces(g, fn, opts = {}) {
+  const {
+    color = PAL.cy, width = 1.6, opacity = 1, n = 560, dashed = false,
+    dashSize = 0.0060, gapSize = 0.0038, z = 0.0006,
+  } = opts;
+  const [y0, y1] = g.o.yRange;
+  const xs = DSP.logSpace(g.o.xRange[0], g.o.xRange[1], n);
+  const ys = new Array(n);
+  for (let i = 0; i < n; i++) ys[i] = fn(xs[i]);
+  // log-x interpolation of the crossing of the floor
+  const cross = (i) => {
+    const t = (y0 - ys[i - 1]) / (ys[i] - ys[i - 1]);
+    return Math.pow(10, Math.log10(xs[i - 1]) + t * (Math.log10(xs[i]) - Math.log10(xs[i - 1])));
+  };
+  const runs = [];
+  let run = null;
+  for (let i = 0; i < n; i++) {
+    if (ys[i] >= y0) {
+      if (!run) { run = []; if (i > 0) run.push([cross(i), y0]); }
+      run.push([xs[i], Math.min(ys[i], y1)]);
+    } else if (run) {
+      run.push([cross(i), y0]);
+      runs.push(run); run = null;
+    }
+  }
+  if (run) runs.push(run);
+  const made = [];
+  for (const r of runs) {
+    if (r.length < 2) continue;
+    const t = new DIAG.Trace(r.length, color, width,
+      { opacity, dashed, dashSize, gapSize, renderOrder: 10 });
+    t.write((i) => [g.x(r[i][0]), g.y(r[i][1]), z]);
+    g.add(t);
+    made.push(t);
+  }
+  return made;
 }
 
 /**
@@ -354,6 +420,86 @@ function rearPanel() {
   return g;
 }
 
+/**
+ * The band-level display: a recessed well, an emissive graticule and three
+ * level bars, and a convex glass over the lot.
+ *
+ * This is the stage's specular set piece. A lit rectangle flush with a fascia is
+ * a decal at any resolution; a lit rectangle sunk 3 mm behind a slightly convex
+ * clear panel is an instrument, because the panel carries a band of the room
+ * across it that moves when the camera moves and does not line up with anything
+ * printed underneath.
+ */
+function bandDisplay() {
+  const M = mats();
+  const g = new THREE.Group();
+  const W = 0.072, H = 0.032;
+
+  /* An APPLIED module, every z positive, because the fascia is a solid plate:
+     anything placed behind its front plane is inside the geometry and the
+     display renders as a dead rectangle. The base plate stands on the fascia,
+     the screen is drawn on its face, and a raised four-strip bezel sinks that
+     face 2.6 mm below the glass — a real recess, made the way a real one is,
+     rather than by burying it. */
+  const base = new THREE.Mesh(GEO.bevelBox(W + 0.012, H + 0.012, 0.0040, 0.0010, 3), M.anodBlack);
+  base.position.set(0, 0, 0.0020);
+  g.add(base);
+
+  const face = new THREE.Mesh(
+    new THREE.PlaneGeometry(W, H),
+    new THREE.MeshBasicMaterial({ color: 0x060a10, toneMapped: false }),
+  );
+  face.position.set(0, 0, 0.0042);
+  g.add(face);
+
+  // Graticule: five verticals, dim.
+  const grid = [];
+  for (let i = 0; i <= 4; i++) {
+    const x = -0.028 + (i / 4) * 0.056;
+    grid.push(x, -0.0115, 0, x, 0.0115, 0);
+  }
+  const gg = new THREE.BufferGeometry();
+  gg.setAttribute('position', new THREE.Float32BufferAttribute(grid, 3));
+  const gl = new THREE.LineSegments(gg, new THREE.LineBasicMaterial({
+    color: 0x2f5468, transparent: true, opacity: 0.9, toneMapped: false, depthWrite: false,
+  }));
+  gl.position.z = 0.0043;
+  g.add(gl);
+
+  // Three band level bars — low, mid, high — at the trims' own settings.
+  const bar = hot(M.meterGlow, 1.05);
+  const cap = hot(M.meterGlow, 1.80);
+  const lev = [0.048, 0.040, 0.034];
+  for (let i = 0; i < 3; i++) {
+    const y = 0.0092 - i * 0.0092;
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(lev[i], 0.0032), bar);
+    b.position.set(-0.028 + lev[i] / 2, y, 0.0044);
+    g.add(b);
+    const c = new THREE.Mesh(new THREE.PlaneGeometry(0.0018, 0.0046), cap);
+    c.position.set(-0.028 + lev[i], y, 0.0044);
+    g.add(c);
+  }
+
+  // Machined bezel: four strips standing proud, so the screen sits in a recess
+  // with a lit edge on all four sides.
+  const bez = satin(M.alu, 0.46, 0.82);
+  for (const [w, h, x, y] of [
+    [W + 0.012, 0.0044, 0, (H + 0.0044) / 2], [W + 0.012, 0.0044, 0, -(H + 0.0044) / 2],
+    [0.0044, H + 0.0044, (W + 0.0044) / 2, 0], [0.0044, H + 0.0044, -(W + 0.0044) / 2, 0],
+  ]) {
+    const s = new THREE.Mesh(GEO.bevelBox(w, h, 0.0028, 0.0006, 3), bez);
+    s.position.set(x, y, 0.0054);
+    g.add(s);
+  }
+
+  // Cover glass, 1.4 mm in front of the bars and inside the bezel's own height.
+  const lens = lensPanel(W + 0.002, H + 0.002,
+    { R: 0.30, seg: 14, rough: 0.05, envI: 2.1, renderOrder: 28 });
+  lens.position.set(0, 0, 0.0058);
+  g.add(lens);
+  return g;
+}
+
 function buildHardware() {
   const M = mats();
   const g = new THREE.Group();
@@ -385,20 +531,21 @@ function buildHardware() {
   }
 
   // Applied control plate for the six trims, machined dark grey.
-  const tray = new THREE.Mesh(GEO.bevelBox(0.303, 0.056, 0.0042, 0.0011, 3), M.anodGrey);
-  tray.position.set(0.084, 0, ZF - 0.0008);
+  const tray = new THREE.Mesh(GEO.bevelBox(0.264, 0.056, 0.0042, 0.0011, 3),
+    satin(M.anodGrey, 0.42, 1.05));
+  tray.position.set(0.048, 0, ZF - 0.0008);
   g.add(tray);
 
   /* Metals that face the camera square-on. The studio's front strip is wide and
-     dim now rather than narrow and hot, so these need to be satin rather than
-     mirror or the six trims and the two selectors return one flat 100 % patch
-     each instead of a highlight with a rolloff. */
-  const markMat = satin(M.chrome, 0.26, 0.60);
-  const trimBody = satin(M.anodGrey, 0.46, 0.72);
-  const selBody = satin(M.alu, 0.36, 0.68);
+     dim now rather than narrow and hot, so these are satin rather than mirror —
+     but not as dark as revision 2 made them, when they were fighting a hot
+     narrow source that no longer exists. */
+  const markMat = satin(M.chrome, 0.24, 0.72);
+  const trimBody = satin(M.alu, 0.46, 0.88);
+  const selBody = satin(M.alu, 0.33, 0.90);
 
   // Six level trims: rows are channels (L above, R below), columns are bands.
-  const colX = [-0.001, 0.078, 0.157];
+  const colX = [-0.022, 0.048, 0.118];
   const rowY = [0.0148, -0.0148];
   const trimAngle = [[-0.34, 0.11, 0.45], [-0.30, 0.17, 0.41]];
   for (let r = 0; r < 2; r++) {
@@ -421,7 +568,7 @@ function buildHardware() {
   const selX = [-0.198, -0.110];
   const selAngle = [-0.62, 0.78];
   for (let i = 0; i < 2; i++) {
-    const bez = new THREE.Mesh(GEO.bevelCyl(0.0205, 0.0205, 0.0022, 48, 0.0005), satin(M.chrome, 0.30, 0.55));
+    const bez = new THREE.Mesh(GEO.bevelCyl(0.0205, 0.0205, 0.0022, 48, 0.0005), satin(M.chrome, 0.28, 0.70));
     bez.rotation.x = Math.PI / 2;
     bez.position.set(selX[i], -0.0015, ZF + 0.0011);
     g.add(bez);
@@ -437,7 +584,7 @@ function buildHardware() {
     }
   }
 
-  // Standby button, power pip, and a small backlit window.
+  // Standby button and power pip.
   const stby = new THREE.Mesh(GEO.bevelCyl(0.0062, 0.0066, 0.0035, 28, 0.0006), selBody);
   stby.rotation.x = Math.PI / 2;
   stby.position.set(-0.254, -0.019, ZF + 0.0018);
@@ -446,24 +593,17 @@ function buildHardware() {
   pwr.position.set(-0.254, 0.020, zf + 0.0011);
   g.add(pwr);
 
-  /* The backlit window: recessed surround, emissive bars, and a convex lens
-     over them. Without the lens the bars are a decal printed on the fascia. */
-  const winWell = new THREE.Mesh(GEO.bevelBox(0.056, 0.024, 0.003, 0.0008, 3), M.anodBlack);
-  winWell.position.set(0.246, 0.0, ZF - 0.0004);
-  g.add(winWell);
-  const glowMat = hot(M.meterGlow, 1.35);
-  for (const [w, x, y] of [[0.038, 0.243, 0.0045], [0.026, 0.237, -0.0045]]) {
-    const bar = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.0024), glowMat);
-    bar.position.set(x, y, ZF + 0.0014);
-    g.add(bar);
-  }
-  const winLens = lensPanel(0.052, 0.021, { R: 0.30, seg: 12, rough: 0.045, envI: 1.05, renderOrder: 28 });
-  winLens.position.set(0.246, 0.0, ZF + 0.0026);
-  g.add(winLens);
+  // The band-level display, right end of the fascia.
+  const disp = bandDisplay();
+  disp.position.set(0.228, 0, ZF + 0.0006);
+  g.add(disp);
 
-  // Brand plate: a broad shallow inset, seen face-on, so it behaves.
-  const plate = new THREE.Mesh(GEO.bevelBox(0.062, 0.013, 0.0014, 0.0005, 3), M.anodGrey);
-  plate.position.set(-0.152, 0.0248, ZF - 0.0005);
+  /* Maker's badge. Recessed and dark it read as a small blank screen, which is
+     worse than nothing on a fascia that already has a display; raised, satin
+     and shallow it reads as an applied metal plate and takes a highlight. */
+  const plate = new THREE.Mesh(GEO.bevelBox(0.062, 0.011, 0.0016, 0.0005, 3),
+    satin(M.chrome, 0.32, 0.82));
+  plate.position.set(-0.152, 0.0248, ZF + 0.0008);
   g.add(plate);
 
   // Fascia fixings.
@@ -492,14 +632,21 @@ function buildHardware() {
 
   privatise(g);
   /* The fascia gets its own copy. Revision 1 dulled it hard to keep the top
-     edge fillet under a 0.92 bloom threshold; the threshold is now 1.06 and the
-     studio strips are wide and dim, so the brushed panel carries a gradient
+     edge fillet under a low bloom threshold; the threshold is 2.30 and the
+     studio strips are wide and dim, so the brushed panel now carries a gradient
      across its height instead of a bar along its edge. */
   const face = g.children[0].userData.face;
   face.material = face.material.clone();
-  face.material.roughness = 0.28;
-  face.material.envMapIntensity = 1.00;
+  face.material.roughness = 0.33;
+  face.material.envMapIntensity = 1.45;
   face.material.anisotropy = 0.60;
+
+  /* The anodised body was tuned against the old narrow, hot emitters and is now
+     too dark under the wide dim ones — a black cheek that returns one flat value
+     is exactly the failure the rig fix was made to cure. The clone is private to
+     this stage, so lifting it does not touch anyone else's chassis. */
+  const bodyMat = _priv.get(M.anodBlack.uuid);
+  if (bodyMat) { bodyMat.roughness = 0.38; bodyMat.envMapIntensity = 1.20; }
 
   const root = new THREE.Group();
   root.add(g);
@@ -508,25 +655,39 @@ function buildHardware() {
 }
 
 // ---------------------------------------------------------------------------
-// Overlay layout — ONE panel, two plot regions, floating above the chassis
+// Overlay layout — ONE panel, two plot regions, everything docked inside it
 // ---------------------------------------------------------------------------
-const CARD = { w: 0.255, h: 0.146 };
-const GM = { x: 0.033, y: 0.046, w: 0.213, h: 0.089 };   // magnitude
-const GG = { x: 0.033, y: 0.015, w: 0.213, h: 0.022 };   // group delay
-const CARD_C = [0.092, 1.252, -3.00];                    // panel centre, world
+const CARD = { w: 0.230, h: 0.166 };
+const GM = { x: 0.031, y: 0.060, w: 0.190, h: 0.084 };   // magnitude
+const GG = { x: 0.031, y: 0.006, w: 0.190, h: 0.042 };   // group delay, log ms
+const CARD_C = [0.037, 1.248, -3.00];                    // panel centre, world
 
 /* Composition, and why it is what it is.
-   The chassis is 0.555 m wide and 0.078 m tall — 7.1 : 1. With both cheeks
-   inside the safe box the largest its fascia can ever be is 960/7.1 ≈ 135 px,
-   so the camera is set by WIDTH, not by a height fill: at this azimuth the box
-   projects to ~850 px of the 960 px box, which is the geometric maximum.
-   The camera also sits BELOW the rack's own top plate (y 1.128). That plate is
-   a 0.5 m gloss slab directly above this bay, and from any higher eye it is the
+
+   The chassis is 0.555 m wide and 0.078 m tall — 7.1 : 1 — so it can never fill
+   a 960 x 840 safe box on height; it is framed on WIDTH, and at this azimuth it
+   projects to ~920 px of the 960, sitting inside x 180…1100.
+
+   The camera sits BELOW the rack's own top plate (y 1.128). That plate is a
+   0.5 m gloss slab directly above this bay, and from any higher eye it is the
    biggest, brightest object in the frame; from underneath it becomes a dark
-   ceiling with one lit fillet, and the unit below leaves the frame entirely.
-   The panel is 0.47 of its revision-2 area so the hero is no longer out-massed. */
+   ceiling with one lit fillet.
+
+   The subject is therefore the chassis AND the panel above it — from the
+   chassis floor at y 0.972 to the panel's top edge at y 1.346, a half-height of
+   0.187 m. `fill` is 0.706 rather than the 0.50–0.62 the addendum suggests for
+   a hero, because a 7.1 : 1 subject cannot be filled on height: at the
+   resulting 1.177 m the chassis projects ~810 px into the 960 px safe box while
+   that half-height subtends 0.706 of the box's height. The target's x is
+   0.0645, not the rack's 0, because the rack's own top plate is the widest
+   thing in shot at ~950 px and only centring it keeps it inside x 160…1120.
+
+   The camera is AIMED 25 mm below the stack's geometric centre, which seats the
+   fascia at 0.69 of the frame and lifts the panel clear of the rack's top plate
+   without leaving the top third of the box empty — the defect of revision 2,
+   which targeted the panel and dropped the hero into the bottom quarter. */
 const CAM_AZ = 0.30;
-const SHOT = frameShot([0.070, 1.215, -3.03], 0.27, { fill: 1.00, az: CAM_AZ, el: -0.085, fov: 30 });
+const SHOT = frameShot([0.0645, 1.133, -3.03], 0.187, { fill: 0.706, az: CAM_AZ, el: -0.02, fov: 30 });
 /** Panel yaw: 14° off the camera axis, so it is never square to the lens. */
 const CARD_YAW = CAM_AZ - 0.244;
 
@@ -549,11 +710,11 @@ export default {
     // ===== the instrument panel ===========================================
     const sheet = new THREE.Group();
     sheet.position.set(...CARD_C);
-    /* Rotated 14° off the camera axis and tipped 5° forward — the camera is
+    /* Rotated 14° off the camera axis and tipped 6° forward — the camera is
        below it — so it is an object standing in the room rather than a graphic
        pasted on the lens: the near edge of the bezel is visible, and the tipped
        face takes the sweep of the front strip across its glass. */
-    sheet.rotation.set(0.085, CARD_YAW, 0);
+    sheet.rotation.set(0.100, CARD_YAW, 0);
     overlay.add(sheet);
 
     const inner = new THREE.Group();
@@ -565,35 +726,48 @@ export default {
 
     // ---- magnitude -------------------------------------------------------
     const gm = new DIAG.Graph({
-      ...axis, w: GM.w, h: GM.h, yRange: [-30, 6],
-      yTicks: [-30, -24, -18, -12, -6, 0, 6], zeroLine: 0,
+      ...axis, w: GM.w, h: GM.h, yRange: [DB_LO, DB_HI],
+      yTicks: [-36, -30, -24, -18, -12, -6, 0, 6], zeroLine: 0,
     });
     gm.position.set(GM.x, GM.y, 0.0010);
     inner.add(gm);
     S.gm = gm;
-    // −6.02 dB reference
-    gm.addTrace(() => XO_DB, { color: PAL.cy, width: 1.0, n: 2, dashed: true, opacity: 0.28 });
-    // the mistake: the same three-way as LR2 with every driver positive
-    gm.addTrace(dbOf(b2Sum), { color: PAL.rd, width: 1.7, dashed: true, opacity: 0.9, n: 520 });
+
+    // −6.02 dB reference: the level every band holds at its own crossover.
+    gm.addTrace(() => XO_DB, { color: PAL.cy, width: 1.0, n: 2, dashed: true, opacity: 0.26 });
+    // The mistake: the same three-way as LR2 with every driver positive.
+    runTraces(gm, dbOf(b2Sum), {
+      color: PAL.rd, width: 1.8, opacity: 0.95, n: 900, dashed: true,
+      dashSize: 0.0058, gapSize: 0.0036,
+    });
+    // The three bands, each drawn only where it is on the paper.
     for (const fn of [bLow, bMid, bHigh]) {
-      gm.addTrace(dbOf(fn), { color: PAL.cy, width: 1.7, opacity: 0.8, n: 420 });
+      runTraces(gm, dbOf(fn), { color: PAL.cy, width: 1.6, opacity: 0.78, n: 620 });
     }
-    gm.addTrace(dbOf(bSum), { color: PAL.gr, width: 2.8, n: 420 });
+    // The sum.
+    runTraces(gm, dbOf(bSum), { color: PAL.gr, width: 2.8, opacity: 1, n: 420, z: 0.0009 });
+
     gm.addMarker(FL, { color: PAL.am, opacity: 0.45 });
     gm.addMarker(FH, { color: PAL.am, opacity: 0.45 });
     for (const f of [FL, FH]) gm.addDot(PAL.am, 0.0032).userData.setData(f, XO_DB);
     S.curM = gm.addMarker(1000, { color: PAL.ink, dashed: false, width: 1.1, opacity: 0.38 });
     S.dotM = gm.addDot(PAL.gr, 0.0040);
 
-    // ---- group delay -----------------------------------------------------
+    // ---- group delay, logarithmic in ms ----------------------------------
     const gg = new DIAG.Graph({
-      ...axis, w: GG.w, h: GG.h, yRange: [0, GD_MAX_MS], yTicks: [0, 2, 4, 6, 8],
+      ...axis, w: GG.w, h: GG.h,
+      yRange: [Math.log10(GD_LO_MS), Math.log10(GD_HI_MS)],
+      yTicks: [-2, -1, 0, 1],
     });
     gg.position.set(GG.x, GG.y, 0.0010);
     inner.add(gg);
     S.gg = gg;
-    gg.addArea((f) => groupDelay(f) * 1e3, { color: PAL.am, opacity: 0.14, n: 240 });
-    gg.addTrace((f) => groupDelay(f) * 1e3, { color: PAL.am, width: 2.1, n: 380 });
+    /* 0.04, not the 0.16 default. `addArea` is `toneMapped:false`, so its alpha
+       goes to the framebuffer linearly and the sRGB transfer lifts it hard: a
+       nominal 8 % of PAL.am prints as a 30 % ochre slab that out-weighs the
+       magnitude plot above it. */
+    gg.addArea(gdLog, { color: PAL.am, opacity: 0.04, n: 260 });
+    runTraces(gg, gdLog, { color: PAL.am, width: 2.0, opacity: 1, n: 520 });
     gg.addMarker(FL, { color: PAL.am, opacity: 0.4 });
     gg.addMarker(FH, { color: PAL.am, opacity: 0.4 });
     S.curG = gg.addMarker(1000, { color: PAL.ink, dashed: false, width: 1.1, opacity: 0.38 });
@@ -609,51 +783,55 @@ export default {
     };
 
     // The one label on the hardware: a caption on the fascia's own centre line,
-    // with a leader, dropped into the shelf gap below it — never onto the
-    // neighbouring unit's face.
+    // dropped into the shelf gap below it — never onto the neighbouring unit.
     S.lHw = L.add(anchor(hardware, -0.09, -CH / 2, ZF), {
       kicker: `Active crossover · LR${ORDER}`,
       value: `2 in, 6 out · ${FL} Hz / ${fmtF(FH)}`,
       cls: 'acc lead', offset: [0, 40], priority: 5,
     });
 
-    // Panel header: what the plot is, and the number it exists to prove.
+    /* Panel title bar, LEFT: what the plot is and the number it exists to
+       prove. Anchored to the magnitude plot's top-left corner and lifted into
+       the bezel's own title strip, so it is type on the instrument rather than
+       a caption floating on the backdrop. */
     S.lHead = L.add(anchor(gm, gm.x(20), GM.h), {
-      kicker: 'Magnitude · 6 dB / division',
-      value: `low + mid + high = ${SUM_ERR.toFixed(3)} dB`,
-      cls: 'acc', offset: [104, -44], occlude: false, priority: 4,
+      kicker: 'Magnitude · 6 dB/div',
+      // Not `acc`: the sum trace is green, and a cyan numeral labelling a green
+      // curve makes the reader hunt for a cyan one. Neutral, and the legend
+      // beside it carries the colour key.
+      value: `sum ${SUM_ERR.toFixed(3)} dB`,
+      cls: 'plain', offset: [62, -23], occlude: false, priority: 4,
     });
 
-    /* Legend. The dashed trace is the myth, and a myth the reader has to infer
-       from a floating caption is not named at all. Colour-keyed here so the
-       three families are read off the plot itself. */
-    S.lLeg = L.add(anchor(gm, gm.x(20), gm.y(-14)), {
+    /* Panel title bar, RIGHT: the legend, docked INSIDE the panel. A legend on
+       bare backdrop is the one place the diagram language visibly breaks. */
+    S.lLeg = L.add(anchor(gm, gm.x(20000), GM.h), {
       text:
-        `<span style="color:${hex(PAL.gr)}">&#9473;&#9473;</span> sum, LR${ORDER}<br>` +
-        `<span style="color:${hex(PAL.cy)}">&#9473;&#9473;</span> low &middot; mid &middot; high<br>` +
-        `<span style="color:${hex(PAL.rd)}">&#9548;&#9548;</span> LR2, every driver +`,
-      cls: 'plain', offset: [-98, 0], occlude: false, priority: 3,
+        `<span style="color:${hex(PAL.gr)}">&#9473;</span> sum` +
+        `&nbsp;&nbsp;<span style="color:${hex(PAL.cy)}">&#9473;</span> low &middot; mid &middot; high<br>` +
+        `<span style="color:${hex(PAL.rd)}">&#9548;</span> LR2, every driver +`,
+      cls: 'plain', offset: [-62, -23], occlude: false, priority: 4,
+    });
+
+    // Group delay: named inside its own plot, where the trace has already
+    // fallen away — not on the backdrop below the panel.
+    S.lGd = L.add(anchor(gg, gg.x(2500), gg.y(0.5)), {
+      kicker: 'Group delay · log ms',
+      cls: 'plain', offset: [0, 0], occlude: false, priority: 3,
     });
 
     // Axis numerals — without these the plot's whole argument is unverifiable.
     gm.tickLabels(L, {
-      yVals: [0, XO_DB, -24],
-      yFmt: (v) => (v === 0 ? '0 dB' : v.toFixed(v === XO_DB ? 2 : 0)),
-      yOffset: [-28, 0],
-    });
-    gg.tickLabels(L, {
       xVals: [20, 100, 1000, 10000],
       xFmt: (v) => (v >= 1000 ? `${v / 1000} k` : (v === 20 ? '20 Hz' : String(v))),
-      yVals: [4, 8],
-      yFmt: (v) => (v === 8 ? '8 ms' : String(v)),
-      xOffset: [0, 14], yOffset: [-24, 0],
+      yVals: [0, XO_DB, -18, -30],
+      yFmt: (v) => (v === 0 ? '0 dB' : v.toFixed(v === XO_DB ? 2 : 0)),
+      xOffset: [0, 14], yOffset: [-26, 0],
     });
-
-    // Group-delay caption, below the panel and clear of the decade numerals.
-    S.lGd = L.add(anchor(gg, gg.x(2200), 0), {
-      kicker: `Group delay · 0 to ${GD_MAX_MS} ms, 2 ms / division`,
-      value: `peak ${(GD_PEAK * 1e3).toFixed(2)} ms at ${GD_PEAK_F.toFixed(0)} Hz`,
-      cls: 'am', offset: [0, 66], occlude: false, priority: 3,
+    gg.tickLabels(L, {
+      yVals: [1, 0, -1, -2],
+      yFmt: (v) => (v === 1 ? '10 ms' : (v === 0 ? '1' : (v === -1 ? '0.1' : '0.01'))),
+      yOffset: [-26, 0],
     });
 
     S.f = 1000;
@@ -678,62 +856,42 @@ export default {
     S.gd = groupDelay(f);
     S.ph = sumPhaseDeg(f);
 
-    S.curM.userData.setX(f); S.dotM.userData.setData(f, S.sum);
-    S.curG.userData.setX(f); S.dotG.userData.setData(f, DSP.clamp(S.gd * 1e3, 0, GD_MAX_MS));
+    S.curM.userData.setX(f);
+    S.dotM.userData.setData(f, DSP.clamp(S.sum, DB_LO, DB_HI));
+    S.curG.userData.setX(f);
+    S.dotG.userData.setData(f, DSP.clamp(gdLog(f), Math.log10(GD_LO_MS), Math.log10(GD_HI_MS)));
   },
 
   content() {
     return `
 <h3>The split</h3>
 <p>Three ways, Linkwitz&#8209;Riley ${ORDER}th order, at <span class="num">${FL} Hz</span> and
-<span class="num">${fmtF(FH)}</span>. Each band is two cascaded Butterworth sections, so
-the asymptote is <span class="num">20&#183;${ORDER}&#183;log&#8321;&#8320;2 = ${SLOPE_DB_OCT.toFixed(2)} dB</span>
-per octave and every band sits at <span class="num">${XO_DB.toFixed(2)} dB</span> at its own
-crossover &mdash; not &minus;3.</p>
+<span class="num">${fmtF(FH)}</span>. Each band is two cascaded Butterworth sections, so the
+asymptote is <span class="num">${SLOPE_DB_OCT.toFixed(2)} dB</span> per octave and every band
+sits at <span class="num">${XO_DB.toFixed(2)} dB</span> at its own crossover &mdash; not &minus;3.
+The three sum to an all&#8209;pass: <b>360&deg; through each crossover</b>,
+${Math.round(PHASE_SPAN)}&deg; of it in&#8209;band. Only arrival time moves &mdash;
+<span class="num">${(GD_PEAK * 1e3).toFixed(2)} ms</span> at ${GD_PEAK_F.toFixed(0)} Hz,
+<span class="num">${(GD_FH * 1e3).toFixed(2)} ms</span> at ${fmtF(FH)}.</p>
 
-<div class="myth"><span class="lab">Commonly got wrong</span><p>LR2 sums flat as well &mdash;
-but only with one driver&rsquo;s polarity <em>reversed</em>. Wire an LR2 with every driver
-positive and it nulls at each crossover; the red trace is that mistake. LR4 is the
-opposite: its two halves are in phase at <em>every</em> frequency.</p></div>
+<div class="myth"><span class="lab">Commonly got wrong</span><p>LR2 sums flat too &mdash; but only
+with one driver&rsquo;s polarity <em>reversed</em>. Wire an LR2 with every driver positive and it
+nulls at each crossover, as the red trace does.</p></div>
 
-<div class="eq">|LP| = |HP| = 0.5 at f<span class="c">c</span>
-20&#183;log&#8321;&#8320; 0.5 = <span class="hl">${XO_DB.toFixed(2)} dB</span>
-low + mid + high = <span class="hl">${SUM_ERR.toFixed(3)} dB</span>
-<span class="c">  worst case, at ${SUM_ERR_F.toFixed(0)} Hz</span></div>
+<p>Passively into ${Z_NOM}&nbsp;&Omega; this low&#8209;pass is two coils and two capacitors, not one
+coil. The ideal Butterworth pair &mdash; <span class="num">${(L_SEC * 1e3).toFixed(1)} mH</span>,
+<span class="num">${(C_SEC * 1e6).toFixed(0)} &micro;F</span> &mdash; is not an LR${ORDER} ladder:
+each section is loaded by the next, not by R. The copper stands.
+<span class="num">${R_NET.toFixed(2)}&nbsp;&Omega;</span> in series burns
+<span class="num">${LOSS_PCT.toFixed(1)}%</span> of the loop power,
+<span class="num">${INSERT_LOSS.toFixed(2)} dB</span> of insertion loss.</p>
 
-<div class="key"><span class="lab">The idea</span><p>Filter at line level, where a decibel
-is free and no inductor is needed, then give every driver its own amplifier
-channel. Two inputs, six outputs.</p></div>
-
-<p>What the three bands add up to is an all&#8209;pass: <b>360&deg; of rotation through each
-crossover</b>, ${Math.round(PHASE_SPAN)}&deg; of it inside the audio band. Group delay peaks at
-<span class="num">${(GD_PEAK * 1e3).toFixed(2)} ms</span> at
-<span class="num">${GD_PEAK_F.toFixed(0)} Hz</span> and falls to
-<span class="num">${(GD_FH * 1e3).toFixed(2)} ms</span> at ${fmtF(FH)}. Magnitude is
-untouched; only the arrival time of the bass moves.</p>
-
-<h3>What a passive network costs</h3>
-<p>The same low&#8209;pass built passively into a nominal ${Z_NOM}&nbsp;&Omega; is not one coil
-but two 2nd&#8209;order sections.</p>
-
-<div class="eq">L = &radic;2&#183;R/&omega;c = ${(L_SEC * 1e3).toFixed(1)} mH  &times;${N_SEC} = <span class="hl">${R_NET.toFixed(2)} &Omega;</span> Cu
-C = 1/(&radic;2&#183;R&#183;&omega;c) = ${(C_SEC * 1e6).toFixed(0)} &micro;F  &times;${N_SEC}, film
-Rs ${(RS_ACT * 1e3).toFixed(0)} m&Omega; &rarr; ${RS_PAS.toFixed(2)} &Omega;   DF ${DF_ACT.toFixed(0)} &rarr; ${DF_PAS.toFixed(1)}</div>
-
-<p>That copper burns <span class="num">${LOSS_PCT.toFixed(1)}%</span> of the power in the loop
-and ${(N_SEC * C_SEC * 1e6).toFixed(0)}&nbsp;&micro;F of non&#8209;polar film buys the level back
-nowhere: insertion loss is <span class="num">${INSERT_DB.toFixed(2)} dB</span>.</p>
-
-<p>Damping factor is the wrong quantity to quote. The voice coil&rsquo;s own
-<span class="num">${RE_COIL.toFixed(1)}&nbsp;&Omega;</span> sits in the same series loop, so the
-resistance that damps the cone rises from <span class="num">${RD_ACT.toFixed(2)}&nbsp;&Omega;</span>
-to <span class="num">${RD_PAS.toFixed(2)}&nbsp;&Omega;</span> &mdash;
-<span class="num">${RD_PCT.toFixed(1)}%</span>, not seventeen&#8209;fold. Both figures carry
-<span class="num">${(CABLE.rLoop * 1e3).toFixed(1)}&nbsp;m&Omega;</span> of speaker cable, which is
-why the active number is ${DF_ACT.toFixed(0)} and not ${DF_TERM.toFixed(0)}.</p>
-
-<p>These are electrical targets. The ear meets the filter multiplied by each
-driver&rsquo;s own roll&#8209;off and by the path difference between drivers.</p>`;
+<p>Damping factor is the wrong quantity: the coil&rsquo;s own
+<span class="num">${RE_COIL.toFixed(1)}&nbsp;&Omega;</span> is in that same loop, so what damps
+the cone rises from <span class="num">${RD_ACT.toFixed(2)}&nbsp;&Omega;</span> to
+<span class="num">${RD_PAS.toFixed(2)}&nbsp;&Omega;</span> &mdash;
+<span class="num">${RD_PCT.toFixed(1)}%</span>, not the seventeen&#8209;fold that
+${DF_ACT.toFixed(0)}&nbsp;&rarr;&nbsp;${DF_PAS.toFixed(1)} implies.</p>`;
   },
 
   readouts() {
@@ -741,11 +899,11 @@ driver&rsquo;s own roll&#8209;off and by the path difference between drivers.</p
     const f = S ? S.f : 1000;
     const gd = S ? S.gd : groupDelay(1000);
     return [
-      { k: 'Crossover', v: `${FL} / 2.20 k`, u: 'Hz', cls: 'acc' },
+      { k: 'Crossover', v: `${FL} / ${(FH / 1000).toFixed(2)} k`, u: 'Hz', cls: 'acc' },
       { k: 'Slope', v: SLOPE_DB_OCT.toFixed(2), u: 'dB/oct' },
       { k: 'Cursor', v: DSP.fHz(f), u: 'Hz' },
       { k: 'Sum', v: (S ? S.sum : 0).toFixed(3), u: 'dB', cls: 'acc' },
-      { k: 'Group delay', v: (gd * 1e3).toFixed(2), u: 'ms', cls: 'am', bar: gd / (GD_MAX_MS * 1e-3) },
+      { k: 'Group delay', v: (gd * 1e3).toFixed(2), u: 'ms', cls: 'am', bar: gd / GD_PEAK },
       { k: 'Sum phase', v: (S ? S.ph : 0).toFixed(0), u: '°' },
     ];
   },

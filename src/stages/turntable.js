@@ -4,7 +4,7 @@ import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
-import { MAINS, CART, TT } from '../core/spec.js';
+import { MAINS, CART, TT, TONEARM } from '../core/spec.js';
 
 /* ===========================================================================
    GROOVE TO VOLTAGE
@@ -54,6 +54,11 @@ const GROOVE_D = GROOVE_W / 2;          // 90° included angle → depth = half 
 const BOTTOM_R = 6e-6;                  // radius of the groove bottom
 const TIP_R_H  = 18e-6;                 // 0.7 mil across-groove radius (touches walls)
 const TIP_R_V  = 5e-6;                  // 0.2 mil along-groove radius (traces λ)
+// A sphere of radius r tangent to both 45° walls has its centre r√2 above the
+// apex, so its underside sits r(√2 − 1) clear of the groove bottom. The tip
+// rides the walls and never the bottom — 7.46 µm of daylight, a quarter of the
+// groove depth.
+const TIP_CLEAR = TIP_R_H * (SQ2 - 1);  // 7.46 µm
 
 // Wall-normal convention, in (lateral u, vertical w) with +u toward the rim:
 //   n_L = (+1, +1)/√2   (inner wall)      n_R = (+1, −1)/√2   (outer wall)
@@ -63,7 +68,6 @@ const tipFromWalls = (sL, sR) => [(sL + sR) / SQ2, (sL - sR) / SQ2];
 // ---- vertical tracking force and the Hertzian contact ---------------------
 const G0     = 9.80665;
 const VTF_N  = CART.vtfN;                             // 19.6 mN (spec)
-const VTF_G  = VTF_N / (1e-3 * G0);                   // 2.00 g
 const N_WALL = VTF_N / (2 * Math.cos(Math.PI / 4));   // 13.86 mN normal to each wall
 const E_DIA = 1050e9, NU_DIA = 0.20;                  // diamond
 const E_PVC = 3.0e9,  NU_PVC = 0.40;                  // vinyl copolymer, quasi-static
@@ -72,12 +76,9 @@ const R_EQ   = Math.sqrt(TIP_R_H * TIP_R_V);          // geometric-mean tip radi
 const A_HZ   = Math.cbrt((3 * N_WALL * R_EQ) / (4 * E_STAR));   // contact radius
 const AREA_C = Math.PI * A_HZ * A_HZ;                 // 2.88 × 10⁻¹¹ m²
 const P_MEAN = N_WALL / AREA_C;                       // 482 MPa
-const P_MAX  = 1.5 * P_MEAN;                          // 723 MPa (Hertz peak)
 // 1 tonne-force per cm² = 1000 × 9.80665 N / 10⁻⁴ m² = 9.80665 × 10⁷ Pa
 const TF_CM2 = 1000 * G0 * 1e4;
 const P_TCM2 = P_MEAN / TF_CM2;                       // 4.92 tf/cm²
-const PVC_H  = 140e6;                                 // indentation hardness ≈ 2.8·σy
-const P_PLAS = PVC_H / TF_CM2;                        // 1.43 tf/cm² — plastic bound
 
 // ---- the moving-coil generator (spec: CART) -------------------------------
 const BL      = CART.Bl;                  // 8.05 mT·m — THE primary
@@ -89,7 +90,12 @@ const E_PK    = CART.outPk;               // 402.5 µV peak
 const E_RMS   = CART.outRms;              // 284.6 µV rms
 const R_COIL  = 10, R_LOAD = CART.loadOhm; // Ω — coil DCR (chosen) and phono load
 const I_PK    = E_PK / (R_COIL + R_LOAD); // 3.659 µA peak
-const WIRE_MM2 = 0.030;                   // mm² — tonearm litz, 7 × 0.07 mm
+// The tonearm wire is a SPEC PRIMARY (TONEARM.litzMm2), shared with the phono
+// chapter so the two cannot quote the same cable differently. The strand
+// diameter is DERIVED from it, not typed: 7 strands of area A/7 each.
+const WIRE_MM2 = TONEARM.litzMm2;                      // 0.030 mm²
+const STRANDS  = 7;
+const STRAND_D = Math.sqrt((4 * WIRE_MM2) / (STRANDS * Math.PI));   // 0.0739 mm
 const V_DRIFT  = DSP.driftVelocity(I_PK, WIRE_MM2);    // 8.97 nm/s peak
 const F_SIG    = 1000;                                 // Hz
 const X_DRIFT  = DSP.driftDisplacement(V_DRIFT, F_SIG);// 1.43 pm peak excursion
@@ -116,8 +122,16 @@ const lambdaAt = (r) => vAt(r) / F_HF;
 const aMaxAt   = (r) => (lambdaAt(r) ** 2) / (4 * Math.PI * Math.PI * TIP_R_V);
 const vMaxAt   = (r) => TAU * F_HF * aMaxAt(r);        // 0.83 → 0.14 m/s
 
+// ---- how close the cut comes to its neighbour ------------------------------
+// The land between two adjacent grooves is the pitch less one groove width.
+// Two cuts meet when their lateral displacements differ by more than that, and
+// the card shows the three quantities as one dimension chain: 60 + 69 = 129.
+const LAND = PITCH - GROOVE_W;                        // 69.0 µm
+
 // ---- display scalings (both stated on screen) -----------------------------
-const MAG        = 2100;      // groove cross-section magnification
+// MAG is set so exactly three grooves at true 129 µm pitch span the card: the
+// reader sees the width, the land and the pitch in one picture, to scale.
+const MAG        = 770;       // groove cross-section magnification
 const TIME_RATIO = 1000;      // groove/stylus motion slowed 1 : 1000
 
 /**
@@ -218,12 +232,82 @@ function beltMesh(c1, r1, c2, r2, thick, height) {
 }
 
 /** Filled 2D polygon in the local XY plane — overlay only. */
-function poly(pts, color, opacity = 1, order = 11) {
+function poly(pts, color, opacity = 1, order = 11, z = 0) {
   const s = new THREE.Shape(pts.map((p) => new THREE.Vector2(p[0], p[1])));
   const m = new THREE.Mesh(new THREE.ShapeGeometry(s),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false }));
+  m.position.z = z;
   m.renderOrder = order;
   return m;
+}
+
+/* ---------------------------------------------------------------------------
+   TWO CORE HELPERS ARE REBUILT LOCALLY, AND THE REASON IS THE SAME BUG.
+
+   `DIAG.diagramCard()` and `DIAG.dimension()` both hang a `userData.setOpacity`
+   on their GROUP which writes straight into their children's materials. Core's
+   `fadeTree()` calls that setter and then carries on traversing INTO those same
+   children, where it latches `_baseOp = material.opacity` — the value the setter
+   has just written. `main.js` calls `fadeTree(overlay, 0)` the moment a stage is
+   added, so the base is latched at zero and those children never draw again,
+   at any reveal.
+
+   The card plate and the dimension arrowheads are meshes, so both are hit. The
+   traces are Line2 and re-derive their own opacity, so they survive — which is
+   why this card has been shipping as an empty translucent frame with unheaded
+   dimension lines. Verified by reproducing the traversal. Reported, not patched:
+   the core is frozen. A plain mesh under a plain group is immune.
+   --------------------------------------------------------------------------- */
+
+/**
+ * Backing plate: an unlit ground for the drawing, inside a machined bezel that
+ * is a real bevelled solid lit by the room. A square-cornered black rectangle
+ * with a 1 px border is a pasted PNG; a plate with thickness, a fillet that
+ * catches the front strip and a shadow line down one edge is an object.
+ */
+function cardPlate(w, h, pad = 0.020) {
+  const g = new THREE.Group();
+  const W = w + pad * 2, H = h + pad * 2;
+
+  const bez = mats().alu.clone();
+  bez.color.setHex(0x343a41);
+  bez.roughness = 0.46;
+  bez.envMapIntensity = 0.58;
+  const bezel = new THREE.Mesh(GEO.bevelBox(W + 0.0050, H + 0.0050, 0.0055, 0.0011, 3), bez);
+  bezel.position.set(w / 2, h / 2, -0.0040);
+  bezel.renderOrder = 1;
+  // NOT a shadow caster. Tried: the plate sits between the key light and the
+  // left loudspeaker, and taking that cabinet's top chamfer out of shadow left
+  // it as a blown white bar across a third of the frame. A floating diagram is
+  // allowed to be weightless; a blown highlight is not.
+  bezel.castShadow = false;
+  g.add(bezel);
+
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({
+    color: 0x080a0d, transparent: true, opacity: 0.95, depthWrite: true, toneMapped: false,
+  }));
+  plate.position.set(w / 2, h / 2, -0.0011);
+  plate.renderOrder = 3;
+  g.add(plate);
+
+  const b = new DIAG.Trace(5, 0x39414c, 1.0, { opacity: 0.75, renderOrder: 5 });
+  const x0 = -pad, y0 = -pad;
+  b.write((i) => [[x0, y0], [x0 + W, y0], [x0 + W, y0 + H], [x0, y0 + H], [x0, y0]][i].concat(-0.0009));
+  g.add(b);
+  return g;
+}
+
+/** Horizontal dimension with arrowheads that survive the fade. */
+function dimH(x0, x1, y, colour = 0x9aa3b0, z = 0.0013) {
+  const g = new THREE.Group();
+  const t = new DIAG.Trace(2, colour, 1.2, { opacity: 0.80, renderOrder: 11 });
+  t.write((i) => [i ? x1 : x0, y, z]);
+  g.add(t);
+  const hl = 0.0058, hw = 0.0019;
+  for (const [x, s] of [[x0, 1], [x1, -1]]) {
+    g.add(poly([[x, y], [x + s * hl, y + hw], [x + s * hl, y - hw]], colour, 0.85, 12, z));
+  }
+  return g;
 }
 
 /** One-way arrow: shaft + head, from a to b. */
@@ -249,28 +333,30 @@ function arrow(a, b, color, width = 1.8, head = 0.010) {
  * Section hatching. A sectioned solid in an engineering drawing is hatched, and
  * without it a filled region is just a coloured rectangle — which is exactly
  * what round 2's card was. One LineSegments, one draw call, hairline weight.
- * Lines run at 45° with a common phase so they align across every rectangle.
+ * The slope is deliberately NOT 45°: the groove walls are at 45°, and hatching
+ * parallel to an edge is the one thing a draughtsman never does. Lines share a
+ * common phase so they align across every rectangle.
  */
-function hatchRects(rects, step, colour, opacity, z = 0.0002) {
+function hatchRects(rects, step, colour, opacity, slope = 0.52, z = 0.0002) {
   let cMin = Infinity, cMax = -Infinity;
   for (const [x0, y0, x1, y1] of rects) {
-    cMin = Math.min(cMin, y0 - x1);
-    cMax = Math.max(cMax, y1 - x0);
+    cMin = Math.min(cMin, y0 - slope * x1);
+    cMax = Math.max(cMax, y1 - slope * x0);
   }
   const pos = [];
   for (let c = Math.ceil(cMin / step) * step; c <= cMax; c += step) {
     for (const [x0, y0, x1, y1] of rects) {
-      const a = Math.max(x0, y0 - c), b = Math.min(x1, y1 - c);
-      if (b - a > 1e-4) pos.push(a, a + c, z, b, b + c, z);
+      const a = Math.max(x0, (y0 - c) / slope), b = Math.min(x1, (y1 - c) / slope);
+      if (b - a > 1e-4) pos.push(a, slope * a + c, z, b, slope * b + c, z);
     }
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  const m = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+  const mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
     color: colour, transparent: true, opacity, depthWrite: false, toneMapped: false,
   }));
-  m.renderOrder = 8;
-  return m;
+  mesh.renderOrder = 8;
+  return mesh;
 }
 
 /**
@@ -283,7 +369,7 @@ function hatchRects(rects, step, colour, opacity, z = 0.0002) {
  * cap over the card, black-bodied and additively blended, contributes only its
  * own reflection: the drawing underneath prints through undimmed.
  */
-function specularPanel(w, h, sag = 0.009) {
+function specularPanel(w, h, sag = 0.006) {
   const geo = new THREE.PlaneGeometry(w, h, 30, 24);
   const p = geo.attributes.position;
   const rMax = Math.hypot(w / 2, h / 2);
@@ -297,12 +383,19 @@ function specularPanel(w, h, sag = 0.009) {
   // No body colour: this layer contributes ONLY its own reflection. It must be
   // near-mirror and very dim — a blurred reflection at any useful brightness
   // washes the whole card to milk instead of laying a band across it.
+  //
+  // ROUND 3: this was four times too strong. A sweep that reaches mid-grey
+  // stops being glass and becomes a milky wash over the drawing — the card
+  // rendered LIGHTER than the backdrop and the section printed through it. The
+  // band has to sit in the bottom quarter of the ramp: present, gradated, and
+  // never competing with the ink it covers.
   m.color.setHex(0x000000);
-  m.roughness = 0.085;
+  m.roughness = 0.095;
   m.reflectivity = 0.5;
-  m.clearcoat = 0.9;
-  m.clearcoatRoughness = 0.045;
-  m.envMapIntensity = 0.048;
+  m.clearcoat = 0.80;
+  m.clearcoatRoughness = 0.055;
+  m.specularIntensity = 0.9;
+  m.envMapIntensity = 0.090;
   m.transparent = true;
   m.depthWrite = false;
   m.blending = THREE.AdditiveBlending;
@@ -354,13 +447,13 @@ function grooveRoughTex() {
     const vLeadIn = vOf(R_OUT);          // 0.965 — outside this, smooth land
     const vLeadOut = vOf(R_IN);          // 0.096 — inside this, smooth land
     const GAPS = [0.17, 0.34, 0.51, 0.67, 0.84];   // five track gaps
-    const ROUGH_LAND = 0.090, ROUGH_FIELD = 0.225;
+    const ROUGH_LAND = 0.115, ROUGH_FIELD = 0.220;
     for (let y = 0; y < H; y++) {
       // v = radius fraction, 0 at the label, 1 at the rim. CanvasTexture flips
       // Y and the surface lathe runs inward, so the two inversions cancel.
       const v = (y + 0.5) / H;
       // grooved field, with a slow modulation so the band is not one flat value
-      let rgh = ROUGH_FIELD + 0.038 * Math.sin(v * TAU * 9.0);
+      let rgh = ROUGH_FIELD + 0.020 * Math.sin(v * TAU * 9.0);
       // lands: lead-in, lead-out, inter-track gaps
       let land = 1 - smooth(vLeadIn - 0.004, vLeadIn + 0.010, v);
       land = Math.min(land, smooth(vLeadOut - 0.010, vLeadOut + 0.006, v));
@@ -593,12 +686,14 @@ function vinylMats() {
     _vinylTop.roughness = 1.0;                        // the map carries the value
     _vinylTop.roughnessMap = grooveRoughTex();
     _vinylTop.normalMap = grooveNormalTex();
-    _vinylTop.normalScale = new THREE.Vector2(0.088, 0.088);
-    // Vinyl is not lacquered: the shine is the surface itself, so the clearcoat
-    // is kept light or it flattens the roughness ramp that gives the disc its
-    // rings.
-    _vinylTop.clearcoat = 0.15;
-    _vinylTop.clearcoatRoughness = 0.09;
+    _vinylTop.normalScale = new THREE.Vector2(0.038, 0.038);
+    // A specular layer over the surface, not instead of it: the clearcoat is a
+    // second, much tighter lobe sitting in front of the roughness ramp, so the
+    // studio strip lays a hard sheen across the disc while the lands and the
+    // modulated band still read underneath it. Round 2 had this at 0.15, which
+    // is below the level where the second lobe is visible at all.
+    _vinylTop.clearcoat = 0.30;
+    _vinylTop.clearcoatRoughness = 0.075;
     // A horizontal disc seen from 29 degrees above can only mirror what is
     // BEHIND it and high up, and in this rig that is bare shell — which is why
     // every attempt to light the record with envMapIntensity alone left it dead.
@@ -607,8 +702,15 @@ function vinylMats() {
     // So: hold the specular F0 down (which scales the direct lobe) and put the
     // brightness back through the environment only, where it arrives as the
     // broad soft gradient a softbox gives.
-    _vinylTop.specularIntensity = 0.24;
-    _vinylTop.envMapIntensity = 3.10;
+    //
+    // ROUND 3: envMapIntensity was 3.10, set when the softboxes were narrow and
+    // hot and the disc would not light at all. The emitters are now wide and
+    // dim, and at 3.10 the record came back as brushed aluminium — a mid-grey
+    // disc banded like a machined part. An LP under a softbox is BLACK, with
+    // one broad sheen across it and the ring structure visible only inside that
+    // sheen. 1.25 is where the black returns and the rings survive.
+    _vinylTop.specularIntensity = 0.34;
+    _vinylTop.envMapIntensity = 0.85;
     // An anisotropic lobe rotated onto the circumference draws the specular into
     // concentric arcs — the signature of a record under a studio softbox. At
     // rotation 0 it smears the other way and the disc starbursts.
@@ -1010,7 +1112,9 @@ function buildClamp() {
  */
 const AIM = [LAYOUT.ttPlinth.x, LAYOUT.ttPlinth.top + Y_SURF + 0.020, LAYOUT.ttPlinth.z];
 const FOV = 28;
-const SHOT = frameShot(AIM, 0.300, { fill: 0.880, az: -0.74, el: 0.500, fov: FOV });
+// fill 0.850, not 0.880: at 0.880 the plinth's near-left corner projected to
+// x = 146 px at 1600 × 1000 and broke the safe box.
+const SHOT = frameShot(AIM, 0.300, { fill: 0.850, az: -0.74, el: 0.500, fov: FOV });
 
 // Camera basis, so overlay cards can be placed in SCREEN terms and not guessed
 // at in world coordinates.
@@ -1037,10 +1141,14 @@ function screenPoint(sx, sy, dist) {
 // OVERLAY — ONE card. Round 2 ran two, and neither carried its area.
 // ---------------------------------------------------------------------------
 
-const CARD_W = 0.270;
-const CARD_H = 0.205;
-const CARD_D = 1.50;                       // metres from the camera
-const CARD_AT = screenPoint(0.310, 0.275, CARD_D);
+// The card sits 1.24 m from the lens. The camera is 1.68 m from the platter
+// centre and the deck is ~0.3 m in radius, so its nearest part is at ~1.38 m:
+// at 1.24 m NOTHING of the hero can print through the diagram, which is what
+// round 2 did — the tonearm crossed the section drawing.
+const CARD_W = 0.245;
+const CARD_H = 0.100;
+const CARD_D = 1.24;
+const CARD_AT = screenPoint(0.265, 0.214, CARD_D);
 
 /** Filled strip under a polyline whose top edge is rewritten every frame. */
 function fillStrip(n, color, opacity, yBase, order = 6) {
@@ -1066,47 +1174,70 @@ function fillStrip(n, color, opacity, yBase, order = 6) {
   return mesh;
 }
 
-/** THE card — the 45/45 groove in section, at 2600 : 1, with the tip in it. */
+/**
+ * THE card — three grooves of a 45/45 cut in section at 770 : 1, with the tip
+ * riding the middle one.
+ *
+ * Round 2 drew ONE groove on a card twice this size, so the lower half was
+ * blank hatching and the reader was given no sense of how a groove sits among
+ * its neighbours. The magnification is now chosen so that exactly three grooves
+ * at the true 129 µm pitch span the card edge to edge: the 60 µm width, the
+ * 69 µm land and the 129 µm pitch are all in one picture and all to the same
+ * scale, dimensioned as a chain, and the ±9 µm the tip actually wanders is
+ * visibly a small fraction of the land it must not cross.
+ */
 function buildGrooveCard(S) {
   const g = new THREE.Group();
   const W = CARD_W, H = CARD_H;
-  g.add(DIAG.diagramCard(W, H, { opacity: 0.94 }));
+  g.add(cardPlate(W, H));
 
-  const CX = W / 2, CY = 0.132;                   // record surface level
-  const D = GROOVE_D * MAG;                       // 0.063 — groove depth
-  const RB = BOTTOM_R * MAG;                      // 0.0126
-  const RT = TIP_R_H * MAG;                       // 0.0378 — tip across-groove radius
-  const UM = U_MAX * MAG;                         // 0.0191 — widest lateral wander
-  const NX = 220;
+  const CX = W / 2, CY = 0.062;           // centre groove axis · surface level
+  const D  = GROOVE_D * MAG;                // 0.0231 — groove depth
+  const RB = BOTTOM_R * MAG;                // 0.0046 — bottom fillet
+  const RT = TIP_R_H * MAG;                 // 0.0139 — tip across-groove radius
+  const PW = PITCH * MAG;                   // 0.0993 — one groove pitch
+  const UM = U_MAX * MAG;                   // 0.0070 — widest wander
+  const NX = 300;
 
-  // profile height at card-x, given modulation (u,w) in metres
-  const prof = (x, u, w) => {
-    const dx = x - (CX + u * MAG);
-    const wall = Math.abs(dx) - D + w * MAG;
+  /** One groove's cut below the land, dx from its own axis, apex raised by w. */
+  const cut = (dx, w) => {
+    const wall = Math.abs(dx) - D + w;
     if (wall >= 0) return 0;
-    const arc = (-D + w * MAG + RB * SQ2) - Math.sqrt(Math.max(0, RB * RB - dx * dx));
-    return Math.min(0, Math.max(wall, Math.abs(dx) < RB ? arc : -1e9));
+    if (Math.abs(dx) < RB) {
+      const arc = (-D + w + RB * SQ2) - Math.sqrt(Math.max(0, RB * RB - dx * dx));
+      return Math.min(0, Math.max(wall, arc));
+    }
+    return wall;
   };
+  // The cut before, the cut being played, and the cut after.
+  const prof = (x, u, w) => Math.min(
+    cut(x - (CX - PW), 0),
+    cut(x - (CX + u * MAG), w * MAG),
+    cut(x - (CX + PW), 0),
+  );
 
   // ---- the sectioned vinyl -------------------------------------------------
   const fill = fillStrip(NX, 0x1b222b, 0.97, 0.0, 6);
   g.add(fill);
   // Hatching in the regions that are solid vinyl whatever the modulation does:
   // the two lands, and everything below the deepest the apex ever goes.
-  const yFloor = CY - D - UM - 0.008;
-  const xLandL = CX - D - UM - 0.006, xLandR = CX + D + UM + 0.006;
+  const yFloor = CY - D - UM - 0.004;
   g.add(hatchRects([
     [0, 0, W, yFloor],
-    [0, yFloor, xLandL, CY],
-    [xLandR, yFloor, W, CY],
-  ], 0.0155, 0x44505e, 0.62));
+    [CX - PW + D, yFloor, CX - D - UM, CY],
+    [CX + D + UM, yFloor, CX + PW - D, CY],
+  ], 0.0110, 0x44505e, 0.55));
 
-  const edge = new DIAG.Trace(NX, 0xb3bcc6, 2.0, { opacity: 0.95, renderOrder: 12 });
+  const edge = new DIAG.Trace(NX, 0xb3bcc6, 1.9, { opacity: 0.95, renderOrder: 12 });
   g.add(edge);
-  // the two walls, tinted by channel — each runs from the apex to the surface,
-  // which for a 90° included angle is exactly 45°
-  const wallL = new DIAG.Trace(2, PAL.cy, 3.4, { opacity: 0.95, renderOrder: 13 });
-  const wallR = new DIAG.Trace(2, PAL.vi, 3.4, { opacity: 0.95, renderOrder: 13 });
+  // The two walls of the played groove. They are two channels, and the palette
+  // carries exactly one signal colour — so they are the same cyan at two
+  // values, solid for L and dashed for R, and the caption does the naming.
+  // (Round 2 used violet for R: a fourth hue, on the most-read element in the
+  // frame, and the only violet in twelve chapters.)
+  const wallL = new DIAG.Trace(2, PAL.cy, 3.0, { opacity: 0.95, renderOrder: 19 });
+  const wallR = new DIAG.Trace(2, PAL.cy, 3.0,
+    { opacity: 0.78, dashed: true, dashSize: 0.0042, gapSize: 0.0032, renderOrder: 19 });
   g.add(wallL, wallR);
 
   S.grooveWrite = (u, w) => {
@@ -1124,51 +1255,75 @@ function buildGrooveCard(S) {
     wallR.write((i) => (i === 0 ? [ax + k, ay + k, 0.0009] : [ax + s, CY, 0.0009]));
   };
 
-  // ---- the unmodulated groove, ghosted, and dimensioned --------------------
-  // Everything on this card is measured against the groove at rest, so the
-  // modulation reads as a departure from a datum rather than as a wobble.
-  const rest = new DIAG.Trace(NX, PAL.ink3, 1.2,
-    { opacity: 0.55, dashed: true, dashSize: 0.006, gapSize: 0.005, renderOrder: 10 });
+  // ---- the unmodulated groove, ghosted -------------------------------------
+  // The modulation must read as a departure from a datum, not as a wobble.
+  const rx0 = CX - D - UM - 0.004, rx1 = CX + D + UM + 0.004, NR = 90;
+  const rest = new DIAG.Trace(NR, PAL.ink3, 1.1,
+    { opacity: 0.50, dashed: true, dashSize: 0.0040, gapSize: 0.0034, renderOrder: 10 });
   rest.write((i) => {
-    const x = (i / (NX - 1)) * W;
+    const x = rx0 + (rx1 - rx0) * (i / (NR - 1));
     return [x, CY + prof(x, 0, 0), 0.0003];
   });
   g.add(rest);
 
-  const DIM_Y = CY + 0.043;
-  g.add(DIAG.dimension([CX - D, DIM_Y, 0.001], [CX + D, DIM_Y, 0.001], { head: 0.008 }));
-  for (const sx of [-1, 1]) {                       // projection lines
-    const t = new DIAG.Trace(2, PAL.ink3, 1.0, { opacity: 0.40, renderOrder: 10 });
-    t.write((i) => [CX + sx * D, i ? DIM_Y + 0.006 : CY, 0.0005]);
+  // ---- the dimension chain: 60 + 69 = 129 µm -------------------------------
+  const DIM1 = CY + 0.0130, DIM2 = CY + 0.0300;
+  const xA = CX - PW - D, xB = CX - PW + D, xC = CX - D;
+  for (const [p, q, y] of [[xA, xB, DIM1], [xB, xC, DIM1], [xA, xC, DIM2]]) {
+    g.add(dimH(p, q, y));
+  }
+  for (const x of [xA, xB, xC]) {                    // projection lines
+    const t = new DIAG.Trace(2, PAL.ink3, 1.0, { opacity: 0.38, renderOrder: 10 });
+    t.write((i) => [x, i ? DIM2 + 0.005 : CY, 0.0005]);
     g.add(t);
   }
-  S.dimAnchor = new THREE.Object3D();
-  S.dimAnchor.position.set(CX - D * 0.56, DIM_Y, 0);
-  g.add(S.dimAnchor);
+  const anchor = (x, y) => {
+    const o = new THREE.Object3D();
+    o.position.set(x, y, 0);
+    g.add(o);
+    return o;
+  };
+  // ---- the included angle, on the groove that has no stylus in it ---------
+  // "45/45" is a claim about this angle and nothing else on the card states it.
+  const AX = CX + PW, AY = CY - D, AR = D * 0.62;
+  const arc = new DIAG.Trace(21, PAL.ink3, 1.2, { opacity: 0.75, renderOrder: 11 });
+  arc.write((i) => {
+    const a = (Math.PI / 4) + (Math.PI / 2) * (i / 20);
+    return [AX + Math.cos(a) * AR, AY + Math.sin(a) * AR, 0.0012];
+  });
+  g.add(arc);
+  const lead = new DIAG.Trace(2, PAL.ink3, 1.0, { opacity: 0.45, renderOrder: 11 });
+  lead.write((i) => [AX, i ? CY + 0.0125 : AY + AR, 0.0012]);
+  g.add(lead);
 
-  // 45° construction lines that make the geometry unmistakable
-  const cons = new DIAG.Trace(3, 0x4e5761, 1.1, { opacity: 0.5, dashed: true, renderOrder: 11 });
-  cons.write((i) => [[CX - D * 1.42, CY + D * 0.42], [CX, CY - D], [CX + D * 1.42, CY + D * 0.42]][i].concat(0.0004));
-  g.add(cons);
+  S.aWidth = anchor((xA + xB) / 2, DIM1);
+  S.aLand  = anchor((xB + xC) / 2, DIM1);
+  S.aPitch = anchor((xA + xC) / 2, DIM2);
+  S.aAngle = anchor(AX, CY + 0.0135);
 
   // ---- stylus (a group that is simply moved) ------------------------------
+  // The tip is tangent to both 45° walls, so its centre sits r√2 above the
+  // apex and its underside clears the groove bottom by r(√2 − 1) = 7.5 µm. It
+  // rides the walls; it never touches the bottom, and the section has to show
+  // that or it teaches the opposite of the truth.
   const sty = new THREE.Group();
   g.add(sty);
+  // Nearly clear: the diamond must not hide the walls it is riding on.
   const disc = new THREE.Mesh(new THREE.CircleGeometry(RT, 48),
-    new THREE.MeshBasicMaterial({ color: 0x76838f, transparent: true, opacity: 0.46, depthWrite: false, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: 0x76838f, transparent: true, opacity: 0.20, depthWrite: false, toneMapped: false }));
   disc.renderOrder = 14;
   sty.add(disc);
   const shank = poly([
-    [-RT * 0.58, RT * 0.98], [RT * 0.58, RT * 0.98], [RT * 0.40, RT * 1.98], [-RT * 0.40, RT * 1.98],
+    [-RT * 0.58, RT * 0.98], [RT * 0.58, RT * 0.98], [RT * 0.40, RT * 2.30], [-RT * 0.40, RT * 2.30],
   ], 0x59646f, 0.44, 14);
   sty.add(shank);
-  const ring = new DIAG.Trace(49, 0xe6ecf3, 1.8, { opacity: 0.95, renderOrder: 16 });
+  const ring = new DIAG.Trace(49, 0xe6ecf3, 1.7, { opacity: 0.95, renderOrder: 16 });
   ring.write((i) => [Math.cos((i / 48) * TAU) * RT, Math.sin((i / 48) * TAU) * RT, 0.002]);
   sty.add(ring);
   // the two Hertzian contact patches, drawn 2a wide at the same magnification
   const aP = A_HZ * MAG;
   for (const s of [-1, 1]) {
-    const c = new DIAG.Trace(2, PAL.am, 5.0, { opacity: 1, renderOrder: 17 });
+    const c = new DIAG.Trace(2, PAL.am, 4.5, { opacity: 1, renderOrder: 17 });
     const cx = s * RT * 0.7071, cy = -RT * 0.7071;
     c.write((i) => {
       const kk = (i === 0 ? -1 : 1) * aP * 0.7071;
@@ -1178,22 +1333,14 @@ function buildGrooveCard(S) {
   }
   S.stylusAt = (u, w) => sty.position.set(CX + u * MAG, CY - D + w * MAG + RT * SQ2, 0.001);
 
-  // ---- lateral / vertical decomposition, at the same 2600 : 1 -------------
-  const REST = [CX, CY - D + RT * SQ2];
-  const legU = new DIAG.Trace(2, PAL.cy, 3.4, { opacity: 0.95, renderOrder: 18 });
-  const legW = new DIAG.Trace(2, PAL.vi, 3.4, { opacity: 0.95, renderOrder: 18 });
-  const legT = new DIAG.Trace(2, 0xe6ecf3, 1.3, { opacity: 0.8, dashed: true, dashSize: 0.005, gapSize: 0.004, renderOrder: 17 });
-  g.add(legU, legW, legT);
-  S.decompose = (u, w) => {
-    const ux = REST[0] + u * MAG, wy = REST[1] + w * MAG;
-    legU.write((i) => [i ? ux : REST[0], REST[1], 0.0030]);
-    legW.write((i) => [ux, i ? wy : REST[1], 0.0030]);
-    legT.write((i) => (i ? [REST[0], REST[1], 0.0028] : [ux, wy, 0.0028]));
-  };
+  // No u/w construction legs. At 770 : 1 the whole excursion is ±9 µm — seven
+  // screen pixels — so a right triangle drawn on it is a white smudge inside
+  // the diamond, not a decomposition. The live u and w are on the cartridge
+  // label, where they are readable, and the locus below shows the shape.
 
   // ---- the tip locus: the stereo ellipse it actually traces ---------------
   const NL = 96;
-  const locus = new DIAG.Trace(NL, PAL.cy, 1.5, { opacity: 0.45, renderOrder: 15 });
+  const locus = new DIAG.Trace(NL, PAL.cy, 1.8, { opacity: 0.80, renderOrder: 20 });
   g.add(locus);
   S.locusWrite = (phase) => {
     locus.write((i) => {
@@ -1208,12 +1355,7 @@ function buildGrooveCard(S) {
   spec.position.set(W / 2, H / 2, 0.004);
   g.add(spec);
 
-  S.headA = new THREE.Object3D();
-  S.headA.position.set(CARD_W / 2, CARD_H + 0.026, 0);
-  g.add(S.headA);
-  S.tipAnchor = new THREE.Object3D();
-  S.tipAnchor.position.set(CARD_W * 0.30, -0.022, 0);
-  g.add(S.tipAnchor);
+  S.headA = anchor(CX, -0.026);
 
   g.position.set(-CARD_W / 2, -CARD_H / 2, 0);
   return g;
@@ -1225,20 +1367,24 @@ function buildRecordAnnot(S) {
   const P = LAYOUT.ttPlinth;
   g.position.set(P.x, P.top, P.z);
   g.rotation.y = P.ry;
-  const Y = Y_SURF + 0.0025;
+  // 4 mm proud of the vinyl, not 1: an annotation drawn ON the surface reads as
+  // paint applied to the record instead of as an overlay above it.
+  const Y = Y_SURF + 0.0040;
 
-  const circle = (r, colour, width, op) => {
+  const circle = (r, colour, width, op, dash) => {
     const n = 128;
-    const t = new DIAG.Trace(n, colour, width, { opacity: op, renderOrder: 12 });
+    const t = new DIAG.Trace(n, colour, width, dash
+      ? { opacity: op, renderOrder: 12, dashed: true, dashSize: 0.008, gapSize: 0.007 }
+      : { opacity: op, renderOrder: 12 });
     t.write((i) => {
       const a = (i / (n - 1)) * TAU;
       return [Math.cos(a) * r, Y, Math.sin(a) * r];
     });
     return t;
   };
-  g.add(circle(R_OUT, PAL.cy, 1.5, 0.62));
-  g.add(circle(R_IN, PAL.cy, 1.5, 0.62));
-  const live = circle(0.11, PAL.am, 1.6, 0.8);
+  g.add(circle(R_OUT, PAL.cy, 1.3, 0.45, true));
+  g.add(circle(R_IN, PAL.cy, 1.3, 0.45, true));
+  const live = circle(0.11, PAL.am, 1.6, 0.8, false);
   g.add(live);
   S.liveCircleWrite = (r) => {
     const n = 128;
@@ -1289,11 +1435,8 @@ function latch() {
   d.v = vAt(S.r);
   d.err = trackErr(S.r);
   d.vmax = vMaxAt(S.r);
-  if (S.labTip) {
-    S.labTip.setText(`u = ${f2(d.u * 1e6)} µm · w = ${f2(d.w * 1e6)} µm`);
-    S.labTip.setValue(`|v| = ${(d.tip * 100).toFixed(2)} cm/s of ${(V_REF * 100).toFixed(2)} cm/s pk`);
-  }
   if (S.labEmf) {
+    S.labEmf.setText(`tip u = ${f2(d.u * 1e6)} µm · w = ${f2(d.w * 1e6)} µm`);
     S.labEmf.setValue(`${(d.e * 1e6).toFixed(0)} µV of ${(E_PK * 1e6).toFixed(0)} µV pk (${(E_RMS * 1e6).toFixed(0)} µV rms)`);
   }
   return d;
@@ -1360,50 +1503,60 @@ export default {
     const panel = new THREE.Group();
     panel.position.copy(CARD_AT);
     panel.lookAt(CAM_P);
+    // Off the lens axis. A card square to the camera is a decal; a few degrees
+    // of yaw gives it perspective, and it is what lets the specular sweep move
+    // across the glass instead of sitting on it.
+    panel.rotateY(-0.20);
     panel.add(buildGrooveCard(S));
     ov.add(panel);
     ov.add(buildRecordAnnot(S));
 
-    // ---- labels (6) -------------------------------------------------------
+    // ---- labels: one caption, three dimension numerals, three callouts -----
     const L = ctx.labels;
 
     L.add(S.headA, {
-      kicker: `45/45 groove in section · ${MAG} : 1 · motion 1 : ${TIME_RATIO}`,
-      text: 'L cuts the wall toward the spindle, R the wall toward the rim',
-      value: `${(GROOVE_D * 1e6).toFixed(0)} µm deep · ${(PITCH * 1e6).toFixed(0)} µm pitch`,
-      occlude: false, priority: 3, offset: [0, -6],
+      kicker: `45/45 GROOVE · ${MAG} : 1`,
+      text: `tip ${(TIP_R_H * 1e6).toFixed(0)} × ${(TIP_R_V * 1e6).toFixed(0)} µm · motion 1 : ${TIME_RATIO}`,
+      value: `${(GROOVE_D * 1e6).toFixed(0)} µm deep · rides the walls, ${(TIP_CLEAR * 1e6).toFixed(1)} µm off the bottom`,
+      occlude: false, priority: 4, offset: [0, 26],
     });
-    L.add(S.dimAnchor, {
+    // The dimension chain's numerals. 60 + 69 = 129.
+    L.add(S.aWidth, {
       value: `${(GROOVE_W * 1e6).toFixed(0)} µm`,
-      cls: 'plain', occlude: false, offset: [0, -14], priority: 2,
+      cls: 'plain', occlude: false, offset: [0, -13], priority: 3,
     });
-    S.labTip = L.add(S.tipAnchor, {
-      kicker: `Tip · ${(TIP_R_H * 1e6).toFixed(0)} × ${(TIP_R_V * 1e6).toFixed(0)} µm radii`,
-      text: 'u = +0.00 µm · w = +0.00 µm',
-      value: '|v| = 0.00 cm/s of 5.00 cm/s pk',
-      cls: 'acc', occlude: false, offset: [0, 16], priority: 3,
+    L.add(S.aLand, {
+      value: `${(LAND * 1e6).toFixed(0)} µm`,
+      cls: 'plain', occlude: false, offset: [0, -13], priority: 3,
+    });
+    L.add(S.aPitch, {
+      value: `${(PITCH * 1e6).toFixed(0)} µm`,
+      cls: 'plain', occlude: false, offset: [0, -13], priority: 3,
+    });
+    L.add(S.aAngle, {
+      value: '90°',
+      cls: 'plain', occlude: false, offset: [0, -11], priority: 3,
     });
 
     S.labEmf = L.add(arm.userData.head, {
-      kicker: 'Moving coil · e = Bl · v, instantaneous',
-      text: `Bl = ${(BL * 1e3).toFixed(2)} mT·m, ${N_TURNS} turns in ${B_GAP} T`,
+      kicker: 'MOVING COIL · e = Bl · v',
+      text: 'tip u = +0.00 µm · w = +0.00 µm',
       value: `0 µV of ${(E_PK * 1e6).toFixed(0)} µV pk (${(E_RMS * 1e6).toFixed(0)} µV rms)`,
-      cls: 'acc lead', offset: [136, -78], priority: 2,
+      cls: 'acc lead', offset: [156, -74], priority: 2,
     });
 
     L.add(S.anchorOut, {
-      kicker: `Groove velocity — ${(R_OUT * 1000).toFixed(0)} mm out to ${(R_IN * 1000).toFixed(0)} mm in`,
-      text: `λ at 10 kHz falls ${(lambdaAt(R_OUT) * 1e6).toFixed(0)} → ${(lambdaAt(R_IN) * 1e6).toFixed(0)} µm`,
-      value: `${V_OUT.toFixed(3)} → ${V_IN.toFixed(3)} m/s`,
-      cls: 'acc lead', offset: [-118, 168], priority: 2,
+      kicker: 'GROOVE VELOCITY',
+      value: `${V_OUT.toFixed(3)} → ${V_IN.toFixed(3)} m/s · ${(R_OUT * 1000).toFixed(0)} → ${(R_IN * 1000).toFixed(0)} mm`,
+      cls: 'acc lead', offset: [-96, 156], priority: 2,
     });
 
     const podAnchor = new THREE.Object3D();
     podAnchor.position.set(POD[0], 0.076, POD[1]);
     hw.add(podAnchor);
     L.add(podAnchor, {
-      kicker: 'Belt drive · 33⅓ rpm',
-      value: `strobe 120 × ${MAINS.f} / 33⅓ = ${STROBE_BARS} bars`,
+      kicker: 'BELT DRIVE · 33⅓ rpm',
+      value: `${STROBE_BARS} strobe bars = 120 × ${MAINS.f} Hz / 33⅓`,
       offset: [10, 52], priority: 1,
     });
 
@@ -1431,7 +1584,6 @@ export default {
     S.grooveWrite(u, w);
     S.stylusAt(u, w);
     S.locusWrite(ph);
-    S.decompose(u, w);
     S.liveCircleWrite(S.r);
     // Nothing numeric is written here on purpose — see latch().
   },
@@ -1439,10 +1591,10 @@ export default {
   content() {
     return `
 <h3>The cut</h3>
-<p>One chisel, driven by two coils at right angles, each
-<span class="num">45°</span> to the disc: left cuts the wall facing the spindle,
-right the wall facing the rim, with the right-hand polarity set so that
-identical signals move the tip sideways.</p>
+<p>One chisel, two coils at right angles, each <span class="num">45°</span> to
+the disc: left cuts the wall facing the spindle (solid on the section), right
+the wall facing the rim (dashed), the right-hand polarity set so identical
+signals move the tip sideways.</p>
 <div class="eq">u = (L + R)/√2  <span class="c">lateral — a mono cut</span>
 w = (L − R)/√2  <span class="c">vertical — the difference</span></div>
 
@@ -1451,47 +1603,37 @@ w = (L − R)/√2  <span class="c">vertical — the difference</span></div>
 wall is moving.</p></div>
 
 <h3>The generator</h3>
-<p>${N_TURNS} turns of <span class="num">${(L_TURN * 1e3).toFixed(2)} mm</span>
-effective length in a <span class="num">${B_GAP} T</span> gap give
-<span class="num">Bl = ${(BL * 1e3).toFixed(2)} mT·m</span>, and a moving coil
-reports <em>velocity</em>:</p>
 <div class="eq">e = Bl·v̂ = <span class="hl">${(BL * 1e3).toFixed(2)} mV·s/m</span> × ${V_REF.toFixed(4)} m/s pk
   = ${(E_PK * 1e6).toFixed(0)} µV pk = ${(E_RMS * 1e6).toFixed(0)} µV rms  <span class="c">1 kHz</span></div>
-<p>Constant amplitude then means output rising 6 dB per octave — which is why
-the recording characteristic is written in velocity.</p>
-
-<h3>Two grams, five tonnes</h3>
-<div class="eq">N = ${(VTF_N * 1e3).toFixed(1)} mN / (2 cos 45°) = ${(N_WALL * 1e3).toFixed(1)} mN
-a = (3·N·R*/4E*)<sup>⅓</sup> = ${(A_HZ * 1e6).toFixed(2)} µm
-p = N/πa² = <span class="hl">${(P_MEAN / 1e6).toFixed(0)} MPa</span> = ${P_TCM2.toFixed(1)} tf/cm²
-p̂ = 1.5·p  = ${(P_MAX / 1e6).toFixed(0)} MPa  <span class="c">Hertz peak</span></div>
-<p>Hertz, diamond on vinyl at <span class="num">1050</span> and
-<span class="num">3.0 GPa</span>. Peak pressure is 1.5 × the mean; vinyl yields
-near <span class="num">50 MPa</span>, so the patch spreads and the truth sits
-between this and the fully plastic
-<span class="num">${P_PLAS.toFixed(1)} tf/cm²</span>.</p>
+<p>${N_TURNS} turns of <span class="num">${(L_TURN * 1e3).toFixed(2)} mm</span> in
+a <span class="num">${B_GAP} T</span> gap. A coil reports <em>velocity</em>, so
+constant amplitude means output rising 6 dB per octave — which is why the
+recording characteristic is written in velocity. The
+<span class="num">${(VTF_N * 1e3).toFixed(1)} mN</span> of downforce lands on two
+patches <span class="num">${(2 * A_HZ * 1e6).toFixed(1)} µm</span> across:
+<span class="num">${(P_MEAN / 1e6).toFixed(0)} MPa</span>, ${P_TCM2.toFixed(1)} tf/cm².</p>
 
 <h3>Why the last track is the worst</h3>
-<p>Linear velocity falls from <span class="num">${V_OUT.toFixed(3)}</span> to
+<p>Linear velocity falls <span class="num">${V_OUT.toFixed(3)}</span> →
 <span class="num">${V_IN.toFixed(3)} m/s</span>, so a 10 kHz wavelength shrinks
-from <span class="num">${(lambdaAt(R_OUT) * 1e6).toFixed(0)}</span> to
+<span class="num">${(lambdaAt(R_OUT) * 1e6).toFixed(0)}</span> →
 <span class="num">${(lambdaAt(R_IN) * 1e6).toFixed(0)} µm</span>. A tip of
-along-groove radius <span class="num">5 µm</span> follows the wall only while
-λ²/4π²A exceeds it, so traceable peak velocity collapses from
-<span class="num">${(vMaxAt(R_OUT) * 100).toFixed(0)}</span> to
-<span class="num">${(vMaxAt(R_IN) * 100).toFixed(0)} cm/s</span> — by
-(146/60)² = <span class="num">${((R_OUT / R_IN) ** 2).toFixed(2)}</span>. No arm
-undoes it.</p>
+along-groove radius <span class="num">${(TIP_R_V * 1e6).toFixed(0)} µm</span>
+follows the wall only while λ²/4π²A exceeds it, so traceable peak velocity
+collapses <span class="num">${(vMaxAt(R_OUT) * 100).toFixed(0)}</span> →
+<span class="num">${(vMaxAt(R_IN) * 100).toFixed(0)} cm/s</span>, by
+(146/60)² = <span class="num">${((R_OUT / R_IN) ** 2).toFixed(2)}</span>.</p>
 
 <div class="myth"><span class="lab">Commonly got wrong</span>
 <p>Nothing races down the tonearm wire at the speed of the music. At
-<span class="num">${(I_PK * 1e6).toFixed(2)} µA</span> peak in 0.030 mm² litz the
-carriers drift at <span class="num">${(V_DRIFT * 1e9).toFixed(2)} nm/s</span> and
-on a 1 kHz signal shuffle <span class="num">±${(X_DRIFT * 1e12).toFixed(2)} pm</span>
-— 1/${CU_RATIO.toFixed(0)} of the <span class="num">255.6 pm</span> spacing
-between copper atoms. The field arrives at
-<span class="num">${(V_FIELD / 1e8).toFixed(2)} × 10⁸ m/s</span>, and it is a
-loop: every electron leaving the coil returns through the other conductor.</p></div>`;
+<span class="num">${(I_PK * 1e6).toFixed(2)} µA</span> peak in
+${STRANDS} × <span class="num">${(STRAND_D * 1e3).toFixed(0)} µm</span> litz
+(<span class="num">${WIRE_MM2.toFixed(3)} mm²</span>) the carriers drift at
+<span class="num">${(V_DRIFT * 1e9).toFixed(2)} nm/s</span> and on a 1 kHz signal
+shuffle <span class="num">±${(X_DRIFT * 1e12).toFixed(2)} pm</span> — 1/${CU_RATIO.toFixed(0)}
+of the <span class="num">255.6 pm</span> between copper atoms. The field arrives
+at <span class="num">${(V_FIELD / 1e8).toFixed(2)} × 10⁸ m/s</span>, and it is a
+loop: what leaves the coil returns on the other conductor.</p></div>`;
   },
 
   readouts() {

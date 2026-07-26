@@ -4,7 +4,7 @@ import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
-import { ROOM, XOVER, TS as MAIN_TS } from '../core/spec.js';
+import { ROOM, XOVER } from '../core/spec.js';
 
 /* ===========================================================================
    BASS & THE ROOM
@@ -38,7 +38,7 @@ const TAU = DSP.TAU;
 // and cross-checked against spec, while RT60 — which only exists in spec — is
 // taken from there. Everything acoustic below follows from those four.
 const RM = { W: LAYOUT.room.w, D: LAYOUT.room.d, H: LAYOUT.room.h, z0: LAYOUT.room.wallZ };
-if (Math.abs(RM.W - ROOM.L) + Math.abs(RM.D - ROOM.W) + Math.abs(RM.H - ROOM.H) > 1e-9) {
+if (Math.abs(RM.W - ROOM.W) + Math.abs(RM.D - ROOM.D) + Math.abs(RM.H - ROOM.H) > 1e-9) {
   throw new Error('sub.js: LAYOUT.room disagrees with spec.ROOM');
 }
 const V_ROOM = RM.W * RM.D * RM.H;                                   // 206.46 m³
@@ -73,9 +73,22 @@ const SURR_W = 0.0340;                      // m, roll-surround width
 const SD = Math.PI * (CONE_R - SURR_W / 2) ** 2;   // 0.0735 m² — 306 mm effective
 const FRAME_R = 0.2000;                     // m, trim-flange outer radius (400 mm)
 const XMAX = 0.019;                         // m, one-way linear excursion
+/** The two diameters a driver actually has, both derived from the drawn radii.
+ *  Nominal is what a catalogue prints; effective is what moves air, and it is
+ *  the one every acoustic number below is computed from. */
+const D_NOM = 2 * CONE_R;                            // 0.340 m, cone + surround
+const D_EFF = 2 * Math.sqrt(SD / Math.PI);           // 0.306 m, effective piston
+/** Where the moving assembly's rest plane sits relative to the front face, and
+ *  the flange that laps over the roll's outer edge. The flange's inner radius
+ *  is INSIDE CONE_R on purpose: a trim ring that stops short of the surround
+ *  leaves a sight-line down the lacquer bore, and a 172 mm mirrored cylinder
+ *  seen end-on is what was reading as a chrome torus around the driver. */
+const DRV_Z = CAB / 2 - 0.0135;                      // rest plane of the cone
+const RING_IN = CONE_R - 0.0010;                     // 0.1690 m, laps the roll
+const RING_Z = CAB / 2 + 0.0090;                     // flange mid-plane
 
 /** CHOSEN: this chapter's driver. Not spec.DRIVER — that is the 220 mm mid-bass
- *  in the floorstander. A 380 mm sealed subwoofer unit. */
+ *  in the floorstander. A 340 mm sealed subwoofer unit, Sd 306 mm effective. */
 const SUB_TS = { fs: 16, Qts: 0.42, Vas: 0.220 };
 const ALIGN = DSP.sealedAlignment(SUB_TS, VB);
 const F3 = (() => {                         // −3 dB of the sealed alignment
@@ -278,7 +291,7 @@ const TANV = Math.tan((FOV * Math.PI) / 360), TANH = TANV * ASPECT;
 const HERO = new THREE.Vector3(LAYOUT.subR.x, (PED_H + CAB) / 2, LAYOUT.subR.z);
 const HERO_R = 0.54;
 const BASE = frameShot([HERO.x, HERO.y, HERO.z], HERO_R,
-  { fill: 0.60, az: 0.34, el: 0.235, fov: FOV });
+  { fill: 0.77, az: 0.34, el: 0.225, fov: FOV });
 const CAMV = new THREE.Vector3(...BASE.position);
 const AXIS = new THREE.Vector3(), RIGHT = new THREE.Vector3(), UPC = new THREE.Vector3();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -297,7 +310,7 @@ const WORLD_UP = new THREE.Vector3(0, 1, 0);
  * Solves h = (A + R·tx + U·ty)/|…| for the axis A by fixed-point iteration.
  */
 const SHOT = (() => {
-  const HX = 424, HY = 596;
+  const HX = 416, HY = 570;
   const h = HERO.clone().sub(CAMV);
   const dist = h.length();
   h.normalize();
@@ -330,8 +343,8 @@ function faceCam(g) {
 }
 
 // ---- the plan card ----------------------------------------------------------
-const CARD_AT = [860, 428, 3.05];           // px, px, metres from the lens
-const PLAN_H = 0.687;                       // ~375 px tall at that distance
+const CARD_AT = [888, 432, 2.50];           // px, px, metres from the lens
+const PLAN_H = 0.687;                       // ~423 px tall at that distance
 const PLAN_W = PLAN_H * RM.W / RM.D;        // true room aspect
 const PLAN_PAD = 0.028;
 /** room x,z → card-local metres (up on the card = toward the back wall) */
@@ -349,6 +362,7 @@ function roundedRect(sh, w, h, r) {
 
 let _coneMat = null, _surrMat = null, _dustMat = null;
 let _ringMat = null, _baffMat = null, _glassMat = null, _fastMat = null, _lacMat = null;
+let _trimMat = null, _hwGlass = null, _meterMat = null;
 /**
  * The cabinet lacquer. Same albedo as mats().pianoBlack — nothing here is
  * lighter than it should be — but a stronger environment term and a tighter
@@ -358,51 +372,79 @@ let _ringMat = null, _baffMat = null, _glassMat = null, _fastMat = null, _lacMat
 function LACQUER() {
   if (!_lacMat) {
     _lacMat = mats().pianoBlack.clone();
-    _lacMat.clearcoatRoughness = 0.034;
-    _lacMat.envMapIntensity = 1.34;
+    // Clearcoat roughness deliberately off the library's 0.028: a perfect
+    // uniform clearcoat mirrors a softbox as a decal-sharp rectangle, and real
+    // lacquer has enough orange-peel that the highlight breaks up and ramps
+    // over its own length.
+    _lacMat.clearcoatRoughness = 0.052;
+    _lacMat.envMapIntensity = 1.30;
   }
   return _lacMat;
 }
 /**
- * Pulp cone. Lifted well off black and given a strong sheen: a 330 mm cone in
- * a black cabinet has nothing but its own shading to describe its form, and at
- * the previous value the cone, the surround and the dust cap collapsed into one
- * flat disc that read as a hole rather than a driver.
+ * Woven-composite cone. The map is mats().coneWeave's own weave, kept rather
+ * than dropped: a 340 mm cone rendered as a bare lathe is a grey gradient with
+ * nothing in it that says what it is made of, and the weave is the one cue that
+ * gives the disc a surface. The albedo is carried in `color` because the weave
+ * map multiplies down to near-black on its own.
  */
 function CONE_MAT() {
   if (!_coneMat) {
-    _coneMat = mats().cone.clone();
-    _coneMat.color.setHex(0x22252a);
-    _coneMat.roughness = 0.86;
-    _coneMat.sheen = 0.70;
-    _coneMat.sheenColor = new THREE.Color(0x555d68);
-    _coneMat.envMapIntensity = 0.90;
+    _coneMat = mats().coneWeave.clone();
+    _coneMat.color.setHex(0xcdd6e2);
+    _coneMat.metalness = 0.0;
+    _coneMat.roughness = 0.66;
+    _coneMat.clearcoat = 0.22;
+    _coneMat.clearcoatRoughness = 0.46;
+    _coneMat.envMapIntensity = 0.42;
+    _coneMat.sheen = 0.22;
+    _coneMat.sheenRoughness = 0.92;
+    _coneMat.sheenColor = new THREE.Color(0x2f353d);
   }
   return _coneMat;
 }
-/** Deep roll surround — darker than the cone, with a sheen along the crown so
- *  the roll reads as a torus rather than as a flat annulus. */
+/**
+ * Roll surround. A 17 mm rubber roll is MATTE — it is the one part of a
+ * loudspeaker that never has a specular highlight on it. The previous sheen of
+ * 1.0 at sheenRoughness 0.52 mirrored the studio's front strip as a banded
+ * chrome torus that was the brightest thing in the frame; that is a material
+ * category error, not a lighting one.
+ */
 function SURR_MAT() {
   if (!_surrMat) {
     _surrMat = mats().rubber.clone();
-    _surrMat.color.setHex(0x101216);
-    _surrMat.sheen = 1.0;
-    _surrMat.sheenRoughness = 0.52;
-    _surrMat.sheenColor = new THREE.Color(0x4c545f);
-    _surrMat.envMapIntensity = 0.80;
+    /* DOUBLE-SIDED, AND THIS IS THE WHOLE BUG.
+     * A half-roll surround is a lathe whose profile turns back on itself: past
+     * the crown the radius still grows but the height falls, so LatheGeometry's
+     * normal (dy, −dx) flips sign and the outer half of the roll becomes
+     * back-facing. Against a FrontSide material it is silently culled, and what
+     * the camera sees in its place is the clearcoated lacquer bore behind it —
+     * a 180 mm black mirror that sweeps the whole studio into a few
+     * millimetres. That is the "mirror-chrome torus with a blown white
+     * specular arc": not a material choice at all, a hole in the mesh. */
+    _surrMat.side = THREE.DoubleSide;
+    _surrMat.color.setHex(0x1c1f24);
+    _surrMat.roughness = 0.86;
+    _surrMat.sheen = 0.42;
+    _surrMat.sheenRoughness = 0.90;
+    _surrMat.sheenColor = new THREE.Color(0x424954);
+    _surrMat.envMapIntensity = 0.46;
   }
   return _surrMat;
 }
-/** Coated dust cap — one tone up from the cone and slightly less matte, so the
- *  centre of the driver separates. */
+/** Coated dust cap — one tone up from the cone and matte, so the centre of the
+ *  driver separates without turning into a polished ball bearing. */
 function DUST_MAT() {
   if (!_dustMat) {
     _dustMat = mats().cone.clone();
-    _dustMat.color.setHex(0x2e333a);
-    _dustMat.roughness = 0.70;
-    _dustMat.clearcoat = 0.20;
-    _dustMat.clearcoatRoughness = 0.30;
-    _dustMat.envMapIntensity = 1.0;
+    _dustMat.color.setHex(0x1f2328);
+    _dustMat.roughness = 0.72;
+    _dustMat.clearcoat = 0.32;
+    _dustMat.clearcoatRoughness = 0.28;
+    _dustMat.sheen = 0.24;
+    _dustMat.sheenRoughness = 0.90;
+    _dustMat.sheenColor = new THREE.Color(0x333941);
+    _dustMat.envMapIntensity = 0.62;
   }
   return _dustMat;
 }
@@ -419,27 +461,66 @@ function FAST_MAT() {
 }
 /**
  * Diamond-turned alloy trim: the one bright element on an otherwise black
- * cabinet. Roughness deliberately well off zero — at 0.33 the reflected image
- * of the studio's front strip was narrower than the flange and returned a
- * clipped white line; at 0.46 it spans the flange and ramps.
+ * cabinet. Built from mats().aluTrim, not mats().alu — alu carries a brushed
+ * normal map and anisotropy 0.72, and on a lathe with circumferential tangents
+ * those smear the softbox into horizontal bars. aluTrim has neither, so the
+ * flange returns one clean sweep that ramps across its own width.
  */
 function RING_MAT() {
   if (!_ringMat) {
-    _ringMat = mats().alu.clone();
-    _ringMat.roughness = 0.62;
-    _ringMat.color.setHex(0x6e747c);
-    _ringMat.envMapIntensity = 0.26;
-    _ringMat.anisotropy = 0.90;
+    _ringMat = mats().aluTrim.clone();
+    _ringMat.color.setHex(0xa8afb8);
+    _ringMat.roughness = 0.34;
+    _ringMat.envMapIntensity = 1.15;
   }
   return _ringMat;
+}
+/** Satin machined trim: the plinth reveal, the fascia, the knob bodies. Darker
+ *  than the flange so the driver keeps the one bright ring. */
+function TRIM() {
+  if (!_trimMat) {
+    _trimMat = mats().aluTrim.clone();
+    _trimMat.color.setHex(0x62676e);
+    _trimMat.roughness = 0.58;
+    _trimMat.envMapIntensity = 0.36;
+  }
+  return _trimMat;
+}
+/**
+ * THE SPECULAR LAYER over the fascia meter — the hardware twin of GLASS_MAT
+ * below. A lit segment meter with nothing in front of it is a decal; a real one
+ * sits behind cover glass that carries the room. Separate material from the
+ * card's so the overlay fade cannot take the hardware's reflection with it.
+ */
+function HW_GLASS() {
+  if (!_hwGlass) {
+    _hwGlass = mats().glass.clone();
+    _hwGlass.color.setHex(0x000000);
+    _hwGlass.roughness = 0.84;
+    _hwGlass.clearcoat = 1.0;
+    _hwGlass.clearcoatRoughness = 0.075;
+    _hwGlass.envMapIntensity = 0.62;
+    _hwGlass.transparent = true;
+    _hwGlass.blending = THREE.AdditiveBlending;
+    _hwGlass.depthWrite = false;
+  }
+  return _hwGlass;
+}
+/** Excursion-meter segments. Deliberately well under the bloom threshold: this
+ *  is a backlit LCD segment, not a light source. */
+function METER_MAT() {
+  if (!_meterMat) {
+    _meterMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  }
+  return _meterMat;
 }
 /** Bead-blasted baffle. Dark enough that the warm kicker cannot tint it. */
 function BAFFLE_MAT() {
   if (!_baffMat) {
     _baffMat = mats().anodBlack.clone();
-    _baffMat.color.setHex(0x191b1e);
-    _baffMat.roughness = 0.58;
-    _baffMat.envMapIntensity = 0.70;
+    _baffMat.color.setHex(0x24272c);
+    _baffMat.roughness = 0.50;
+    _baffMat.envMapIntensity = 1.05;
   }
   return _baffMat;
 }
@@ -463,7 +544,7 @@ function GLASS_MAT() {
     _glassMat.roughness = 0.86;
     _glassMat.clearcoat = 1.0;
     _glassMat.clearcoatRoughness = 0.115;
-    _glassMat.envMapIntensity = 0.46;
+    _glassMat.envMapIntensity = 0.38;
     _glassMat.transparent = true;
     _glassMat.opacity = 1;
     _glassMat.blending = THREE.AdditiveBlending;
@@ -487,6 +568,39 @@ function convexPanel(w, h, bulge, seg = 24) {
   }
   p.needsUpdate = true;
   g.computeVertexNormals();
+  return g;
+}
+/**
+ * The moving assembly, drawn here rather than borrowed, so that every radius on
+ * screen is one of the radii the chapter's arithmetic uses: cone wall to
+ * CONE_R − SURR_W, a true half-torus roll of section SURR_W/2 out to CONE_R,
+ * and a shallow spherical dust cap. Sd is computed from these same numbers.
+ */
+function movingAssembly() {
+  const g = new THREE.Group();
+  const rc = CONE_R - SURR_W;               // 0.136 m, cone/surround junction
+  const rd = 0.062;                         // dust-cap radius
+  const dep = 0.078;                        // cone depth at the cap
+  const cp = [];
+  for (let i = 0; i <= 22; i++) {
+    const t = i / 22;
+    cp.push(new THREE.Vector2(rd + (rc - rd) * t, -dep * Math.pow(1 - t, 1.28)));
+  }
+  g.add(new THREE.Mesh(new THREE.LatheGeometry(cp, 128), CONE_MAT()));
+  const sp = [];
+  for (let i = 0; i <= 22; i++) {
+    const a = Math.PI * (i / 22);
+    sp.push(new THREE.Vector2(rc + (SURR_W / 2) * (1 - Math.cos(a)),
+      Math.sin(a) * SURR_W * 0.50));
+  }
+  g.add(new THREE.Mesh(new THREE.LatheGeometry(sp, 128), SURR_MAT()));
+  const A = 0.92, dp = [];                  // 53° of arc: a cap, not a dome
+  for (let i = 0; i <= 16; i++) {
+    const a = A * (1 - i / 16);
+    dp.push(new THREE.Vector2((Math.sin(a) / Math.sin(A)) * rd,
+      -dep + ((Math.cos(a) - Math.cos(A)) / (1 - Math.cos(A))) * 0.019));
+  }
+  g.add(new THREE.Mesh(new THREE.LatheGeometry(dp, 96), DUST_MAT()));
   return g;
 }
 /** Flat annulus with generous broken edges and a shallow cone on the top face,
@@ -540,28 +654,90 @@ export default {
     const M = mats();
     const half = CAB / 2;
 
-    // ---- pedestal + spikes -------------------------------------------------
-    const ped = new THREE.Mesh(GEO.bevelBox(CAB + 0.05, PED_H - 0.030, CAB + 0.05, 0.006, 4), LACQUER());
-    ped.position.y = (PED_H - 0.030) / 2 + 0.014;
+    // ---- pedestal, reveal and feet -----------------------------------------
+    // The pedestal is the plate-amplifier enclosure: the cabinet above it is a
+    // sealed lacquer box with nothing in it but air and one motor.
+    const PW = CAB + 0.05;                  // 0.550 m, plan of the pedestal
+    const PB = PED_H - 0.046;               // 0.199 m, body height
+    const ped = new THREE.Mesh(GEO.bevelBox(PW, PB, PW, 0.006, 4), LACQUER());
+    ped.position.y = PB / 2 + 0.016;
     g.add(ped);
-    const cap = new THREE.Mesh(GEO.bevelBox(CAB - 0.115, 0.020, CAB - 0.115, 0.003, 3), M.steel);
-    cap.position.y = PED_H - 0.010;         // flush with the cabinet base
-    g.add(cap);
+    // THE REVEAL. A 16 mm satin band, proud of the cabinet and inset from the
+    // pedestal, so the two masses read as one designed object with a machined
+    // joint rather than as a box standing on a box.
+    const rev = new THREE.Mesh(GEO.bevelBox(PW - 0.010, 0.030, PW - 0.010, 0.0026, 3), TRIM());
+    rev.position.y = PED_H - 0.015;
+    g.add(rev);
+    // shadow gap: a dark inset collar the cabinet actually sits on
+    const gap = new THREE.Mesh(GEO.bevelBox(CAB - 0.030, 0.014, CAB - 0.030, 0.002, 2), M.anodBlack);
+    gap.position.y = PED_H - 0.007;
+    g.add(gap);
+    // machined feet: a dark disc and a small adjuster, not a chrome spike. At
+    // this scale a polished cone returns a clipped white speck in the floor
+    // reflection and reads as debris.
+    const footD = 0.052;
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const sp = new THREE.Mesh(GEO.bevelCyl(0.020, 0.006, 0.016, 20, 0.0008), M.steel);
-      sp.position.set(sx * (half - 0.008), 0.008, sz * (half - 0.008));
-      g.add(sp);
+      const fo = new THREE.Mesh(GEO.bevelCyl(footD / 2, footD / 2 + 0.002, 0.011, 28, 0.0010), M.anodBlack);
+      fo.position.set(sx * (PW / 2 - 0.052), 0.0055, sz * (PW / 2 - 0.052));
+      g.add(fo);
+      const ad = new THREE.Mesh(GEO.bevelCyl(0.0135, 0.0135, 0.0075, 24, 0.0008), TRIM());
+      ad.position.set(fo.position.x, 0.0146, fo.position.z);
+      g.add(ad);
     }
-    // machined nameplate on the pedestal front, with its status LED beside it
-    const plate2 = new THREE.Mesh(GEO.bevelBox(0.086, 0.011, 0.0022, 0.0004, 2), M.alu);
-    plate2.position.set(-0.012, PED_H - 0.082, half + 0.0262);
-    g.add(plate2);
-    // A 4 mm indicator. Held below the bloom threshold (0.92) on purpose: the
+
+    // ---- plate-amp fascia, on the face the camera can see -------------------
+    const fz = PW / 2;
+    const fas = new THREE.Mesh(GEO.bevelBox(0.318, 0.076, 0.0060, 0.0018, 3), TRIM());
+    fas.position.set(0, 0.112, fz + 0.0026);
+    g.add(fas);
+    GEO.screwRow(g, [[-0.146, 0.140], [0.146, 0.140], [-0.146, 0.084], [0.146, 0.084]],
+      fz + 0.0058, 0.0022);
+    // recessed meter well
+    const well = new THREE.Mesh(GEO.bevelBox(0.208, 0.038, 0.0040, 0.0010, 2), M.anodBlack);
+    well.position.set(-0.044, 0.112, fz + 0.0050);
+    g.add(well);
+    // eleven backlit segments — live cone excursion, both polarities from centre
+    const SEGN = 11;
+    const segGeo = GEO.bevelBox(0.0125, 0.0250, 0.0030, 0.0004, 2);
+    const seg = new THREE.InstancedMesh(segGeo, METER_MAT(), SEGN);
+    seg.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(SEGN * 3), 3);
+    const _m4 = new THREE.Matrix4();
+    for (let i = 0; i < SEGN; i++) {
+      _m4.makeTranslation(-0.044 + (i - (SEGN - 1) / 2) * 0.0172, 0.112, fz + 0.0058);
+      seg.setMatrixAt(i, _m4);
+    }
+    seg.instanceMatrix.needsUpdate = true;
+    seg.frustumCulled = false;
+    g.add(seg);
+    // THE SPECULAR LAYER: slightly convex cover glass over the lit segments, so
+    // the widened front strip sweeps across them as a soft band instead of
+    // leaving them as a decal printed on the metal.
+    const cover = new THREE.Mesh(convexPanel(0.216, 0.046, 0.0022, 20), HW_GLASS());
+    cover.position.set(-0.044, 0.112, fz + 0.0086);
+    cover.renderOrder = 6;
+    g.add(cover);
+    // Level and phase controls. GEO.knob is built about +Y, so it is laid on its
+    // back inside a wrapper — setting rotation.x and rotation.z on the knob
+    // itself tilts it instead of turning it.
+    for (let i = 0; i < 2; i++) {
+      const kw = new THREE.Group();
+      kw.rotation.x = Math.PI / 2;
+      kw.position.set(0.092 + i * 0.044, 0.112, fz + 0.0052);
+      const k = GEO.knob(0.0155, 0.0115, { body: TRIM(), mark: M.chrome });
+      k.rotation.y = -1.25;
+      kw.add(k);
+      g.add(kw);
+      // Only the LEFT sub's level control turns: the A/B on screen is that sub
+      // being brought up, and a control that moves on the sub whose level is
+      // not changing would be a lie told in hardware.
+      if (i === 0 && isLeft) S.knobs.push(k);
+    }
+    // A 4 mm indicator. Held well below the bloom threshold on purpose: the
     // previous 11 mm sphere at full ledCyan bloomed into a 120 px flare that
     // read as a light leak across the lower half of the frame.
-    const flh = new THREE.Mesh(new THREE.SphereGeometry(0.0022, 12, 10),
+    const flh = new THREE.Mesh(new THREE.SphereGeometry(0.0024, 12, 10),
       new THREE.MeshBasicMaterial({ color: 0x4da8dc, toneMapped: false }));
-    flh.position.set(0.052, PED_H - 0.082, half + 0.0262);
+    flh.position.set(0.0725, 0.112, fz + 0.0050);
     g.add(flh);
 
     // ---- gloss cabinet, bored through for the driver ------------------------
@@ -569,27 +745,55 @@ export default {
     // it: the cone has to sit inside the cabinet and the bore wall has to be
     // visible around it, or the driver reads as a hole. Extruded rather than
     // bevelBox so the bore gets the same broken edge as the outside.
-    const holeR = CONE_R + 0.0028;
+    /* THE BORE RADIUS IS NOT THE RADIUS YOU ASK FOR.
+     * ExtrudeGeometry applies its bevel to holes as well as to the outer
+     * contour, and inward: the hole is `bevelSize` SMALLER at the cap than the
+     * path given, flaring back out over `bevelThickness`. With a 7.5 mm bevel a
+     * 172.8 mm bore presents a 165.3 mm lip of clearcoated lacquer standing
+     * inside the cone's own 170 mm edge. The path radius therefore carries the
+     * bevel, so the narrowest lacquer in the aperture is CONE_R + 2.8 mm and
+     * the flange laps over all of it. */
+    const CAB_BEV = 0.0075;
+    const holeR = CONE_R + 0.0028 + CAB_BEV;
     const bsh = new THREE.Shape();
     roundedRect(bsh, CAB - 0.016, CAB - 0.016, 0.006);
     const bore = new THREE.Path();
     bore.absarc(0, 0, holeR, 0, TAU, true);
     bsh.holes.push(bore);
     const body = new THREE.Mesh(new THREE.ExtrudeGeometry(bsh, {
-      depth: CAB - 0.016, bevelEnabled: true, bevelSize: 0.0075,
+      depth: CAB - 0.016, bevelEnabled: true, bevelSize: CAB_BEV,
       bevelThickness: 0.0080, bevelSegments: 4, curveSegments: 60,
     }), LACQUER());
     body.position.set(0, PED_H + half, -half + 0.008);
     g.add(body);
 
-    // bore liner — matte, so nothing bright comes back out of the hole
+    /* BORE LINER.
+     * The through-bore is a 172 mm-radius cylinder of the cabinet's own piano
+     * lacquer, and because the cone sits 78 mm back inside it, a wide crescent
+     * of that wall is in shot around the driver. A clearcoated black mirror
+     * curved through 180° reflects the whole studio into a few millimetres, and
+     * it was returning the banded chrome ring that read as the surround. It is
+     * lined: matte rubber, no environment to speak of, and taken far enough
+     * forward that the flange covers its lip. */
     const linerMat = M.rubber.clone();
+    linerMat.color.setHex(0x08090b);
+    linerMat.roughness = 0.96;
+    linerMat.sheen = 0.0;
+    linerMat.envMapIntensity = 0.05;
     linerMat.side = THREE.DoubleSide;
+    const LINL = 0.32;
+    const GSK_Z = half - 0.0035;
     const liner = new THREE.Mesh(
-      new THREE.CylinderGeometry(holeR - 0.0008, holeR - 0.0008, 0.30, 48, 1, true), linerMat);
+      new THREE.CylinderGeometry(holeR - 0.0009, holeR - 0.0009, LINL, 96, 1, true), linerMat);
     liner.rotation.x = Math.PI / 2;
-    liner.position.set(0, PED_H + half, half - 0.16);
+    liner.position.set(0, PED_H + half, GSK_Z - LINL / 2);
     g.add(liner);
+    // a matte gasket annulus closing the last millimetres between the roll's
+    // outer edge and the bore, so no sight-line reaches lacquer at any angle
+    const gskt = new THREE.Mesh(
+      new THREE.RingGeometry(CONE_R, holeR + 0.0012, 96), linerMat);
+    gskt.position.set(0, PED_H + half, GSK_Z);
+    g.add(gskt);
 
     // ---- machined baffle plate, proud of the lacquer ------------------------
     const BAF = 0.446, BT = 0.020;
@@ -606,64 +810,85 @@ export default {
     g.add(baffle);
 
     // ---- alloy trim flange + fasteners -------------------------------------
-    const ring = new THREE.Mesh(ringLathe(CONE_R + 0.0045, FRAME_R, 0.014), RING_MAT());
+    // Twelve M4 heads on a 377 mm pitch circle. Fasteners at a known size are
+    // the cheapest scale cue there is: with them the flange reads as 400 mm
+    // across, without them it could be a tweeter.
+    // The flange's inner lip is INSIDE the bore radius, so the lacquer bore
+    // mouth and its mirror bevel are covered by machined alloy rather than left
+    // to reflect the rig.
+    const ring = new THREE.Mesh(ringLathe(RING_IN, FRAME_R, 0.015), RING_MAT());
     ring.rotation.x = Math.PI / 2;
-    ring.position.set(0, PED_H + half, half + 0.0090);
+    ring.position.set(0, PED_H + half, RING_Z);
     g.add(ring);
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * TAU + 0.3927;
-      const rr = (CONE_R + FRAME_R) / 2 + 0.0035;
-      const s = GEO.screw(0.0026, { mat: FAST_MAT() });
-      s.position.set(Math.cos(a) * rr, PED_H + half + Math.sin(a) * rr, half + 0.0152);
+    const rr = (RING_IN + FRAME_R) / 2;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * TAU + TAU / 24;
+      const s = GEO.screw(0.0030, { mat: FAST_MAT() });
+      s.position.set(Math.cos(a) * rr, PED_H + half + Math.sin(a) * rr, RING_Z + 0.0081);
       g.add(s);
+    }
+
+    // baffle fixings and grille-pin sockets: the four corners are the only
+    // part of a 446 mm baffle the 400 mm flange leaves, and empty they are the
+    // one place the eye finds nothing made.
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const so = new THREE.Mesh(GEO.bevelCyl(0.0092, 0.0100, 0.0035, 24, 0.0007), TRIM());
+      so.rotation.x = Math.PI / 2;
+      so.position.set(sx * 0.1955, PED_H + half + sy * 0.1955, half + 0.0038);
+      g.add(so);
+      const sc = GEO.screw(0.0028, { mat: FAST_MAT() });
+      sc.position.set(so.position.x, so.position.y, half + 0.0060);
+      g.add(sc);
     }
 
     // ---- the driver --------------------------------------------------------
     const drv = new THREE.Group();
-    drv.position.set(0, PED_H + half, half - 0.0070);
-    const cone = GEO.driverCone(CONE_R, 0.072, {
-      surroundW: SURR_W, dustR: 0.050,
-      coneMat: CONE_MAT(), surrMat: SURR_MAT(), dustMat: DUST_MAT(),
-    });
+    drv.position.set(0, PED_H + half, DRV_Z);
+    const cone = movingAssembly();
     cone.rotation.x = Math.PI / 2;
     drv.add(cone);
     g.add(drv);
-    S.drivers.push({ g: drv, led: flh, left: isLeft });
+    S.drivers.push({ g: drv, led: flh, meter: seg, n: SEGN, left: isLeft });
 
-    // ---- rear plate amplifier ----------------------------------------------
+    // ---- plate amplifier, on the pedestal's back panel -----------------------
     const rear = new THREE.Group();
-    rear.position.set(0, PED_H + half, -half + 0.004);
+    rear.position.set(0, 0.112, -PW / 2 + 0.002);
     rear.rotation.y = Math.PI;
-    const plate = new THREE.Mesh(GEO.bevelBox(0.35, 0.39, 0.014, 0.0025, 3), M.anodGrey);
-    plate.position.z = 0.007;
+    const plate = new THREE.Mesh(GEO.bevelBox(0.44, 0.152, 0.012, 0.0025, 3), M.anodGrey);
+    plate.position.z = 0.006;
     rear.add(plate);
-    const hs = GEO.heatsink(0.305, 0.16, 0.036, 22, { mat: M.anodBlack });
-    hs.position.set(0, 0.098, 0.032);
+    const hs = GEO.heatsink(0.40, 0.062, 0.030, 26, { mat: M.anodBlack });
+    hs.position.set(0, 0.038, 0.026);
     rear.add(hs);
-    for (let i = 0; i < 3; i++) {
-      const k = GEO.knob(0.0195, 0.014, { body: M.alu, mark: M.chrome });
-      k.rotation.x = Math.PI / 2;
-      k.rotation.z = [-0.6, 0.35, -1.25][i];
-      k.position.set(-0.105 + i * 0.105, -0.038, 0.021);
-      rear.add(k);
-      if (i === 2) S.knobs.push(k);
-    }
-    for (const [x, o] of [[-0.100, GEO.xlr()], [-0.005, GEO.xlr()], [0.100, GEO.iecInlet()]]) {
-      o.position.set(x, -0.133, 0.014);
+    for (const [x, o] of [[-0.150, GEO.xlr()], [-0.055, GEO.xlr()], [0.140, GEO.iecInlet()]]) {
+      o.position.set(x, -0.040, 0.012);
       rear.add(o);
     }
-    const led = new THREE.Mesh(new THREE.SphereGeometry(0.0034, 10, 8), M.ledCyan);
-    led.position.set(0.132, -0.038, 0.016);
+    for (const [x, c] of [[0.035, 0xd94b3a], [0.072, 0x2e3238]]) {
+      const bp = GEO.bindingPost({ colour: c });
+      bp.position.set(x, -0.040, 0.012);
+      rear.add(bp);
+    }
+    const led = new THREE.Mesh(new THREE.SphereGeometry(0.0030, 10, 8), M.ledCyan);
+    led.position.set(0.196, 0.038, 0.014);
     rear.add(led);
-    GEO.screwRow(rear, [[-0.160, 0.180], [0.160, 0.180], [-0.160, -0.180], [0.160, -0.180]], 0.015, 0.0026);
+    GEO.screwRow(rear, [[-0.206, 0.062], [0.206, 0.062], [-0.206, -0.062], [0.206, -0.062]], 0.013, 0.0024);
     g.add(rear);
 
     GEO.shadowed(g);
-    led.castShadow = led.receiveShadow = false;
-    flh.castShadow = flh.receiveShadow = false;
-    const sh2 = GEO.contactShadow(CAB * 3.0, CAB * 3.0, 0.42);
-    sh2.position.y = 0.0016;
-    g.add(sh2);
+    for (const o of [led, flh, seg, cover]) o.castShadow = o.receiveShadow = false;
+
+    // ---- contact with the floor ---------------------------------------------
+    // A 59 kg cabinet whose silhouette meets the floor on a razor edge is the
+    // clearest 'pasted onto a background' tell there is. Two multiply quads: a
+    // wide ambient pool that darkens the planar reflection out to a metre, and a
+    // tight core at the footprint that closes the join.
+    const shA = GEO.contactShadow(PW * 2.7, PW * 2.7, 0.46);
+    shA.position.y = 0.0012;
+    g.add(shA);
+    const shB = GEO.contactShadow(PW * 1.28, PW * 1.28, 0.96);
+    shB.position.y = 0.0021;
+    g.add(shB);
     return g;
   },
 
@@ -856,7 +1081,12 @@ export default {
     S.aKey = new THREE.Object3D(); S.aKey.position.set(-PLAN_W / 2, -PLAN_H / 2 - PLAN_PAD, 0.02);
     S.aRule = new THREE.Object3D(); S.aRule.position.set(mx(-LAM30 / 4), my(2.98), 0.02);
     S.aNode = new THREE.Object3D(); S.aNode.position.set(0, my(SEAT.z), 0.02);
-    wrap.add(S.aTitle, S.aKey, S.aRule, S.aNode);
+    // numerals on the two dimension lines. A plan with a 1 m grid and no number
+    // on either edge is a decoration; with them every point on the map can be
+    // read off to a coordinate, which is what makes it a measurement.
+    S.aW = new THREE.Object3D(); S.aW.position.set(0, -PLAN_H / 2 + 0.007, 0.02);
+    S.aD = new THREE.Object3D(); S.aD.position.set(-PLAN_W / 2 + 0.007, 0.06, 0.02);
+    wrap.add(S.aTitle, S.aKey, S.aRule, S.aNode, S.aW, S.aD);
 
     return faceCam(wrap);
   },
@@ -867,26 +1097,28 @@ export default {
     const cy = '#5cc0f2', am = '#f0b35a', gr = '#7fd6a2';
     S.lab = {};
     S.lab.sub = L.add(new THREE.Vector3(LAYOUT.subR.x, PED_H + CAB + 0.11, LAYOUT.subR.z), {
-      kicker: `Sealed 380 mm · ${(VB * 1000).toFixed(0)} L`,
-      text: `f₃ ${F3.toFixed(1)}&nbsp;Hz · 12&nbsp;dB/oct · ${M_TOTAL.toFixed(0)}&nbsp;kg<br>`
-        + `drive ${SPL_REF}&nbsp;dB @ 1&nbsp;m half space`,
+      kicker: `SEALED ${(D_NOM * 1000).toFixed(0)} mm · ${(VB * 1000).toFixed(0)} L`,
+      text: `Sd ${(D_EFF * 1000).toFixed(0)}&nbsp;mm eff · f₃ ${F3.toFixed(1)}&nbsp;Hz`
+        + `<br>12&nbsp;dB/oct · ${M_TOTAL.toFixed(0)}&nbsp;kg`,
       value: '', cls: 'am', offset: [0, -20], priority: 5,
     });
     S.lab.plan = L.add(S.aTitle, {
-      kicker: 'Room in plan · floor level',
-      text: `sound pressure at ${F_TONE.toFixed(2)}&nbsp;Hz<br>`
-        + 'time shown at 1&nbsp;:&nbsp;50',
+      kicker: 'ROOM IN PLAN · FLOOR LEVEL',
+      text: `sound pressure at ${F_TONE.toFixed(2)}&nbsp;Hz, shown at 1&nbsp;:&nbsp;50`,
       value: '', cls: 'acc', offset: [0, -24], occlude: false, priority: 4,
     });
+    /** The key is in ONE convention. Printing a peak contour beside an rms SPL
+     *  is how a reader checks 20·log10(5.1/2e−5), gets 108, and decides the
+     *  chapter is 3 dB out — so both conversions are on the line. */
     S.lab.key = L.add(S.aKey, {
-      kicker: 'Pressure key',
-      text: `<b style="color:${cy}">+p</b> compression &nbsp;<b style="color:${am}">−p</b> rarefaction`
-        + `<br>contour ${P_BAND.toFixed(2)}&nbsp;Pa · peak ${P_FS.toFixed(1)}&nbsp;Pa`
-        + `<br><span style="color:${cy}">○</span> sub &nbsp;`
-        + `<span style="color:${am}">●</span> seat &nbsp;<span style="color:${gr}">- -</span> Ψ₁₁₀ = 0`
-        + `<br>W ${RM.W}&nbsp;m · D ${RM.D.toFixed(1)}&nbsp;m · 1&nbsp;m grid`,
-      value: `${SPL_FS.toFixed(0)} dB SPL at the peak`,
-      cls: 'acc', offset: [104, 62], occlude: false, priority: 4,
+      kicker: 'PRESSURE KEY',
+      text: `<b style="color:${cy}">+p</b> compression · <b style="color:${am}">−p</b> rarefaction`
+        + `<br><span style="color:${cy}">○</span> sub · <span style="color:${am}">●</span> seat`
+        + ` · <span style="color:${gr}">- -</span> Ψ₁₁₀ = 0`
+        + `<br>${LEVELS} contours of ${P_BAND.toFixed(2)}&nbsp;Pa peak`,
+      value: `peak ${P_FS.toFixed(1)} Pa = ${(P_FS / Math.SQRT2).toFixed(1)} Pa rms`
+        + ` = ${SPL_FS.toFixed(0)} dB SPL`,
+      cls: 'acc', offset: [116, 56], occlude: false, priority: 4,
     });
     S.lab.node = L.add(S.aNode, {
       kicker: 'Ψ₁₁₀ = 0', text: 'the sofa sits on the centre line',
@@ -895,6 +1127,14 @@ export default {
     S.lab.rul = L.add(S.aRule, {
       kicker: 'λ/2 at 30 Hz', value: `${(LAM30 / 2).toFixed(2)} m`,
       cls: 'acc', offset: [-58, -2], occlude: false, priority: 2,
+    });
+    L.add(S.aW, {
+      value: `W ${RM.W.toFixed(1)} m`, cls: 'plain', offset: [0, 15],
+      occlude: false, priority: 1,
+    });
+    L.add(S.aD, {
+      value: `D ${RM.D.toFixed(1)} m`, cls: 'plain', offset: [-34, 0],
+      occlude: false, priority: 1,
     });
   },
 
@@ -921,58 +1161,57 @@ export default {
     S.x = x;
     for (const d of S.drivers) {
       const lv = d.left ? mix : 1;
-      d.g.position.z = CAB / 2 - 0.0070 + x * lv;
+      d.g.position.z = DRV_Z + x * lv;
       d.led.material.color.setRGB(0.302 * lv + 0.03, 0.659 * lv + 0.05, 0.863 * lv + 0.07);
+      // fascia excursion meter: |x| against Xmax, the last three segments amber
+      const frac = (Math.abs(x) * lv / XMAX) * d.n;
+      const ic = d.meter.instanceColor;
+      for (let i = 0; i < d.n; i++) {
+        const on = DSP.clamp(frac - i, 0, 1);
+        const hot = i >= d.n - 3;
+        const r = hot ? 0.030 + 0.60 * on : 0.008 + 0.055 * on;
+        const gr = hot ? 0.017 + 0.33 * on : 0.017 + 0.31 * on;
+        const b = hot ? 0.006 + 0.10 * on : 0.024 + 0.57 * on;
+        ic.setXYZ(i, r, gr, b);
+      }
+      ic.needsUpdate = true;
     }
     for (const m of S.marks) m.m.material.opacity = m.left ? 0.18 + 0.82 * mix : 1;
-    for (const k of S.knobs) k.rotation.z = -1.25 + 2.4 * mix;
+    for (const k of S.knobs) k.rotation.y = -1.25 + 2.35 * mix;
   },
 
   // =========================================================================
   content() {
     const n = (v) => `<span class="num">${v}</span>`;
     return `
-<p>One wavelength at ${n('30 Hz')} is ${n(LAM30.toFixed(2) + ' m')}; this room's longest
-straight line is ${n(DIAG3D.toFixed(2) + ' m')}. No point in it is more than half a wavelength
-from a wall, so the steady state is not a travelling wave but a standing pattern fixed by the
-boundaries. The two subs stand ${n(SUB_OFF.toFixed(2) + ' m')} either side of the centre
-line.</p>
-
-<div class="key"><span class="lab">The idea</span><p>Below Schroeder the room is a resonator
-with a fixed geography of loud and quiet places. A source excites a mode by where it stands,
-not by how well it is made.</p></div>
+<p>At ${n('30 Hz')} a wavelength is ${n(LAM30.toFixed(2) + ' m')} and this room's longest
+straight line is ${n(DIAG3D.toFixed(2) + ' m')}. Nothing in it is half a wavelength from a
+wall, so the steady state is a standing pattern fixed by the boundaries, not a travelling
+wave.</p>
 
 <div class="myth"><span class="lab">Commonly got wrong</span><p>Two subwoofers do not flatten
 the response at one seat. Computed here, 20–80 Hz peak-to-peak at the central seat is
-${n(ENV1.pp.toFixed(1) + ' dB')} with one and ${n(ENV2.pp.toFixed(1) + ' dB')} with two: that
-seat sits on the null of every odd lateral mode, so the pair only adds a flat
-${n('6.02 dB')}. What collapses is the disagreement <em>between</em> seats,
-${n(ENV1.spread.toFixed(1) + ' dB')} to ${n(ENV2.spread.toFixed(1) + ' dB')} — and one
-equalisation then serves them all.</p></div>
+${n(ENV1.pp.toFixed(1) + ' dB')} with one sub and unchanged at
+${n(ENV2.pp.toFixed(1) + ' dB')} with two — not similar, <em>identical</em>, because that seat
+lies on the null of every odd lateral mode and the pair simply doubles the field there. What
+collapses is the disagreement <em>between</em> seats,
+${n(ENV1.spread.toFixed(1) + ' dB')} to ${n(ENV2.spread.toFixed(1) + ' dB')}.</p></div>
 
-<h3>The modes are arithmetic</h3>
-<div class="eq">f = <span class="hl">c/2</span> · √( (p/W)² + (q/D)² + (r/H)² )
+<div class="key"><span class="lab">The idea</span><p>Below Schroeder —
+${n(F_SCH.toFixed(0) + ' Hz')} here — the room is a resonator with a fixed geography of loud
+and quiet places. A source excites a mode by where it stands.</p></div>
+
+<div class="eq">f = <span class="hl">c/2</span>·√( (p/W)² + (q/D)² + (r/H)² )
 <span class="c">W ${RM.W} · D ${RM.D} · H ${RM.H} m · c ${C} m/s</span>
-<span class="c">axial </span>${AXIALS.map((f) => f.toFixed(2)).join('  ')} Hz
-δ = 3·ln10/RT60 = ${DELTA.toFixed(1)} s⁻¹</div>
-<p>RT60 is ${n(RT60.toFixed(2) + ' s')}, so Sabine over ${n(S_ROOM.toFixed(1) + ' m²')} implies
-ᾱ = ${n(ABAR.toFixed(2))} and 2000·√(RT60/V) puts Schroeder at ${n(F_SCH.toFixed(0) + ' Hz')} —
-every subwoofer frequency is below it. 30 Hz sits within
-${n((100 * Math.abs(F_TONE - 30) / 30).toFixed(2) + '%')} of the first tangential mode
-${n('(1,1,0)')} at ${n(F_TONE.toFixed(2) + ' Hz')}, where Ψ₁₁₀ meets the two subs equal and
-opposite, ${n('−' + Math.abs(PSI_R).toFixed(3))} and ${n('+' + Math.abs(PSI_L).toFixed(3))}:
-their sum drives it with no net force. The plan sums the ${NPAT} strongest floor patterns at
-that frequency, of which ${n('(1,1,0)')} carries most.</p>
+<span class="c">axial </span>${AXIALS.map((f) => f.toFixed(2)).join(' ')} Hz
+<span class="c">Vb ${(VB * 1000).toFixed(0)} L → </span>Qtc ${ALIGN.Qtc.toFixed(2)} · f₃ ${F3.toFixed(1)} Hz · <span class="hl">12 dB/oct</span></div>
 
-<h3>The box, and the handover</h3>
-<div class="eq">Vas ${(SUB_TS.Vas * 1000).toFixed(0)} L / Vb ${(VB * 1000).toFixed(0)} L → α ${ALIGN.alpha.toFixed(2)}
-fc = fs·√(α+1) = <span class="hl">${ALIGN.fc.toFixed(1)} Hz</span> · Qtc ${ALIGN.Qtc.toFixed(2)}
-f₃ ${F3.toFixed(1)} Hz, <span class="hl">12 dB/oct</span> <span class="c">— sealed is 2nd order</span>
-${SPL_REF} dB @ 1 m half space → x̂ ${(X_PK * 1000).toFixed(2)} mm
-Û = Sd·ω·x̂ = ${(Q_PK * 1000).toFixed(1)} L/s peak</div>
-<p>Above ${n(XOVER.fLow + ' Hz')} an LR${XOVER.order} crossover hands over to the
-floorstanders, whose own sealed alignment is already −3 dB by
-${n(MAIN_TS.fc.toFixed(1) + ' Hz')}.</p>`;
+<p>30 Hz sits ${n((100 * Math.abs(F_TONE - 30) / 30).toFixed(2) + '%')} from the first
+tangential mode ${n('(1,1,0)')} at ${n(F_TONE.toFixed(2) + ' Hz')}, where Ψ₁₁₀ meets the two
+subs — ${n(SUB_OFF.toFixed(2) + ' m')} either side of the centre line — equal and opposite,
+${n('−' + Math.abs(PSI_R).toFixed(3))} and ${n('+' + Math.abs(PSI_L).toFixed(3))}: matched,
+their sum drives it with no net force. Sealed is second order, so above
+${n(XOVER.fLow + ' Hz')} an LR${XOVER.order} hands over to the floorstanders.</p>`;
   },
 
   /**

@@ -4,7 +4,7 @@ import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
-import { CART, TT, PHONO, PREAMP, AMP, CHAIN } from '../core/spec.js';
+import { CART, TT, TONEARM, PHONO, PREAMP, AMP, SPEAKER, CHAIN } from '../core/spec.js';
 
 /* ===========================================================================
    PHONO STAGE — RIAA equalisation.
@@ -31,6 +31,8 @@ const TR = {
   T2: NET.R2 * NET.C1,                          //  314.49 µs
   T3: NET.R3 * NET.C2,                          //   74.58 µs
 };
+/** Realised corner frequencies, derived — never typed into the prose. */
+const FR = { f1: 1 / (DSP.TAU * TR.T1), f2: 1 / (DSP.TAU * TR.T2), f3: 1 / (DSP.TAU * TR.T3) };
 const netRaw = (f) => {
   const w = DSP.TAU * f;
   return DSP.cDiv([1, w * TR.T2], DSP.cMul([1, w * TR.T1], [1, w * TR.T3]));
@@ -54,62 +56,8 @@ const ERR = (() => {
 // Insertion loss of the passive network at 1 kHz: the gain blocks must make it up.
 const NET_LOSS_1K = DSP.dB(NET_1K);             // −19.96 dB
 
-// --- groove mechanics --------------------------------------------------------
-// A magnetic cartridge is a velocity transducer. For a lateral sinusoid of peak
-// velocity v̂ the peak displacement is a = v̂/ω, so a constant-velocity cut makes
-// the excursion grow as 1/f.
-const V_REF = CART.vRef;                        // 0.05 m/s PEAK — spec.js
-const exc = (v, f) => v / (DSP.TAU * f);
-const A_1K = exc(V_REF, 1000);                  // 7.958 µm
-const A_50_FLAT = exc(V_REF, 50);               // 159.155 µm
-const REC_50 = DSP.riaaRecordDb(50);            // −16.946 dB
-const A_50_RIAA = exc(V_REF * DSP.undB(REC_50), 50);  // 22.622 µm
-const A_RATIO = A_50_FLAT / A_50_RIAA;          // 7.035
-
-// Average groove pitch: a 20-minute side at spec.js's 33⅓ rpm is 666.7
-// revolutions, spread across the recorded band from TT.rOuter to TT.rInner.
-const LP_MIN = 20;
-const LP_TURNS = LP_MIN * TT.rpm;               // 666.67
-const PITCH = (TT.rOuter - TT.rInner) / LP_TURNS;     // 129.0 µm
-
-// --- gain budget -------------------------------------------------------------
-// Not in spec.js: the coil's own resistance. A 10 Ω MC coil is the resistance
-// that goes with CART.Bl = 8.05 mT·m in a cartridge of this output.
-const R_CART = 10;                              // Ω
-const Z_LOAD = CART.loadOhm;                    // 100 Ω
-const V_CART = CART.outRms;                     // 284.61 µV rms at 5 cm/s peak
-const LOAD_DB = DSP.dB(Z_LOAD / (Z_LOAD + R_CART));   // −0.828 dB
-const V_IN = V_CART * DSP.undB(LOAD_DB);        // 258.74 µV rms at the input
-const G_STAGE_DB = PHONO.gainDb;                // 64.00 dB — spec.js
-const V_OUT = V_IN * DSP.undB(G_STAGE_DB);      // 0.4101 V rms
-// What the rest of the chain contributes to land 1 W (2.83 V) at the terminals.
-// Line stage + power amplifier + the volume setting spec.js solves for; it must
-// come to CHAIN.totalDb − PHONO.gainDb, and it does, to 1e-12 dB.
-const G_REST_DB = PREAMP.gainDb + AMP.gainDb + CHAIN.volumeDb;   // 15.946 dB
-const AMP_RAW_DB = G_STAGE_DB - NET_LOSS_1K;    // 83.96 dB of raw amplification
-
-// --- noise -------------------------------------------------------------------
-const K_B = 1.380649e-23, T_K = 293.15;         // 20 °C
-const R_SRC = (R_CART * Z_LOAD) / (R_CART + Z_LOAD);  // 9.091 Ω seen by the input
-const EN_DEV = 1.0e-9;                          // V/√Hz, four paralleled devices
-const EN_R = Math.sqrt(4 * K_B * T_K * R_SRC);  // 0.3836 nV/√Hz Johnson
-const EN_TOT = Math.hypot(EN_DEV, EN_R);        // 1.0711 nV/√Hz
-// The noise is shaped by the playback curve, so the honest bandwidth is
-// ∫|H(f)/H(1k)|² df over 20 Hz–20 kHz, not a flat 20 kHz.
-const ENB = (() => {
-  const a = Math.log(20), b = Math.log(20000), n = 4000;
-  let s = 0;
-  for (let i = 0; i < n; i++) {
-    const f = Math.exp(a + ((b - a) * (i + 0.5)) / n);
-    const p = DSP.undB(playDb(f));
-    s += p * p * f * ((b - a) / n);
-  }
-  return s;                                     // 8707 Hz
-})();
-const V_NOISE = EN_TOT * Math.sqrt(ENB);        // 99.9 nV rms
-const SNR_DB = DSP.dB(V_IN / V_NOISE);          // 68.3 dB
-
 // --- what component tolerance costs on top of the E96 grid -------------------
+// 0.1 % films and 1 % polystyrene, root-sum-square over the three constants.
 const D_T = Math.hypot(0.001, 0.010);           // 1.005 %
 const TOL_DB = (() => {
   const mag = (T, f) => {
@@ -131,22 +79,62 @@ const TOL_DB = (() => {
   return worst;                                 // 0.103 dB
 })();
 
-// --- the input loop: carriers vs field (quoted in prose, not drawn) ----------
-const I_RMS = V_CART / (Z_LOAD + R_CART);       // 2.587 µA
-const I_PK = I_RMS * Math.SQRT2;                // 3.659 µA
-const WIRE_MM2 = 0.05;                          // mm², tonearm litz
-const V_DRIFT = DSP.driftVelocity(I_PK, WIRE_MM2);        // 5.378 nm/s
-const X_DRIFT = DSP.driftDisplacement(V_DRIFT, 1000);     // 0.856 pm
-const C_FIELD = DSP.signalSpeed(0.66);          // 1.979e8 m/s
-const FIELD_PER_HALF = (C_FIELD * (1 / 1000)) / 2;        // 98.9 km
-const CU_SPACING = 255.6e-12;                   // m, fcc Cu nearest neighbour a/√2
+// --- groove mechanics --------------------------------------------------------
+// A magnetic cartridge is a velocity transducer. For a lateral sinusoid of peak
+// velocity v̂ the peak displacement is a = v̂/ω, so a constant-velocity cut makes
+// the excursion grow as 1/f.
+const V_REF = CART.vRef;                        // 0.05 m/s PEAK — spec.js
+const exc = (v, f) => v / (DSP.TAU * f);
+const A_50_FLAT = exc(V_REF, 50);               // 159.155 µm
+
+// Average groove pitch: a 20-minute side at spec.js's 33⅓ rpm is 666.7
+// revolutions, spread across the recorded band from TT.rOuter to TT.rInner.
+const LP_TURNS = 20 * TT.rpm;                   // 666.67
+const PITCH = (TT.rOuter - TT.rInner) / LP_TURNS;     // 129.0 µm
+
+// --- gain budget -------------------------------------------------------------
+// Every term is a spec.js primary. The cartridge is a CART.srcOhm source into a
+// CART.loadOhm load, so the input never sees the open-circuit voltage; spec.js
+// carries that loss and CHAIN's volume residual is solved with it in place, so
+// this ladder and the preamp chapter's now agree to 1e-12 dB.
+// CART.outRms is the open-circuit 284.61 µV; CART.loadLossDb is the −0.828 dB
+// the 10 Ω coil loses into the 100 Ω load; CART.atInputRms is what is left.
+const V_IN = CART.atInputRms;                   // 258.74 µV rms at the input
+const G_STAGE_DB = PHONO.gainDb;                // 64.00 dB
+const V_OUT = V_IN * DSP.undB(G_STAGE_DB);      // 0.4101 V rms
+const G_REST_DB = PREAMP.gainDb + AMP.gainDb + CHAIN.volumeDb;   // +16.774 dB
+// 0.41007 V × 10^(16.7737/20) = 2.82843 V = 1.0000 W into 8 Ω, to 1e-12 dB.
+const V_TERM = V_OUT * DSP.undB(G_REST_DB);
+const W_TERM = (V_TERM * V_TERM) / SPEAKER.nominalZ;   // 1.0000 W
+const AMP_RAW_DB = G_STAGE_DB - NET_LOSS_1K;    // 83.96 dB of raw amplification
+
+// --- noise -------------------------------------------------------------------
+const K_B = 1.380649e-23, T_K = 293.15;         // 20 °C
+const R_SRC = (CART.srcOhm * CART.loadOhm) / (CART.srcOhm + CART.loadOhm);  // 9.091 Ω
+const EN_DEV = 1.0e-9;                          // V/√Hz, four paralleled devices
+const EN_R = Math.sqrt(4 * K_B * T_K * R_SRC);  // 0.3836 nV/√Hz Johnson
+const EN_TOT = Math.hypot(EN_DEV, EN_R);        // 1.0711 nV/√Hz
+// The noise is shaped by the playback curve, so the honest bandwidth is
+// ∫|H(f)/H(1k)|² df over 20 Hz–20 kHz, not a flat 20 kHz.
+const ENB = (() => {
+  const a = Math.log(20), b = Math.log(20000), n = 4000;
+  let s = 0;
+  for (let i = 0; i < n; i++) {
+    const f = Math.exp(a + ((b - a) * (i + 0.5)) / n);
+    const p = DSP.undB(playDb(f));
+    s += p * p * f * ((b - a) / n);
+  }
+  return s;                                     // 8707 Hz
+})();
+const V_NOISE = EN_TOT * Math.sqrt(ENB);        // 99.9 nV rms
+const SNR_DB = DSP.dB(V_IN / V_NOISE);          // 68.3 dB
 
 // --- presentation ------------------------------------------------------------
 // A real swept sine, in real time, no magnification claimed. It starts at the
 // 1 kHz reference because that is where the curve is normalised. 20 s per sweep
 // is slow enough that the 10 Hz readout tick and the graph cursor describe the
 // same instant to within 3 px of the plot.
-const SWEEP = 20.0;                             // s per 20 Hz → 20 kHz decade sweep
+const SWEEP = 20.0;                             // s per 20 Hz → 20 kHz sweep
 const PH0 = Math.log10(1000 / 20) / 3;          // start at 1 kHz
 
 const S = { f: 1000, rec: 0, play: 0, sum: 0, vin: V_IN, vout: V_OUT, gain: G_STAGE_DB };
@@ -160,11 +148,16 @@ const sgn = (v, d = 2) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d);
 // radius handed to frameShot must be the chassis' apparent HALF-HEIGHT, not its
 // bounding sphere — a bounding sphere is dominated by the 555 mm width and
 // leaves the chassis 85 px tall. (2) The camera is lifted so the top face is in
-// view: at 14° the silhouette is 217 mm tall rather than 112, which is what
+// view: at 21° the silhouette is 217 mm tall rather than 112, which is what
 // makes a rack component read as an object instead of a strip.
 //
-// At 1600 × 1000 this lands the chassis at x 250…1030, y 166…414, and the card
-// at x 376…1114, y 446…924 — both inside the safe box (160…1120, 90…930).
+// The 555 mm width is the binding constraint, not the height: at fill 0.33 the
+// chassis is 905 px wide inside a 960 px safe box, and any more fill pushes it
+// through x = 160 / x = 1120. So the hero is made to dominate by being the only
+// fully-lit chassis in frame (the flags below) rather than by being enlarged.
+//
+// At 1600 × 1000 this lands the chassis at x 190…1090, y 188…372, and the card
+// at x 452…1112, y 435…915 — both inside the safe box (160…1120, 90…930).
 // ---------------------------------------------------------------------------
 const CH_H = 0.112, CH_FOOT = 0.008;
 const CH_D = LAYOUT.rack.d - 0.06;                          // 0.440
@@ -172,7 +165,7 @@ const HERO_Y = LAYOUT.bayCentre(3, CH_H) + CH_FOOT;         // 0.678
 const HERO_Z = LAYOUT.rack.z + CH_D / 2;                    // fascia plane, −3.08
 const AZ = 0.40, EL = 0.36, FOV = 30;
 const HERO_R = 0.1103;          // chassis half-height + the top face in view
-const FILL = 0.30;
+const FILL = 0.33;
 const ASPECT = 1.6, TANH = Math.tan((FOV * Math.PI) / 360);
 
 const _b = frameShot([LAYOUT.rack.x, HERO_Y, HERO_Z], HERO_R,
@@ -186,7 +179,7 @@ const DIST = _cam0.distanceTo(_tgt0);
 
 // Where the hero should land, in GEOMETRIC ndc — the director's shift lens then
 // adds −0.1625 in x, which is what puts ndc 0 at screen x 640.
-const HX = -0.0375, HY = 0.42;
+const HX = -0.0375, HY = 0.44;
 const _shift = _rgt.clone().multiplyScalar(-HX * ASPECT * TANH * DIST)
   .addScaledVector(_up, -HY * TANH * DIST);
 const SHOT = {
@@ -208,13 +201,12 @@ function place(ndcX, ndcY, dist) {
     .addScaledVector(UPV, ndcY * TANH * dist);
 }
 
-// The card sits 0.18 m in front of the fascia plane, so one metre on the card
-// covers more screen than one metre on the chassis. The excursion strip claims
-// a magnification, so it is drawn at 1000 × that ratio and the claim is then
-// literally true on screen.
-const CARD_DIST = 1.45;
-const EXC_MAG = 1000;
-const EXC_SCALE = EXC_MAG * (CARD_DIST / DIST);
+// The card floats 0.17 m in front of the fascia plane. Fixing its distance as a
+// fraction of the camera distance keeps its size on screen invariant if the
+// framing is retuned.
+// One metre on the card's plane is 500/(CARD_DIST·tan(fov/2)) ≈ 1420 px at
+// 1600 × 1000, which is how every dimension on it below was chosen.
+const CARD_DIST = 0.885 * DIST;
 
 // ---------------------------------------------------------------------------
 // local helpers
@@ -232,26 +224,6 @@ function poly(pts, color, width, opts = {}) {
   return t;
 }
 const V3 = (x, y, z = 0) => new THREE.Vector3(x, y, z);
-
-function flatMat(color, opacity) {
-  return new THREE.MeshBasicMaterial({
-    color, transparent: true, opacity, depthWrite: false, toneMapped: false,
-    side: THREE.DoubleSide,
-  });
-}
-
-/** A solid measurement bar with end ticks — reads at any size. */
-function bar(x0, x1, y, h, z, color) {
-  const g = new THREE.Group();
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, h), flatMat(color, 0.92));
-  m.position.set((x0 + x1) / 2, y, z);
-  m.renderOrder = 11;
-  g.add(m);
-  for (const x of [x0, x1]) {
-    g.add(poly([V3(x, y - h * 1.5, z + 0.0004), V3(x, y + h * 1.5, z + 0.0004)], color, 2.2));
-  }
-  return g;
-}
 
 /**
  * Alpha ramp for the negative-fill flags. Feathered on both sides and at the far
@@ -297,10 +269,14 @@ function buildHardware() {
   const FT = 0.020;              // a thick, properly machined fascia
   const fz = D / 2;
 
+  // Brushed alloy, one notch off the library's default. The 6.4 mm break on the
+  // fascia's top edge matters more than the colour does: at the previous 4.5 mm
+  // the reflected front strip clipped to white over the panel's whole width with
+  // no ramp either side of it, which is the single artefact that says "render".
   const face = M.alu.clone();
-  face.color.setHex(0xd2d6dc);
-  face.roughness = 0.19;
-  face.envMapIntensity = 1.12;
+  face.color.setHex(0xc0c5cb);
+  face.roughness = 0.300;
+  face.envMapIntensity = 0.82;
 
   // The hero's own shell is a shade above the black-anodised boxes either side of
   // it, so its top face reads as a surface rather than as a hole in the frame.
@@ -308,10 +284,17 @@ function buildHardware() {
   shellMat.color.setHex(0x25282d);
   shellMat.roughness = 0.38;
 
+  // Satin trim, not mirror. A 2 mm bar is narrower than the reflected image of
+  // the softbox, so a chrome finish makes the whole section clip and bloom.
+  const trim = M.aluTrim.clone();
+  trim.color.setHex(0xb4b9c0);
+  trim.roughness = 0.40;
+  trim.envMapIntensity = 0.62;
+
   const g = new THREE.Group();
   g.position.set(R.x, HERO_Y, R.z);
 
-  g.add(GEO.chassis(W, H, D, { r: 0.0028, seg: 4, faceThick: FT, body: shellMat, face }));
+  g.add(GEO.chassis(W, H, D, { r: 0.0040, seg: 4, faceThick: FT, body: shellMat, face }));
 
   // --- fascia -----------------------------------------------------------------
   // Applied centre plate, standing 1.2 mm proud. It carries a clearcoat so the
@@ -325,30 +308,34 @@ function buildHardware() {
   plate.position.set(0, 0, fz + 0.0014);
   g.add(plate);
 
-  // chrome bezel around the plate — four hairline bars
+  // bezel around the plate — four hairline bars
   const bezH = GEO.bevelBox(0.2695, 0.0015, 0.0020, 0.0004, 2);
   const bezV = GEO.bevelBox(0.0015, 0.0750, 0.0020, 0.0004, 2);
   for (const sy of [1, -1]) {
-    const b = new THREE.Mesh(bezH, M.chrome);
+    const b = new THREE.Mesh(bezH, trim);
     b.position.set(0, sy * 0.0368, fz + 0.0031);
     g.add(b);
   }
   for (const sx of [1, -1]) {
-    const b = new THREE.Mesh(bezV, M.chrome);
+    const b = new THREE.Mesh(bezV, trim);
     b.position.set(sx * 0.1340, 0, fz + 0.0031);
     g.add(b);
   }
 
-  // full-width chrome inlay along the bottom of the fascia — a light-catcher
-  const inlay = new THREE.Mesh(GEO.bevelBox(0.508, 0.0024, 0.0018, 0.0005, 2), M.chrome);
+  // full-width inlay along the bottom of the fascia — a light-catcher
+  const inlay = new THREE.Mesh(GEO.bevelBox(0.508, 0.0024, 0.0018, 0.0005, 2), trim);
   inlay.position.set(0, -0.0455, fz + 0.0010);
   g.add(inlay);
 
-  // milled relief lines flanking the plate
+  // Milled relief lines flanking the plate. At 1.2 mm they were under two pixels
+  // at this framing and did nothing; a 2.4 mm cut reads as machining.
+  // They also sat at x ±97.5 mm, which is UNDER the 212 mm indicator well, so
+  // nothing of them was ever visible. They belong on the bare fascia, in the
+  // 37 mm gap between the applied plate and the knob bezel.
   for (const sx of [1, -1]) {
-    for (let i = 0; i < 4; i++) {
-      const l = new THREE.Mesh(GEO.bevelBox(0.052, 0.0012, 0.0012, 0.0003, 2), M.anodBlack);
-      l.position.set(sx * 0.0975, (i - 1.5) * 0.0105, fz + 0.0004);
+    for (let i = 0; i < 5; i++) {
+      const l = new THREE.Mesh(GEO.bevelBox(0.030, 0.0022, 0.0014, 0.0005, 2), M.anodBlack);
+      l.position.set(sx * 0.1585, (i - 2) * 0.0112, fz + 0.0005);
       g.add(l);
     }
   }
@@ -365,15 +352,23 @@ function buildHardware() {
   // throws a shadow onto its own display prints as a dark step under each mark.
   const lit = [];
 
+  const segDim = M.plastic.clone();
+  segDim.color.setHex(0x18272e);
+
+  // Unlit track behind the level bar. Without it the lit bar floats in black and
+  // reads as a decal; with it, two thirds of a scale is lit and one third is not,
+  // which is what makes an instrument look like an instrument.
+  const track = new THREE.Mesh(GEO.bevelBox(0.1520, 0.0026, 0.0008, 0.0003, 2), segDim);
+  track.position.set(-0.0200, 0.0140, fz + 0.0042);
+  g.add(track); lit.push(track);
+
   // hairline backlit bar — kept small so bloom stays a glint, not a flare
   const glow = new THREE.Mesh(GEO.bevelBox(0.100, 0.0026, 0.0009, 0.0003, 2), M.meterGlow);
-  glow.position.set(-0.046, 0.0140, fz + 0.0044);
+  glow.position.set(-0.046, 0.0140, fz + 0.0045);
   g.add(glow); lit.push(glow);
 
   // stepped cartridge-loading ladder: 8 segments, the first four lit
   const segGeo = GEO.bevelBox(0.0076, 0.0030, 0.0009, 0.0003, 2);
-  const segDim = M.plastic.clone();
-  segDim.color.setHex(0x18272e);
   for (let i = 0; i < 8; i++) {
     const s = new THREE.Mesh(segGeo, i < 4 ? M.meterGlow : segDim);
     s.position.set(-0.0930 + i * 0.0110, -0.0125, fz + 0.0044);
@@ -400,12 +395,12 @@ function buildHardware() {
     const kg = new THREE.Group();
     kg.rotation.x = Math.PI / 2;
     kg.position.z = 0.0030 + 0.0160 / 2;
-    const k = GEO.knob(r, 0.0160, { body: mats().alu, mark: M.chrome, flutes: 60 });
+    const k = GEO.knob(r, 0.0160, { body: face, mark: trim, flutes: 60 });
     k.rotation.y = pointer;
     kg.add(k);
     c.add(kg);
     // engraved index positions
-    const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.00068, 8, 6), M.chrome, 5);
+    const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.00068, 8, 6), trim, 5);
     const m4 = new THREE.Matrix4();
     for (let i = 0; i < 5; i++) {
       const a = Math.PI * 0.5 + (i / 4 - 0.5) * Math.PI * 1.3;
@@ -503,9 +498,9 @@ function buildHardware() {
   const LR = 0.105, LARC = 0.0545 / LR;
   const lensMat = M.glass.clone();
   lensMat.color.setHex(0x000000);
-  lensMat.roughness = 0.045;
-  lensMat.clearcoatRoughness = 0.020;
-  lensMat.envMapIntensity = 3.2;
+  lensMat.roughness = 0.050;
+  lensMat.clearcoatRoughness = 0.024;
+  lensMat.envMapIntensity = 3.6;
   lensMat.transparent = true;
   lensMat.depthWrite = false;
   lensMat.blending = THREE.AdditiveBlending;
@@ -519,8 +514,8 @@ function buildHardware() {
   lens.frustumCulled = false;
   lens.renderOrder = 4;
   g.add(lens);
-  // the lens sits in a machined rebate, so it gets a hairline chrome surround
-  const rim = new THREE.Mesh(GEO.bevelBox(0.2205, 0.0585, 0.0016, 0.0004, 2), M.chrome);
+  // the lens sits in a machined rebate, so it gets a hairline surround
+  const rim = new THREE.Mesh(GEO.bevelBox(0.2205, 0.0585, 0.0016, 0.0004, 2), trim);
   rim.position.set(0, 0, fz + 0.0026);
   rim.castShadow = false; rim.receiveShadow = true;
   g.add(rim);
@@ -530,10 +525,11 @@ function buildHardware() {
 }
 
 // ---------------------------------------------------------------------------
-// OVERLAY — two negative-fill flags, one card, two plot regions
+// OVERLAY — four negative-fill flags, one card, two plot regions
 // ---------------------------------------------------------------------------
 function buildOverlay(ctx) {
   const L = ctx.labels;
+  const M = mats();
   const root = new THREE.Group();
   const R = {};
 
@@ -542,15 +538,15 @@ function buildOverlay(ctx) {
   // the standing finding against this chapter. This is what a photographer does
   // about it: black flags in front of the bays either side of the hero, feathered
   // so there is no rectangle, leaving bay 3 the only fully-lit chassis in frame.
-  // Four flags, forming an aperture around bay 3. The texture's soft edge is at
-  // the plane's own foot, so a rotation of 0/π/±π½ aims the falloff at the hero
-  // from above, below, right and left. The gap between one chassis and the next
-  // is only 56 mm, so the ramp has to reach full density inside it.
+  // The texture's soft edge is at the plane's own foot, so a rotation of 0/π/±π½
+  // aims the falloff at the hero from above, below, right and left. The gap
+  // between one chassis and the next is only 56 mm, so the ramp has to reach
+  // full density inside it.
   const alpha = flagAlpha();
-  const flag = (w, h, cx, cy, rot) => {
+  const flag = (w, h, cx, cy, rot, op = 0.80) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({
-        color: 0x04050a, transparent: true, opacity: 0.84, alphaMap: alpha,
+        color: 0x04050a, transparent: true, opacity: op, alphaMap: alpha,
         depthWrite: false, toneMapped: false,
       }));
     m.position.set(cx, cy, HERO_Z + 0.045);
@@ -560,16 +556,52 @@ function buildOverlay(ctx) {
   };
   const H2 = Math.PI / 2;
   root.add(flag(1.16, 0.600, 0, 1.040, 0));            // above: bays 4 and 5
-  root.add(flag(1.16, 0.568, 0, 0.324, Math.PI));      // below: bays 2, 1 and 0
-  root.add(flag(0.210, 0.660, 0.625, 0.665, -H2));     // right of the fascia
-  root.add(flag(0.210, 0.660, -0.625, 0.665, H2));     // left of the fascia
+  // The bays BELOW are held a stop lighter than the rest: they are the only
+  // thing giving the lower-left quarter of the frame any structure at all, and
+  // at full density that quarter went to a single flat near-black.
+  root.add(flag(1.16, 0.568, 0, 0.324, Math.PI, 0.70));   // below: bays 2, 1, 0
+  // The side flags are deep in y as well as wide, because the rack's shelf edge
+  // trim recedes diagonally out of the fascia plane and a narrow band left the
+  // far end of it as the brightest thing in the frame.
+  root.add(flag(0.640, 0.700, 0.640, 0.665, -H2));     // right of the fascia
+  root.add(flag(0.640, 0.700, -0.640, 0.665, H2));     // left of the fascia
 
   // --- one card, floating clear of the rack -----------------------------------
-  const CW = 0.5362, CH = 0.3243, PAD = 0.020;
+  const CW = 0.4000, CH = 0.2760, PAD = 0.020;
   const holder = new THREE.Group();
-  holder.position.copy(place(0.09375, -0.361, CARD_DIST));
+  holder.position.copy(place(0.145, -0.335, CARD_DIST));
   holder.lookAt(CAM);
+  // A card square to the lens is a decal. Yawing it 9° off the axis gives the
+  // glass over it somewhere to sweep the front strip from, and gives the frame's
+  // left edge a visible thickness.
+  holder.rotateY(-0.157);
   root.add(holder);
+
+  // The card is an object in the room, not a pasted PNG: a 12 mm machined plate
+  // with a satin edge chamfer standing proud of it, so it catches the rig, casts
+  // a shadow back onto the rack and has a lit edge on the side nearest the key.
+  const frameMat = M.anodBlack.clone();
+  frameMat.color.setHex(0x0c0e12);
+  frameMat.roughness = 0.44;
+  // A DIELECTRIC, not the trim alloy. Every metal in the library is metalness 1,
+  // and a metal chamfer 2 mm wide under the room's spotlights returns a specular
+  // far above 1.0 in linear — the card's top edge was the second-largest blown
+  // area in the frame. A satin dark polymer bezel reflects ~4 % and ramps.
+  const bezMat = M.plastic.clone();
+  bezMat.color.setHex(0x474c54);
+  bezMat.roughness = 0.58;
+  bezMat.clearcoat = 0.25;
+  bezMat.clearcoatRoughness = 0.38;
+  bezMat.envMapIntensity = 0.55;
+  const OW = CW + PAD * 2, OH = CH + PAD * 2;
+  const bez = new THREE.Mesh(GEO.bevelBox(OW + 0.0050, OH + 0.0050, 0.0135, 0.0018, 3), bezMat);
+  bez.position.z = -0.0090;
+  bez.castShadow = bez.receiveShadow = true;
+  holder.add(bez);
+  const body = new THREE.Mesh(GEO.bevelBox(OW + 0.0008, OH + 0.0008, 0.0142, 0.0014, 3), frameMat);
+  body.position.z = -0.0083;
+  body.castShadow = false; body.receiveShadow = true;
+  holder.add(body);
 
   const card = new THREE.Group();
   card.position.set(-CW / 2, -CH / 2, 0);
@@ -581,111 +613,130 @@ function buildOverlay(ctx) {
   // fadeTree captures a mesh's opacity the first time it sees it, and the app's
   // first call happens at reveal 0 — seed the plate or it never comes back.
   plate.userData.plate.userData._baseOp = 1.0;
+  // A pure-black plate is a hole in the frame: it took a quarter of the safe box
+  // below 3 % luminance and hollowed out the mid-tone mass. This is still deep
+  // enough for a 2 px trace to read against, and the glass over it now has a
+  // value to lay its gradient onto.
+  plate.userData.plate.material.color.setHex(0x0f1318);
   card.add(plate);
 
   // ======================= 1. the RIAA curves ==============================
-  const GX = 0.030, GY = 0.0941;
-  const GW = CW - GX, GH = CH - GY;
+  const GX = 0.034, GW = CW - GX - 0.008;
   const g = new DIAG.Graph({
-    w: GW, h: GH, xLog: true, xRange: [20, 20000], yRange: [-25, 25],
+    w: GW, h: 0.1620, xLog: true, xRange: [20, 20000], yRange: [-25, 25],
     yTicks: [-20, -10, 0, 10, 20], zeroLine: 0,
   });
-  g.position.set(GX, GY, 0);
+  g.position.set(GX, 0.1060, 0);
   card.add(g);
   R.graph = g;
 
-  // The record curve rises at +6 dB/oct between f1…f2 and again above f3. A
-  // 6 dB/octave rise in velocity is constant amplitude, so these are the decades
-  // in which the groove stops getting wider. An unexplained wash of colour on a
-  // measurement plot reads as a fault, so each region is marked the way a plot
-  // marks a range: a solid bracket along the top edge with end ticks, and no
-  // wash of colour over the data. (A basic material writes linear, and the sRGB
-  // encode multiplies small values by ~12.9, so even a 1 % fill prints as a
-  // visible brown field.)
-  const BY = GH - GH * 0.055, BT = GH * 0.045;
-  for (const [fa, fb] of [[F1, F2], [F3, 20000]]) {
-    const x0 = g.x(fa) + 0.0008, x1 = g.x(fb) - 0.0008;
-    g.add(poly([V3(x0, BY, 0.0005), V3(x1, BY, 0.0005)], PAL.am, 2.0, { opacity: 0.8 }));
-    for (const x of [x0, x1]) {
-      g.add(poly([V3(x, BY - BT, 0.0005), V3(x, BY, 0.0005)], PAL.am, 2.0, { opacity: 0.8 }));
-    }
-  }
-
-  for (const f of [F1, F2, F3]) g.addMarker(f, { color: PAL.ink3, width: 1.2, opacity: 0.6 });
+  for (const f of [F1, F2, F3]) g.addMarker(f, { color: PAL.ink3, width: 1.2, opacity: 0.55 });
 
   g.addTrace((f) => DSP.riaaRecordDb(f), { color: PAL.am, width: 2.8, n: 420, z: 0.0006 });
   g.addTrace((f) => playDb(f), { color: PAL.cy, width: 2.8, n: 420, z: 0.0008 });
-  g.addTrace((f) => sumDb(f), { color: PAL.gr, width: 3.4, n: 420, z: 0.0014 });
 
-  for (const f of [F1, F2, F3]) {
-    const d = g.addDot(PAL.ink, 0.0030);
-    d.userData.setData(f, playDb(f));
-  }
-
-  R.cursor = g.addMarker(1000, { color: PAL.ink, width: 1.5, dashed: false, opacity: 0.45 });
-  R.dotRec = g.addDot(PAL.am, 0.0048);
-  R.dotPlay = g.addDot(PAL.cy, 0.0048);
-  R.dotSum = g.addDot(PAL.gr, 0.0048);
+  R.cursor = g.addMarker(1000, { color: PAL.ink, width: 1.4, dashed: false, opacity: 0.42 });
+  R.dotRec = g.addDot(PAL.am, 0.0042);
+  R.dotPlay = g.addDot(PAL.cy, 0.0042);
 
   // A plot a reader cannot take a value off is a decoration.
   g.tickLabels(L, {
-    xVals: [20, 100, 1000, 10000], yVals: [-20, 0, 20],
-    xFmt: (v) => (v >= 1000 ? v / 1000 + ' k' : String(v)),
+    yVals: [-20, 0, 20],
     yFmt: (v) => (v > 0 ? '+' : '') + v,
-    xOffset: [0, 13], yOffset: [-17, 0],
+    yOffset: [-19, 0],
   });
 
-  // ======================= 2. groove excursion =============================
-  // Same 50 Hz, same 5 cm/s peak, with and without pre-emphasis, against the
-  // average groove pitch. Everything here is at one scale.
-  const mid = CW * 0.40;
-  const halfFlat = A_50_FLAT * EXC_SCALE;
-  const halfRiaa = A_50_RIAA * EXC_SCALE;
-  const halfPitch = (PITCH / 2) * EXC_SCALE;
+  // ======================= 2. the error lane ===============================
+  // The sum of the two curves above is ±0.06 dB, which on a ±25 dB axis is one
+  // pixel — indistinguishable from the zero line, so the whole "a result, not an
+  // identity" argument was invisible in the picture. It gets its own lane on the
+  // same frequency axis at ±0.13 dB full scale, with the ±0.10 dB that the same
+  // parts' tolerance costs marked in dashes just inside the frame: the design
+  // error is visibly inside the tolerance, which is the point.
+  const gl = new DIAG.Graph({
+    w: GW, h: 0.0460, xLog: true, xRange: [20, 20000], yRange: [-0.13, 0.13],
+    yTicks: [], zeroLine: 0,
+  });
+  gl.position.set(GX, 0.0300, 0);
+  card.add(gl);
+  R.lane = gl;
 
-  for (const sx of [-1, 1]) {
-    card.add(poly([V3(mid + sx * halfPitch, 0.006, 0.006), V3(mid + sx * halfPitch, 0.062, 0.006)],
-      PAL.ink3, 1.3, { opacity: 0.6, dashed: true, dashSize: 0.006, gapSize: 0.005 }));
+  for (const s of [1, -1]) {
+    gl.add(poly([V3(0, gl.y(s * TOL_DB), 0.0004), V3(GW, gl.y(s * TOL_DB), 0.0004)],
+      PAL.ink3, 1.3, { opacity: 0.75, dashed: true, dashSize: 0.007, gapSize: 0.005 }));
   }
-  card.add(poly([V3(mid - halfPitch, 0.010, 0.006), V3(mid + halfPitch, 0.010, 0.006)],
-    PAL.ink3, 1.4, { opacity: 0.6 }));
-  card.add(bar(mid - halfFlat, mid + halfFlat, 0.048, 0.0084, 0.008, PAL.am));
-  card.add(bar(mid - halfRiaa, mid + halfRiaa, 0.026, 0.0084, 0.008, PAL.cy));
+  gl.addTrace((f) => sumDb(f), { color: PAL.gr, width: 3.0, n: 520, z: 0.0010 });
+  R.laneCursor = gl.addMarker(1000, { color: PAL.ink, width: 1.4, dashed: false, opacity: 0.42 });
+  R.dotSum = gl.addDot(PAL.gr, 0.0042);
+
+  gl.tickLabels(L, {
+    xVals: [20, 100, 1000, 10000],
+    xFmt: (v) => (v >= 1000 ? v / 1000 + ' k' : String(v)),
+    xOffset: [0, 14],
+  });
+
+  // ======================= the specular layer over the card ================
+  // The plot is a lit panel, and nothing in this piece had a reflection sitting
+  // in front of what was underneath it. This is a crowned clear panel over the
+  // whole card: 12 mm of crown across 320 mm, so the surface normal turns
+  // through 17° top to bottom and the widened front strip sweeps across it as a
+  // soft band. Black albedo, additive, so it adds a reflection to the traces
+  // rather than veiling them.
+  //
+  // The clearcoat is OFF. mats().glass carries clearcoat 1.0, and a clearcoat
+  // lobe on top of the base specular took the whole panel to a white wash that
+  // buried the traces. A sheet of glass reflects ~4 % at normal incidence and
+  // rises at the edges by Fresnel, which is exactly what the base dielectric
+  // lobe gives — a soft band across the crown, not a veil.
+  const CR = 1.10, CARC = (OH + 0.040) / CR;
+  const glassMat = M.glass.clone();
+  glassMat.color.setHex(0x000000);
+  glassMat.roughness = 0.170;
+  glassMat.clearcoat = 0.0;
+  glassMat.specularIntensity = 0.50;
+  glassMat.envMapIntensity = 0.45;
+  glassMat.transparent = true;
+  glassMat.depthWrite = false;
+  glassMat.blending = THREE.AdditiveBlending;
+  glassMat.side = THREE.FrontSide;
+  const glass = new THREE.Mesh(
+    new THREE.CylinderGeometry(CR, CR, OW + 0.004, 72, 1, true, -CARC / 2, CARC), glassMat,
+  );
+  glass.rotation.z = Math.PI / 2;
+  glass.position.set(0, 0, 0.0035 - CR);
+  glass.castShadow = glass.receiveShadow = false;
+  glass.frustumCulled = false;
+  glass.renderOrder = 16;
+  holder.add(glass);
 
   // ======================= labels ==========================================
   const lab = {};
 
   // The identifying label is pinned to the hero with a leader dot, in the flagged
   // gap immediately below its own fascia — not to the shelf above it.
-  lab.hero = L.add(V3(-0.16, 0.575, HERO_Z + 0.03), {
+  lab.hero = L.add(V3(-0.17, 0.585, HERO_Z + 0.03), {
     kicker: 'Bay 3 · moving-coil phono',
-    value: G_STAGE_DB.toFixed(2) + ' dB at 1 kHz · 100 Ω',
-    cls: 'lead', occlude: false, offset: [108, 0], priority: 8,
+    value: G_STAGE_DB.toFixed(2) + ' dB at 1 kHz · ' + CART.loadOhm + ' Ω',
+    cls: 'lead', occlude: false, offset: [104, 0], priority: 9,
   });
 
-  lab.play = L.add(anchor(g, g.x(20), g.y(playDb(20))), {
-    kicker: 'Playback — fitted network', cls: 'acc plain', occlude: false, priority: 5,
-    value: sgn(playDb(20)) + ' dB at 20 Hz', offset: [150, 74],
+  // The two curves cross at 1 kHz, which leaves exactly three large clear areas
+  // on the plot: the wedge either side of the crossing, and the band above the
+  // crossing between cyan's fall and amber's rise. Each label sits in one of
+  // them, so nothing is written over a trace.
+  lab.play = L.add(anchor(g, g.x(70), g.y(0)), {
+    kicker: 'Playback · network', cls: 'acc plain', occlude: false, priority: 5,
+    value: sgn(playDb(20)) + ' dB at 20 Hz', offset: [0, 0],
   });
-  // In the right-hand wedge, where the two curves have opened out again — the
-  // left wedge only has room for two labels without covering the traces.
-  lab.sum = L.add(anchor(g, g.x(9000), g.y(0)), {
-    kicker: 'Record + network', cls: 'plain', occlude: false, priority: 6,
-    text: 'a result, not an identity',
-    value: sgn(ERR.hi, 3) + ' / ' + sgn(ERR.lo, 3) + ' dB', offset: [0, 40],
+  lab.rec = L.add(anchor(g, g.x(1000), g.y(15.5)), {
+    kicker: 'Record · standard', cls: 'am plain', occlude: false, priority: 5,
+    value: sgn(DSP.riaaRecordDb(20000)) + ' dB at 20 kHz', offset: [0, 0],
   });
-  lab.rec = L.add(anchor(g, g.x(20), g.y(DSP.riaaRecordDb(20))), {
-    kicker: 'Record — the standard', cls: 'am plain', occlude: false, priority: 5,
-    text: 'brackets: constant amplitude',
-    value: sgn(DSP.riaaRecordDb(20)) + ' dB at 20 Hz', offset: [150, -74],
-  });
-  lab.exc = L.add(anchor(card, CW * 0.86, 0.034), {
-    kicker: '50 Hz at 5 cm/s peak ×' + EXC_MAG, cls: 'plain',
-    occlude: false, priority: 4,
-    text: 'grey: groove pitch, ' + (PITCH * 1e6).toFixed(0) + ' µm',
-    value: '±' + (A_50_FLAT * 1e6).toFixed(1) + ' → ±' + (A_50_RIAA * 1e6).toFixed(1)
-      + ' µm · ÷' + A_RATIO.toFixed(2),
-    offset: [0, 0],
+  lab.err = L.add(anchor(card, GX + GW / 2, 0.0910), {
+    kicker: 'Record + network · error',
+    text: 'dashed: ±' + TOL_DB.toFixed(2) + ' dB, parts tolerance',
+    cls: 'plain', occlude: false, priority: 6,
+    value: sgn(ERR.hi, 3) + ' / ' + sgn(ERR.lo, 3) + ' dB', offset: [0, 0],
   });
 
   R.lab = lab;
@@ -729,6 +780,7 @@ export default {
     S.vout = S.vin * DSP.undB(S.gain);
 
     R.cursor.userData.setX(f);
+    R.laneCursor.userData.setX(f);
     R.dotRec.userData.setData(f, S.rec);
     R.dotPlay.userData.setData(f, S.play);
     R.dotSum.userData.setData(f, S.sum);
@@ -736,59 +788,39 @@ export default {
 
   content() {
     return `
-<h3>Why the cut is not flat</h3>
 <p>A moving-coil cartridge is a velocity transducer: its output follows how
 fast the groove wall moves, not how far. Peak displacement is
-<span class="num">a = v&#770;/&omega;</span>, so a constant-velocity cut lets
-excursion grow as <span class="num">1/f</span>. At
-<span class="num">5 cm/s</span> peak the 1 kHz swing is
-<span class="num">${(A_1K * 1e6).toFixed(2)} &micro;m</span>; at 50 Hz it is
-<span class="num">${(A_50_FLAT * 1e6).toFixed(1)} &micro;m</span> against a
-<span class="num">${(PITCH * 1e6).toFixed(0)} &micro;m</span> groove pitch, and the cutter crosses
-into its neighbour.</p>
+<span class="num">a = v&#770;/&omega;</span>, so excursion grows as
+<span class="num">1/f</span>: at <span class="num">${(V_REF * 100).toFixed(0)} cm/s</span>, 50 Hz wants
+<span class="num">&plusmn;${(A_50_FLAT * 1e6).toFixed(1)} &micro;m</span> against a
+<span class="num">${(PITCH * 1e6).toFixed(0)} &micro;m</span> groove pitch.</p>
 
-<div class="key"><span class="lab">The idea</span><p>Pre-emphasis trades bass
-excursion for treble noise, and playback has to undo it exactly. The cyan curve
-is <em>not</em> the algebraic inverse of the amber one: it is the response of
-the network below, in stock parts. Their sum is a result &mdash;
-<span class="num">+${ERR.hi.toFixed(3)} dB</span> at
-<span class="num">${ERR.fHi.toFixed(0)} Hz</span> at worst, with
-<span class="num">&plusmn;${TOL_DB.toFixed(2)} dB</span> more from tolerance.</p></div>
+<div class="key"><span class="lab">The idea</span><p>The cyan curve is
+<em>not</em> the algebraic inverse of the amber one: it is the network below, in
+stock parts. Their sum is a result &mdash;
+<span class="num">+${ERR.hi.toFixed(3)} dB</span>, inside the parts' own
+<span class="num">&plusmn;${TOL_DB.toFixed(2)} dB</span>.</p></div>
 
-<div class="eq">(1+sT&#8322;) / (1+sT&#8321;)(1+sT&#8323;)  <span class="c">2 buffered RC</span>
-T&#8321; (R&#8321;+R&#8322;)C&#8321;  96.1 k, 33 nF  <span class="hl">${(TR.T1 * 1e6).toFixed(0)} &micro;s</span>
-T&#8322;  R&#8322;C&#8321;      9.53 k, 33 nF  <span class="hl">${(TR.T2 * 1e6).toFixed(1)} &micro;s</span>
-T&#8323;  R&#8323;C&#8322;      2.26 k, 33 nF  <span class="hl">${(TR.T3 * 1e6).toFixed(1)} &micro;s</span></div>
+<div class="eq">(1+sT&#8322;)/(1+sT&#8321;)(1+sT&#8323;)  <span class="c">fitted (ideal) Hz</span>
+T&#8321; ${((NET.R1 + NET.R2) / 1e3).toFixed(1)} k &middot; ${(NET.C1 * 1e9).toFixed(0)} nF  ${(TR.T1 * 1e6).toFixed(0)} &micro;s <span class="hl">${FR.f1.toFixed(2)}</span> (${F1.toFixed(2)})
+T&#8322; ${(NET.R2 / 1e3).toFixed(2)} k &middot; ${(NET.C1 * 1e9).toFixed(0)} nF  ${(TR.T2 * 1e6).toFixed(1)} &micro;s <span class="hl">${FR.f2.toFixed(1)}</span> (${F2.toFixed(1)})
+T&#8323; ${(NET.R3 / 1e3).toFixed(2)} k &middot; ${(NET.C2 * 1e9).toFixed(0)} nF   ${(TR.T3 * 1e6).toFixed(1)} &micro;s <span class="hl">${FR.f3.toFixed(0)}</span> (${F3.toFixed(0)})</div>
 
-<p>The standard's corners are
-<span class="num">${F1.toFixed(2)}</span>, <span class="num">${F2.toFixed(1)}</span> and
-<span class="num">${F3.toFixed(0)} Hz</span>; stock parts land
-<span class="num">50.17</span>, <span class="num">506.1</span> and
-<span class="num">2134</span>.</p>
-
-<h3>Gain and noise</h3>
-<div class="eq">${(V_CART * 1e6).toFixed(1)} &micro;V  <span class="c">cartridge, 5 cm/s peak, open</span>
-${LOAD_DB.toFixed(2)} dB  <span class="c">100 &Omega; load, 10 &Omega; coil</span>
-+${G_STAGE_DB.toFixed(2)} dB  <span class="c">this stage</span>  <span class="hl">${(V_OUT * 1e3).toFixed(1)} mV</span>
-+${G_REST_DB.toFixed(2)} dB  <span class="c">line, power, volume</span>  2.83 V</div>
-
-<p>The network loses <span class="num">${NET_LOSS_1K.toFixed(2)} dB</span> at 1 kHz, so the
-gain blocks make <span class="num">${AMP_RAW_DB.toFixed(2)} dB</span>. Weighted by the playback
-curve the noise bandwidth is <span class="num">${(ENB / 1000).toFixed(2)} kHz</span>, not a flat
-20 kHz: <span class="num">${(V_NOISE * 1e9).toFixed(1)} nV</span> rms from
-<span class="num">${(EN_TOT * 1e9).toFixed(2)} nV/&radic;Hz</span>, or
-<span class="num">${SNR_DB.toFixed(1)} dB</span> below
-<span class="num">${(V_IN * 1e6).toFixed(1)} &micro;V</span>, unweighted.</p>
+<p>The network loses <span class="num">${Math.abs(NET_LOSS_1K).toFixed(2)} dB</span>, so the
+blocks make <span class="num">${AMP_RAW_DB.toFixed(2)} dB</span> for
+<span class="num">${G_STAGE_DB.toFixed(2)}</span> net:
+<span class="num">${(V_IN * 1e6).toFixed(1)} &micro;V</span> in,
+<span class="num">${(V_OUT * 1e3).toFixed(1)} mV</span> out on
+<span class="num">${(V_NOISE * 1e9).toFixed(1)} nV</span> of noise over the
+<span class="num">${(ENB / 1000).toFixed(2)} kHz</span> the curve leaves, not a flat 20 &mdash;
+<span class="num">${SNR_DB.toFixed(1)} dB</span> down.
+<span class="num">+${G_REST_DB.toFixed(2)} dB</span> more lands
+<span class="num">${V_TERM.toFixed(3)} V</span> &mdash;
+<span class="num">${W_TERM.toFixed(3)} W</span> into <span class="num">${SPEAKER.nominalZ} &Omega;</span>.</p>
 
 <div class="myth"><span class="lab">Commonly got wrong</span><p>The earth wire is
-not the signal return. The coil has two terminals and its own screened pair:
-what leaves on the hot comes back on the cold. The earth post is a
-<em>different</em> node &mdash; arm tube, bearing, platter &mdash; tied to
-signal ground at one point. Carriers in the signal loop oscillate
-<span class="num">&plusmn;${(X_DRIFT * 1e12).toFixed(2)} pm</span> at 1 kHz &mdash;
-<span class="num">1/${Math.round(CU_SPACING / X_DRIFT)}</span> of a copper atom
-spacing &mdash; while the field covers
-<span class="num">${(FIELD_PER_HALF / 1000).toFixed(0)} km</span> in half a cycle.</p></div>
+not the signal return: the coil's two terminals have their own screened
+<span class="num">${TONEARM.litzMm2.toFixed(3)} mm&sup2;</span> pair.</p></div>
 `;
   },
 

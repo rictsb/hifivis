@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LAYOUT, frameShot } from '../core/layout.js';
+import { LAYOUT, SAFE, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
@@ -9,12 +9,16 @@ import { DIGITAL } from '../core/spec.js';
 /**
  * DIGITAL TO ANALOGUE — where the staircase myth dies.
  *
- * Two plot regions, one card, and the converter itself as the hero.
- *   · region 1 — the samples, all seventeen sinc kernels, the zero-order hold
- *     the output stage actually emits (amber), and the one band-limited curve
- *     that fits the samples (cyan). The myth and its removal in one frame.
- *   · region 2 — a 65 536-point FFT of the real bit stream from a real
- *     second-order modulator, with the analogue filter over it.
+ * ONE card, ONE plot region, and the converter itself as the hero.
+ *   · the samples, all seventeen sinc kernels, the zero-order hold the output
+ *     stage actually emits (amber), and the one band-limited curve that fits
+ *     the samples (cyan). The myth and its removal in a single frame.
+ *
+ * The Δ-Σ spectrum that used to occupy a second plot region is still MEASURED
+ * — a 65 536-point FFT of a real second-order modulator runs at build — but it
+ * is quoted in the instrument cluster and the prose rather than drawn. Two
+ * plots on one card at this framing put the diagram at four times the hero's
+ * mass and neither plot was legible; one plot, twice the size, is the trade.
  *
  * Time: `timeScale` 2e-5, so one sample period (22.676 µs) takes 1.134 s of
  * wall clock. The cursor steps one sample per sample period — the animation
@@ -42,11 +46,8 @@ const VFS_RMS = 2.0;
 const VFS = VFS_RMS * Math.SQRT2;     // 2.8284 V peak = 0 dBFS
 
 const LSB24 = DSP.lsbVolts(WORD, VFS);      // 3.3717e-7 V = 337.2 nV
-const LSB16 = DSP.lsbVolts(WORD_CD, VFS);   // 8.631e-5 V = 86.31 µV
 const SNR16 = DSP.quantSnrDb(WORD_CD);      // 98.09 dB
-const SNR24 = DSP.quantSnrDb(WORD);         // 146.26 dB
 
-const ZOH_NYQ = DSP.zohDb(NYQ, FS);         // −3.9224 dB  (sinc(1/2) = 2/π)
 const ZOH_20K = DSP.zohDb(20000, FS);       // −3.1678 dB, non-oversampling
 const OSR_DIG = 8;                          // CHOSEN digital interpolation ratio
 const FS_OS = FS * OSR_DIG;                 // 352 800 Hz hold rate after ×8
@@ -56,10 +57,6 @@ const ZOH_20K_OS = DSP.zohDb(20000, FS_OS); // −0.0460 dB
 const K_B = 1.380649e-23, T_KELVIN = 293.15, R_J = 1000, BW_J = 20000;
 const V_JOHNSON = Math.sqrt(4 * K_B * T_KELVIN * R_J * BW_J); // 5.690e-7 V
 const LSB_VS_KTB = 20 * Math.log10(LSB24 / V_JOHNSON);        // −4.54 dB
-
-/** Analogue reconstruction filter: 3rd-order Butterworth, fc = 80 kHz. */
-const FC_REC = 80000, N_REC = 3;
-const recFiltDb = (f) => -10 * Math.log10(1 + Math.pow(f / FC_REC, 2 * N_REC));
 
 // Δ-Σ modulator
 const FS_MOD = FS * OSR;              // 2 822 400 Hz
@@ -108,6 +105,10 @@ function reconstruct(x) {
 
 // 20 kHz at 44.1 kHz — quoted in the panel, so derive it, do not type it.
 const SAMPLES_PER_CYCLE = FS / 20000;                  // 2.2050
+
+/** Thin-space grouping, so 44 100 and 22 050 in the prose are the imported
+ *  primary and its half rather than two more numbers typed by hand. */
+const grp = (v) => Math.round(v).toLocaleString('en-GB').replace(/,/g, ' ');
 
 // ---------------------------------------------------------------------------
 // 3. A real Δ-Σ modulator and a real FFT of its output
@@ -158,7 +159,7 @@ function fft(re, im) {
 const BHW = [0.27105140069342, -0.43329793923448, 0.21812299954311,
   -0.06592544638803, 0.01081174209837, -0.00077658482522, 0.00001388721735];
 
-const SPEC = { binHz: FS_MOD / N_FFT, snrMeas: 0, drFs: 0, floorAt: () => -140 };
+const SPEC = { binHz: FS_MOD / N_FFT, snrMeas: 0, drFs: 0 };
 
 function analyseStream() {
   const re = new Float64Array(N_FFT), im = new Float64Array(N_FFT);
@@ -195,16 +196,6 @@ function analyseStream() {
    * sine throughout.
    */
   SPEC.drFs = SPEC.snrMeas + HEADROOM_DB;
-
-  // 1/12-octave mean power per bin, in dBFS
-  SPEC.floorAt = (f) => {
-    const lo = f / Math.pow(2, 1 / 24), hi = f * Math.pow(2, 1 / 24);
-    const a = Math.max(1, Math.round(lo / bin));
-    const b = Math.max(a, Math.min(half - 1, Math.round(hi / bin)));
-    let p = 0;
-    for (let k = a; k <= b; k++) p += pw[k];
-    return 10 * Math.log10(Math.max(p / (b - a + 1) / 0.5, 1e-22));
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -215,8 +206,8 @@ const H_BODY = 0.086;
 const FOOT = 0.006;
 const W_C = LAYOUT.rack.w - 0.03;          // 0.555
 const D_C = LAYOUT.rack.d - 0.06;          // 0.440
-const LID_LIFT = 0.030;                    // lifted, then tilted about its rear edge
-const LID_TILT = 0.070;                    // rad — front edge stays under the shelf
+const LID_LIFT = 0.016;                    // lifted, then tilted about its rear edge
+const LID_TILT = 0.022;                    // rad. Any more and the lid mirrors the front strip
 
 /**
  * A shallow convex lens. The cover glass over a real instrument display is not
@@ -278,6 +269,40 @@ function displayTexture() {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
+  return t;
+}
+
+/**
+ * THE SPECULAR LAYER, as a texture.
+ *
+ * A cover-glass reflection is not a fog. It is the image of a source with a
+ * boundary: bright core, a short fall to the rim, then nothing. The round-2
+ * version of this was a wide radial-ish ramp at more than three times this
+ * amplitude and it read as an uncorrected lens flare over the whole card. The
+ * stops below give the band a leading edge that stays inside two per cent of
+ * the panel's width — the boundary is what makes it read as glass.
+ */
+function sheenTexture(angle = -0.34) {
+  const s = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const x = c.getContext('2d');
+  x.clearRect(0, 0, s, s);
+  x.translate(s / 2, s / 2);
+  x.rotate(angle);
+  const g = x.createLinearGradient(0, -s * 0.85, 0, s * 0.85);
+  g.addColorStop(0.000, 'rgba(255,255,255,0)');
+  g.addColorStop(0.300, 'rgba(255,255,255,0)');
+  g.addColorStop(0.318, 'rgba(255,255,255,0.62)');   // the leading edge
+  g.addColorStop(0.400, 'rgba(255,255,255,0.44)');
+  g.addColorStop(0.520, 'rgba(255,255,255,0.20)');
+  g.addColorStop(0.640, 'rgba(255,255,255,0.05)');
+  g.addColorStop(0.720, 'rgba(255,255,255,0)');
+  g.addColorStop(1.000, 'rgba(255,255,255,0)');
+  x.fillStyle = g;
+  x.fillRect(-s, -s, s * 2, s * 2);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 
@@ -362,9 +387,9 @@ function buildInternals(g) {
   // this rig and became the most saturated thing in the frame; knocked back to
   // a dark varnished copper so nothing outside the palette shouts.
   const wire = M.magnetWire.clone();
-  wire.color.setHex(0x4e3220);
-  wire.roughness = 0.42;
-  wire.envMapIntensity = 0.6;
+  wire.color.setHex(0x4a3020);
+  wire.roughness = 0.62;
+  wire.envMapIntensity = 0.32;
   const toroid = new THREE.Mesh(new THREE.TorusGeometry(0.034, 0.013, 12, 40), wire);
   toroid.rotation.x = -Math.PI / 2;
   toroid.position.set(0.150, yF + 0.014, -0.156);
@@ -454,8 +479,11 @@ function buildHardware() {
   // were narrow and hot: the highlight should ramp across the chamfer, not clip.
   const zF = D_C / 2 - 0.008;
   const faceMat = M.alu.clone();
-  faceMat.roughness = 0.32;
-  faceMat.envMapIntensity = 1.12;
+  // The chapter's subject should not be the dimmest fascia in the bay stack.
+  // The widened strips carry a ramp across the chamfer at this gain instead of
+  // the clipped line they gave when they were narrow and hot.
+  faceMat.roughness = 0.275;
+  faceMat.envMapIntensity = 1.80;
   const face = new THREE.Mesh(GEO.bevelBox(W_C + 0.008, H_BODY + 0.004, 0.016, 0.0026, 5), faceMat);
   face.position.set(0, 0.003, zF);
   face.castShadow = face.receiveShadow = true;
@@ -477,29 +505,43 @@ function buildHardware() {
   disp.position.set(-0.092, 0.005, zF + 0.0110);
   g.add(disp);
 
-  /* THE SPECULAR LAYER. A lit display with nothing in front of it reads as a
-     decal. This is a real transmissive cover glass with a 1.4 mm bulge and a
-     low but non-zero roughness, so the front strip crosses it as a soft band
-     with a rolloff either side, and the glyphs sit behind that band. */
+  /* THE SPECULAR LAYER over the display. A lit panel with nothing in front of
+     it reads as a decal at any resolution. This is a real cover glass with a
+     2.2 mm bulge (R ≈ 0.14 m across the short axis) and a tight clearcoat, so
+     the widened front strip crosses it as a band with a defined edge and the
+     glyphs sit behind that band.
+
+     Transmission is the wrong tool: three.js's transmissive path leaves a lit
+     diffuse residue and a blurred backdrop, and this panel sits 15 mm from a
+     lit shelf strip, so the glyph field went milky. A thin, nearly clear alpha
+     layer with a strong environment gain gives the same physics where it
+     matters — a curvature-driven specular band that moves with the camera. */
   const lensMat = M.clearGlass.clone();
-  /* Transmission is the wrong tool here: three.js's transmissive path leaves a
-     lit diffuse residue and a blurred backdrop, and this panel sits 15 mm from
-     a blown-out shelf strip, so the glyph field went milky grey. A thin, nearly
-     clear alpha layer with a strong environment gain gives the same physics
-     where it matters — a curvature-driven specular band that moves with the
-     camera — and leaves the display black-backed underneath it. */
   lensMat.transmission = 0;
   lensMat.color.setHex(0x0b0f14);
-  lensMat.opacity = 0.11;
-  lensMat.roughness = 0.030;
+  lensMat.opacity = 0.14;
+  lensMat.roughness = 0.045;
   lensMat.clearcoat = 1.0;
-  lensMat.clearcoatRoughness = 0.030;
+  lensMat.clearcoatRoughness = 0.035;
   lensMat.depthWrite = false;
-  lensMat.envMapIntensity = 3.6;
-  const lens = new THREE.Mesh(lensGeometry(0.300, 0.0440, 0.0018), lensMat);
+  lensMat.envMapIntensity = 4.2;
+  const lens = new THREE.Mesh(lensGeometry(0.300, 0.0440, 0.0022, 34, 12), lensMat);
   lens.position.set(-0.092, 0.005, zF + 0.0116);
   lens.renderOrder = 4;
   g.add(lens);
+
+  /* …and the reflected strip itself, as a band with a leading edge. The glass
+     above supplies the physics; this supplies the guarantee that the band is
+     ON the panel at this camera azimuth rather than just off its edge. */
+  const gleam = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.300, 0.0440),
+    new THREE.MeshBasicMaterial({
+      map: sheenTexture(0.10), color: 0x9fb6cc, transparent: true, opacity: 0.20,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    }));
+  gleam.position.set(-0.092, 0.005, zF + 0.0121);
+  gleam.renderOrder = 5;
+  g.add(gleam);
 
   // machined filter-select buttons, one lit
   const btnGeo = GEO.bevelCyl(0.0086, 0.0092, 0.0045, 28, 0.0006);
@@ -538,14 +580,21 @@ function buildHardware() {
 
   // ---- lid: lifts on reveal, exposing the two board sections ----
   const lid = new THREE.Group();
-  const lidMat = M.pianoBlack ? M.pianoBlack.clone() : M.anodBlack.clone();
+  /* The lid is lifted and tilted, which points its top face straight at the
+     wide front strip: at clearcoat roughness 0.028 it mirrored the strip as a
+     blown white streak the width of the chassis. Slackening the clearcoat and
+     halving the env gain turns that into a ramp across the panel — the lid is
+     lacquer, not a mirror. */
+  const lidMat = (M.pianoBlack || M.anodBlack).clone();
+  lidMat.clearcoatRoughness = 0.10;
+  lidMat.envMapIntensity = 0.55;
   const lidPlate = new THREE.Mesh(GEO.bevelBox(W_C - 0.020, 0.005, D_C - 0.026, 0.0018, 3), lidMat);
   lidPlate.castShadow = lidPlate.receiveShadow = true;
   lid.add(lidPlate);
   const vents = GEO.ventSlots(0.150, 0.230, 3, 12, { mat: M.plastic, sw: 0.0042, sd: 0.014 });
   vents.position.set(0.120, 0.0026, -0.030);
   lid.add(vents);
-  const lidTrim = new THREE.Mesh(GEO.bevelBox(W_C - 0.060, 0.0016, 0.003, 0.0006, 2), M.alu);
+  const lidTrim = new THREE.Mesh(GEO.bevelBox(W_C - 0.060, 0.0016, 0.003, 0.0006, 2), M.anodGrey);
   lidTrim.position.set(0, 0.0032, D_C / 2 - 0.020);
   lid.add(lidTrim);
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
@@ -569,65 +618,86 @@ function buildHardware() {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Overlay — ONE card, TWO plot regions
+// 5. THE SHOT — the converter as the hero, one plate beside it
 // ---------------------------------------------------------------------------
-const CARD = { w: 0.399, h: 0.204 }, CARD_PAD = 0.016;
-const G1 = { x: 0.026, y: 0.018, w: 0.208, h: 0.148 };    // reconstruction + hold
-const G2 = { x: 0.264, y: 0.018, w: 0.129, h: 0.148 };    // shaped noise, measured
+/*  Round 2 shipped fill 0.90 on a 92 mm chassis: the camera sat 1.03 m away,
+    the rack was cropped top and bottom, the unit below was sliced by the frame
+    edge and the diagram was forced to lie on the hero's own silhouette. The
+    addendum caps fill at 0.34–0.42 when a diagram sits beside the hero.
 
-/** Card centre in world space. Sits just proud of the rack's front posts, and
- *  directly above the converter — not above the two units that sit above it. */
-const CARD_C = [0.045, 0.787, -2.980];
-const AZ = 0.22;
+    At fill 0.40 the lens is 2.318 m out and 1 m at the subject is 778 px, so
+    the whole rack (1.128 m) is 877 px tall and fits the frame with its floor
+    and its planar reflection showing. The rig is then TRUCKED 152 px so the
+    rack sits right of the safe box's centre, and BOOMED 80 px so the rack top
+    lands just inside it — which leaves 348 px of clear backdrop camera-left
+    for the plate. Card and hero share no pixels.                            */
+const AZ = 0.24, EL = 0.155, FOV = 31, FILL = 0.40;
+const HERO_R = 0.216;                                    // the framed radius
+const HERO_C = [LAYOUT.rack.x, LAYOUT.bayCentre(LAYOUT.bay.dac, H_TOT), LAYOUT.rack.z + D_C / 2];
 
-/*  Composition, measured off the render rather than guessed. At 1600 × 1000
-    the converter's bounding box lands x 208…1060, y 530…925 — 852 × 395 px,
-    47 % of the safe box's height — and the card sits above it at x 240…1030,
-    y 105…549. Nothing crosses x 160 or x 1120, nothing reaches the masthead.
+const TAN_H = Math.tan((FOV * Math.PI) / 360);
+const D_CAM = HERO_R / (FILL * SAFE.hFrac * TAN_H);      // 2.318 m
+const PX_PER_M = 500 / (D_CAM * TAN_H);                  // 777.7 px per metre
 
-    NOTE on the audit's "chassis at least a third of the safe-box height": the
-    FASCIA alone cannot be. A 555 × 92 mm box seen three-quarter on is 3.6 : 1;
-    made 280 px tall its front face is 1010 px wide and breaks the x limit.
-    Width binds first, so this takes the widest chassis the safe box carries
-    (780 px of fascia) and puts nothing in the frame to compete with it.      */
-const SHOT = frameShot([0.060, 0.692, -3.030], 0.216,
-  { fill: 0.90, az: AZ, el: 0.16, fov: 31 });
+const CAM_F = new THREE.Vector3(
+  -Math.sin(AZ) * Math.cos(EL), -Math.sin(EL), -Math.cos(AZ) * Math.cos(EL));
+const CAM_R = new THREE.Vector3(Math.cos(AZ), 0, -Math.sin(AZ));   // screen-right
+const CAM_U = CAM_R.clone().cross(CAM_F);                          // screen-up
 
-/** A soft, broad reflection band — the image of the front strip in the card's
- *  cover glass. Low amplitude on purpose: it must read as a mid-grey ramp. */
-function sheenTexture() {
-  const s = 256;
-  const c = document.createElement('canvas');
-  c.width = c.height = s;
-  const x = c.getContext('2d');
-  x.clearRect(0, 0, s, s);
-  x.translate(s / 2, s / 2);
-  x.rotate(-0.30);
-  const g = x.createLinearGradient(0, -s * 0.80, 0, s * 0.80);
-  g.addColorStop(0.00, 'rgba(255,255,255,0)');
-  g.addColorStop(0.22, 'rgba(255,255,255,0.06)');
-  g.addColorStop(0.42, 'rgba(255,255,255,0.26)');
-  g.addColorStop(0.52, 'rgba(255,255,255,0.34)');
-  g.addColorStop(0.68, 'rgba(255,255,255,0.14)');
-  g.addColorStop(0.86, 'rgba(255,255,255,0.02)');
-  g.addColorStop(1.00, 'rgba(255,255,255,0)');
-  x.fillStyle = g;
-  x.fillRect(-s, -s, s * 2, s * 2);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+const TRUCK_PX = -152;    // −ve slides the subject RIGHT in frame
+const BOOM_PX = 80;       // +ve slides the subject DOWN in frame
+
+const _base = frameShot(HERO_C, HERO_R, { fill: FILL, az: AZ, el: EL, fov: FOV });
+const _off = CAM_R.clone().multiplyScalar(TRUCK_PX / PX_PER_M)
+  .addScaledVector(CAM_U, BOOM_PX / PX_PER_M);
+const SHOT = {
+  position: [_base.position[0] + _off.x, _base.position[1] + _off.y, _base.position[2] + _off.z],
+  target: [_base.target[0] + _off.x, _base.target[1] + _off.y, _base.target[2] + _off.z],
+  fov: FOV,
+};
+
+/**
+ * The optical axis is NOT at x = 800, and it is not at 640 either. The Director
+ * shifts the principal point to the centre of the clear band, which at 1600 px
+ * is (railW + (w − panelW)) / 2 = (200 + 1140) / 2 = 670. Composing off 640 put
+ * this card 30 px left of where the arithmetic said it was — most of the margin
+ * the safe box has on that side.
+ */
+const AXIS_PX = 670;
+
+/** World point on the ray through screen pixel (px,py) at AXIAL depth `dist`. */
+function rayPoint(px, py, dist) {
+  const r = CAM_F.clone()
+    .addScaledVector(CAM_R, ((px - AXIS_PX) / 800) * TAN_H * 1.6)
+    .addScaledVector(CAM_U, (-(py - 500) / 500) * TAN_H);
+  return new THREE.Vector3(...SHOT.position).addScaledVector(r, dist);
 }
+/** Metres per screen pixel at an axial depth. */
+const mpp = (dist) => (dist * TAN_H) / 500;
 
-/** Vertical shaded band between two data x values. */
-function xBand(graph, x0, x1, color, opacity) {
-  const a = graph.x(x0), b = graph.x(x1);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(b - a, graph.o.h),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false }));
-  m.position.set((a + b) / 2, graph.o.h / 2, -0.0004);
-  m.renderOrder = 6;
-  graph.add(m);
-  return m;
-}
+// ---------------------------------------------------------------------------
+// 6. Overlay — ONE card, ONE plot region
+// ---------------------------------------------------------------------------
+// 330 × 196 px centred at (352, 388): x 187…517, y 290…486. Measured off the
+// render: the chapter rail ends at 160 and the rack's left post starts at 564,
+// so the plate has 27 px of margin on one side and 47 px on the other, and its
+// lower edge clears the top of the left monoblock (y ≈ 512).
+const CARD_D = 1.86;                       // metres from the lens — it floats
+const CARD_PX = { w: 330, h: 196, cx: 352, cy: 388 };
+const MPX = mpp(CARD_D);                   // 1.0316 mm per pixel out there
+const CARD = { w: CARD_PX.w * MPX, h: CARD_PX.h * MPX };
+const CARD_C = rayPoint(CARD_PX.cx, CARD_PX.cy, CARD_D);
+/** Square to the lens is always a decal: yaw the plate 0.13 rad off the ray. */
+const CARD_YAW = Math.atan2(SHOT.position[0] - CARD_C.x, SHOT.position[2] - CARD_C.z) - 0.13;
+
+// plot box inside the plate, in pixels — the left margin holds the y numerals
+const PAD = { l: 50, r: 14, t: 20, b: 30 };
+const G1 = {
+  x: PAD.l * MPX,
+  y: PAD.b * MPX,
+  w: (CARD_PX.w - PAD.l - PAD.r) * MPX,
+  h: (CARD_PX.h - PAD.t - PAD.b) * MPX,
+};
 
 // ---------------------------------------------------------------------------
 
@@ -636,7 +706,7 @@ export default {
   title: 'Digital to Analogue',
   nav: 'DAC',
   kicker: 'DAC',
-  standfirst: 'One band-limited curve fits those samples. Nothing else does.',
+  standfirst: 'Exactly one band-limited curve passes through those samples.',
   shot: SHOT,
   timeScale: TIME_SCALE,
   alwaysUpdate: false,
@@ -645,54 +715,44 @@ export default {
     runModulator();
     analyseStream();
 
+    const M = mats();
     const hardware = buildHardware();
 
     const overlay = new THREE.Group();
-    overlay.position.set(...CARD_C);
-    overlay.rotation.y = AZ;
+    overlay.position.copy(CARD_C);
+    overlay.rotation.y = CARD_YAW;
     const root = new THREE.Group();
     root.position.set(-CARD.w / 2, -CARD.h / 2, 0);
     overlay.add(root);
 
     const S = this._s = { t: 0, n: -1, state: { n: 0, v: 0, err: 0 } };
 
-    /* THE PLATE. Opaque, depth-writing, and a dielectric with a clearcoat
-       rather than a flat unlit fill — so the rack behind it cannot print
-       through (the round-1 and round-2 blocker) and so the card itself carries
-       a specular ramp instead of being one dead value. */
-    const pad = CARD_PAD;
-    /* A FLAT plate reflects a 2.6 m softbox as a flat patch and the whole card
-       goes mid-grey; a gently convex one (R ≈ 1.2 m) compresses the same source
-       into a band with a rolloff either side. Base specular is turned right
-       down and the clearcoat is left tight, so the plate reads near-black with
-       one graded highlight sweeping it — not one dead value. */
-    const plateMat = new THREE.MeshPhysicalMaterial({
-      color: 0x04070c, metalness: 0.0, roughness: 0.90,
-      specularIntensity: 0.13,
-      clearcoat: 1.0, clearcoatRoughness: 0.20,
-      opacity: 1, depthWrite: true,
-    });
-    const plate = new THREE.Mesh(
-      lensGeometry(CARD.w + pad * 2, CARD.h + pad * 2, 0.007, 26, 14), plateMat);
-    plate.position.set(CARD.w / 2, CARD.h / 2, -0.012);
-    plate.renderOrder = 2;
-    root.add(plate);
-
-    const edge = new DIAG.Trace(5, 0x4c5663, 1.2, { opacity: 0.85, renderOrder: 3 });
-    edge.write((i) => [[-pad, -pad], [CARD.w + pad, -pad], [CARD.w + pad, CARD.h + pad],
-      [-pad, CARD.h + pad], [-pad, -pad]][i].concat(-0.0032));
-    root.add(edge);
+    /* THE PLATE, as an object rather than a pasted PNG: a machined slab with
+       real thickness and a bevelled fillet, opaque and depth-writing so the
+       rack behind cannot print through, and a separate convex cover glass in
+       front of the traces so the plate carries a specular ramp of its own. */
+    const slabMat = M.anodBlack.clone();
+    slabMat.color.setHex(0x02040a);
+    slabMat.metalness = 0.0;
+    slabMat.roughness = 0.64;
+    slabMat.envMapIntensity = 0.30;
+    const slab = new THREE.Mesh(GEO.bevelBox(CARD.w, CARD.h, 0.013, 0.0026, 4), slabMat);
+    slab.position.set(CARD.w / 2, CARD.h / 2, -0.0085);
+    slab.castShadow = slab.receiveShadow = true;
+    root.add(slab);
+    /* No drawn border. A hairline rule a few pixels inside the slab's own
+       silhouette doubles the edge and is most of what makes a card read as a
+       pasted PNG; the bevelled fillet catching the front strip is the border. */
 
     // sample dots for the reconstruction plot
-    // 0xeef0f4 sits above the 0.92 bloom threshold and every dot grew a halo.
-    const dots = new DIAG.Swarm(N_WIN + 1, { color: 0xdadfe6, size: 0.0021, additive: false });
+    const dots = new DIAG.Swarm(N_WIN + 1, { color: 0xccd3dc, size: 0.0023, additive: false });
     root.add(dots);
     S.dots = dots;
 
-    // ===== 1 · reconstruction, and the hold it replaces =====================
+    // ===== the samples, the hold, and the one curve that fits ==============
     {
       const g = new DIAG.Graph({
-        w: G1.w, h: G1.h, xRange: [0, N_WIN], yRange: [-1.16, 1.16],
+        w: G1.w, h: G1.h, xRange: [0, N_WIN], yRange: [-1.18, 1.18],
         xTicks: [0, 2, 4, 6, 8, 10, 12, 14, 16], yTicks: [-1, -0.5, 0, 0.5, 1],
         zeroLine: 0,
       });
@@ -702,7 +762,7 @@ export default {
 
       // the zero-order hold the output stage physically emits — AMBER, because
       // it is an intermediate, not a myth. Red is reserved for the myth callout.
-      const stair = new DIAG.Trace(2 * (N_WIN + 1) + 1, PAL.am, 1.7, { opacity: 0.80, renderOrder: 10 });
+      const stair = new DIAG.Trace(2 * (N_WIN + 1) + 1, PAL.am, 1.8, { opacity: 0.82, renderOrder: 10 });
       stair.write((i) => {
         const n = Math.min(N_WIN, Math.floor(i / 2));
         const x = Math.min(N_WIN, (i + 1) >> 1);
@@ -713,7 +773,7 @@ export default {
       // every kernel, all the time: a still frame must show the finished sum
       for (let n = 0; n <= N_WIN; n++) {
         const a = smp(n);
-        const t = new DIAG.Trace(150, PAL.cyDim, 1.0, { opacity: 0.55, renderOrder: 9 });
+        const t = new DIAG.Trace(150, PAL.cyDim, 1.0, { opacity: 0.60, renderOrder: 9 });
         t.write((i, u) => {
           const x = u * N_WIN;
           return [g.x(x), g.y(a * DSP.sinc(x - n)), 0.0004];
@@ -721,7 +781,7 @@ export default {
         g.add(t);
       }
 
-      const sum = new DIAG.Trace(480, PAL.cy, 2.8, { renderOrder: 13 });
+      const sum = new DIAG.Trace(520, PAL.cy, 3.0, { renderOrder: 13 });
       sum.write((i, u) => [g.x(u * N_WIN), g.y(reconstruct(u * N_WIN)), 0.0010]);
       g.add(sum);
 
@@ -733,51 +793,48 @@ export default {
       // the hold error at the middle of the interval, where it is largest
       S.errBar = new DIAG.Trace(2, PAL.am, 3.6, { renderOrder: 15 });
       g.add(S.errBar);
-      S.holdDot = g.addDot(PAL.am, 0.0026);
-      S.curDot = g.addDot(PAL.cy, 0.0026);
+      S.holdDot = g.addDot(PAL.am, 0.0030);
+      S.curDot = g.addDot(PAL.cy, 0.0030);
 
       g.tickLabels(ctx.labels, {
-        xVals: [0, 16], yVals: [-1, 0, 1],
+        xVals: [0, 4, 8, 12, 16], yVals: [-1, 0, 1],
         xFmt: (v) => String(v),
         yFmt: (v) => (v === 0 ? '0' : (v > 0 ? '+' : '−') + VFS.toFixed(2)),
-        xOffset: [0, 12], yOffset: [-20, 0],
+        xOffset: [0, 13], yOffset: [-21, 0],
       });
     }
 
-    // ===== 2 · shaped noise, measured =======================================
-    {
-      const g = new DIAG.Graph({
-        w: G2.w, h: G2.h, xLog: true, xRange: [3000, FS_MOD / 2], yRange: [-160, 0],
-        yTicks: [-160, -120, -80, -40, 0],
-      });
-      g.position.set(G2.x, G2.y, 0);
-      root.add(g);
-      S.g2 = g;
-      xBand(g, 3000, 20000, PAL.cy, 0.038);
-      g.addTrace((f) => SPEC.floorAt(f), { color: PAL.am, width: 1.5, n: 480, opacity: 0.92 });
-      g.addTrace((f) => SPEC.floorAt(f) + recFiltDb(f), { color: PAL.cy, width: 2.0, n: 480 });
-      g.addTrace(recFiltDb, { color: PAL.gr, width: 1.4, n: 300, dashed: true, opacity: 0.85 });
-      g.addMarker(NYQ, { color: PAL.ink, width: 1.0, opacity: 0.40 });
+    /* THE COVER GLASS over the whole plate. Slightly convex (sagitta 3.2 mm
+       across 0.21 m, R ≈ 1.7 m) with a low but non-zero roughness, so the
+       widened front strip sweeps it as a soft band with a readable boundary
+       instead of the radial fog round 2 shipped. Alpha is low enough that the
+       traces underneath lose nothing. */
+    const glassMat = M.clearGlass.clone();
+    glassMat.transmission = 0;
+    glassMat.color.setHex(0x05080d);
+    glassMat.opacity = 0.11;
+    glassMat.roughness = 0.105;
+    glassMat.clearcoat = 1.0;
+    glassMat.clearcoatRoughness = 0.075;
+    glassMat.envMapIntensity = 2.1;
+    glassMat.depthWrite = false;
+    const glass = new THREE.Mesh(
+      lensGeometry(CARD.w - 0.005, CARD.h - 0.005, 0.0040, 34, 20), glassMat);
+    glass.position.set(CARD.w / 2, CARD.h / 2, 0.0052);
+    glass.renderOrder = 30;
+    root.add(glass);
 
-      g.tickLabels(ctx.labels, {
-        xVals: [20000, 1000000], yVals: [0, -80, -160],
-        xFmt: (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + ' MHz' : (v / 1000).toFixed(0) + ' kHz'),
-        yFmt: (v) => (v === 0 ? '0' : String(v)),
-        xOffset: [0, 12], yOffset: [-20, 0],
-      });
-    }
-
-    /* Cover glass over the whole card: the image of the widened front strip,
-       swept across as a graded band. Additive and low, so it lifts the plate
-       into a mid-grey ramp without touching the legibility of the traces. */
+    // and the reflected strip itself: a band with a leading edge, laid across
+    // the upper-left where the beauty box actually sits, at a peak alpha well
+    // under half of round 2's radial fog
     const sheen = new THREE.Mesh(
-      new THREE.PlaneGeometry(CARD.w + pad * 2, CARD.h + pad * 2),
+      new THREE.PlaneGeometry(CARD.w - 0.005, CARD.h - 0.005),
       new THREE.MeshBasicMaterial({
-        map: sheenTexture(), color: 0x8ea6bc, transparent: true, opacity: 0.05,
+        map: sheenTexture(-0.21), color: 0x8ea6bc, transparent: true, opacity: 0.055,
         blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
       }));
-    sheen.position.set(CARD.w / 2, CARD.h / 2, 0.0060);
-    sheen.renderOrder = 30;
+    sheen.position.set(CARD.w / 2, CARD.h / 2, 0.0058);
+    sheen.renderOrder = 31;
     root.add(sheen);
 
     // ---- labels -------------------------------------------------------------
@@ -789,24 +846,23 @@ export default {
       return o;
     };
 
-    S.lab1 = L.add(anchor(G1.x + G1.w * 0.5, G1.y + G1.h + 0.004), {
-      kicker: 'Reconstruction · sum of sincs · V',
-      text: 'amber · the hold it replaces',
-      value: '', cls: 'acc', offset: [0, -38], occlude: false, priority: 6,
-    });
-    L.add(anchor(G2.x + G2.w * 0.5, G2.y + G2.h + 0.004), {
-      kicker: 'Δ-Σ shaped noise, measured · dBFS',
-      value: `65 536-pt FFT · DR ${SPEC.drFs.toFixed(1)} · model ${SNR_MODEL.toFixed(1)}`,
-      cls: 'acc', offset: [0, -30], occlude: false, priority: 6,
+    /* Kickers wrap past ~27 characters and label bodies past ~29; a wrapped
+       kicker orphaned "· dBFS" onto its own line in the round-2 frame. Both
+       lines below are inside those limits, so each label is one kicker, one
+       body line and one value — a hierarchy, not a code comment. */
+    S.lab1 = L.add(anchor(CARD.w / 2, CARD.h), {
+      kicker: 'RECONSTRUCTION · V',
+      text: 'cyan: Σ sincs · amber: hold',
+      value: '', cls: 'acc', offset: [0, -34], occlude: false, priority: 6,
     });
 
     const hwAnchor = new THREE.Object3D();
-    hwAnchor.position.set(-0.10, H_BODY / 2, D_C / 2);
+    hwAnchor.position.set(-0.06, H_BODY / 2 + 0.004, D_C / 2);
     hardware.add(hwAnchor);
     L.add(hwAnchor, {
-      kicker: 'Digital to analogue · rack bay 2',
-      value: `${WORD} bit · ${(FS / 1000).toFixed(1)} kHz · ${VFS_RMS.toFixed(3)} V rms out`,
-      cls: 'acc', offset: [0, -30], occlude: false, priority: 7,
+      kicker: 'CONVERTER · RACK BAY 2',
+      value: `${WORD} bit · ${(FS / 1000).toFixed(1)} kHz · ${VFS_RMS.toFixed(3)} V rms`,
+      cls: 'acc', offset: [0, -38], occlude: false, priority: 7,
     });
 
     this._latch(true);
@@ -820,8 +876,8 @@ export default {
    * footer, because readouts refresh at 10 Hz while labels are written every
    * frame. Here the ONLY moving quantity is the sample index, it is derived
    * from the simulated clock at the true sample rate, and it is advanced from
-   * readouts() — so the cursor, the two label values and the six footer cells
-   * are always the same instant, whatever moment a screenshot catches.
+   * readouts() — so the cursor, the label value and the six footer cells are
+   * always the same instant, whatever moment a screenshot catches.
    */
   _latch(force) {
     const S = this._s;
@@ -841,7 +897,7 @@ export default {
     S.curDot.userData.setData(xm, yRec);
     S.holdDot.userData.setData(xm, yHold);
     const sv = (x, d) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(d);
-    S.lab1.setValue(`n+\u00bd = ${n}.5 · y = ${sv(S.state.v, 3)} V · hold error ${sv(S.state.err, 0)} mV`);
+    S.lab1.setValue(`y = ${sv(S.state.v, 3)} V · hold error ${sv(S.state.err, 0)} mV`);
     return S.state;
   },
 
@@ -866,33 +922,42 @@ export default {
     }));
   },
 
+  /**
+   * 160 words. The round-2 panel ran to the bottom of the frame and the whole
+   * arithmetic section was cut off below the readout footer, so the reader lost
+   * every number the chapter derives. Front-loaded and cut to fit at 1600×1000
+   * with no scroll: callout, equation, idea, then the ladder.
+   */
   content() {
     const dr = SPEC.drFs ? SPEC.drFs.toFixed(1) : '—';
-    const gap = SPEC.drFs ? (SNR_MODEL - SPEC.drFs).toFixed(1) : '—';
     return `
 <h3>The unique curve</h3>
-<p>A converter is handed <span class="num">44 100</span> numbers a second and has to make a voltage. The sampling theorem does not say those numbers are enough points to draw the wave. It says that <em>if</em> the recording held nothing at or above <span class="num">${(NYQ).toLocaleString('en-GB').replace(',', ' ')}</span> Hz, exactly one band-limited function passes through them.</p>
-<div class="myth"><span class="lab">Commonly got wrong</span><p>The staircase, drawn here in amber. The output stage does hold each value until the next update — but the hold belongs to that stage, not to the signal. Interpolating <span class="num">×${OSR_DIG}</span> first moves the hold to <span class="num">${(FS_OS / 1000).toFixed(1)}</span> kHz, where its aperture costs <span class="num">${ZOH_20K_OS.toFixed(3)}</span> dB at 20 kHz instead of <span class="num">${ZOH_20K.toFixed(2)}</span> dB — the un-oversampled hold costs <span class="num">${ZOH_NYQ.toFixed(2)}</span> dB at f<sub>s</sub>/2 and puts a null at f<sub>s</sub>. The analogue filter removes what is left.</p></div>
+<p>A converter is handed <span class="num">${grp(FS)}</span> numbers a second and has to make a voltage. The theorem: <em>if</em> nothing was recorded at or above <span class="num">${grp(NYQ)}</span> Hz, exactly one band-limited function passes through them.</p>
+<div class="myth"><span class="lab">Commonly got wrong</span><p>The staircase, in amber. The hold is real, but it belongs to the output stage, not to the signal. Interpolating <span class="num">×${OSR_DIG}</span> moves it to <span class="num">${(FS_OS / 1000).toFixed(1)}</span> kHz, where the aperture costs <span class="num">${ZOH_20K_OS.toFixed(3)}</span> dB instead of <span class="num">${ZOH_20K.toFixed(2)}</span>.</p></div>
 <div class="eq">y(t) = Σₙ x[n] · sinc(t/T − n)
-<span class="c">T = 1/44 100 = 22.676 µs</span></div>
-<div class="key"><span class="lab">The idea</span><p>Two points per cycle is enough. A 20 kHz tone gets <span class="num">${SAMPLES_PER_CYCLE.toFixed(3)}</span> of them, looks like nothing on a plot, and reconstructs exactly.</p></div>
-<h3>Arithmetic</h3>
+<span class="c">T = 1/${grp(FS)} = ${(T_S * 1e6).toFixed(3)} µs</span></div>
+<div class="key"><span class="lab">The idea</span><p>Just over two points per cycle is enough. A 20 kHz tone gets <span class="num">${SAMPLES_PER_CYCLE.toFixed(3)}</span> of them and reconstructs exactly.</p></div>
 <ul>
-<li>Full scale is <span class="num">${VFS_RMS.toFixed(3)}</span> V rms, <span class="num">${VFS.toFixed(3)}</span> V peak, so the ${WORD}-bit LSB is <span class="num">${(LSB24 * 1e9).toFixed(1)} nV</span>. One 1 kΩ resistor makes <span class="num">${(V_JOHNSON * 1e9).toFixed(0)} nV</span> of noise of its own in 20 kHz, so the bottom bit sits <span class="num">${Math.abs(LSB_VS_KTB).toFixed(1)}</span> dB below it. At ${WORD_CD} bits the step is <span class="num">${(LSB16 * 1e6).toFixed(1)} µV</span>, 256 times larger.</li>
-<li>Ideal quantisation is <span class="num">6.02 × ${WORD_CD} + 1.76 = ${SNR16.toFixed(1)}</span> dB at ${WORD_CD} bits and <span class="num">${SNR24.toFixed(1)}</span> dB at ${WORD}.</li>
-<li>Shaping by |1−z⁻¹|² drops the one-bit noise density <span class="num">${Math.abs(NTF_20K).toFixed(1)}</span> dB at 20 kHz. A one-bit loop cannot take full scale, so this one runs <span class="num">${HEADROOM_DB.toFixed(2)}</span> dB down; referring its measured in-band noise back to full scale gives <span class="num">${dr}</span> dB against a model of <span class="num">${SNR_MODEL.toFixed(1)}</span>. The <span class="num">${gap}</span> dB shortfall is that model's white-error assumption failing: a one-bit quantiser makes idle tones, not noise.</li>
+<li>Full scale <span class="num">${VFS_RMS.toFixed(3)}</span> V rms → a ${WORD}-bit LSB of <span class="num">${(LSB24 * 1e9).toFixed(1)}</span> nV, <span class="num">${Math.abs(LSB_VS_KTB).toFixed(1)}</span> dB under one 1 kΩ resistor's <span class="num">${(V_JOHNSON * 1e9).toFixed(0)}</span> nV in 20 kHz.</li>
+<li>6.02N + 1.76 = <span class="num">${SNR16.toFixed(1)}</span> dB at ${WORD_CD} bits. Shaping drops the one-bit floor <span class="num">${Math.abs(NTF_20K).toFixed(1)}</span> dB: DR <span class="num">${dr}</span>, model <span class="num">${SNR_MODEL.toFixed(1)}</span> dBFS.</li>
 </ul>`;
   },
 
+  /**
+   * `.ro .k` is still `text-transform:uppercase` in the stylesheet, so a unit
+   * written into a readout KEY is destroyed exactly as it was in the round-2
+   * label kickers: "kHz" printed "KHZ". Units therefore live in `u`, which
+   * carries no transform, and the keys below are words only.
+   */
   readouts() {
     const st = this._latch(false);
     return [
-      { k: 'FS', v: (FS / 1000).toFixed(2), u: 'kHz', cls: 'acc' },
-      { k: 'CURSOR n+\u00bd', v: `${st.n}.5`, u: `of ${N_WIN}` },
-      { k: 'y(t)', v: (st.v >= 0 ? '+' : '−') + Math.abs(st.v).toFixed(3), u: 'V', cls: 'acc' },
-      { k: 'HOLD ERR', v: (st.err >= 0 ? '+' : '−') + Math.abs(st.err).toFixed(0), u: 'mV', cls: 'am' },
-      { k: 'IN-BAND DR', v: SPEC.drFs.toFixed(1), u: 'dBFS' },
-      { k: 'ZOH \u00d78 20 kHz', v: ZOH_20K_OS.toFixed(3).replace('-', '\u2212'), u: 'dB', cls: 'am' },
+      { k: 'Sample rate', v: (FS / 1000).toFixed(2), u: 'kHz', cls: 'acc' },
+      { k: 'Cursor index', v: `${st.n}.5`, u: `of ${N_WIN}` },
+      { k: 'Output', v: (st.v >= 0 ? '+' : '−') + Math.abs(st.v).toFixed(3), u: 'V', cls: 'acc' },
+      { k: 'Hold error', v: (st.err >= 0 ? '+' : '−') + Math.abs(st.err).toFixed(0), u: 'mV', cls: 'am' },
+      { k: 'In-band DR', v: SPEC.drFs.toFixed(1), u: 'dBFS' },
+      { k: 'Aperture ×8', v: ZOH_20K_OS.toFixed(3).replace('-', '−'), u: 'dB at 20 kHz', cls: 'am' },
     ];
   },
 };
