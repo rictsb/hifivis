@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LAYOUT } from '../core/layout.js';
+import { LAYOUT, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
@@ -8,9 +8,10 @@ import * as DSP from '../core/dsp.js';
 /* ===========================================================================
    BASS & THE ROOM
    ---------------------------------------------------------------------------
-   Every number is derived here, at module scope, from LAYOUT and DSP.
-   content() and readouts() read the same constants the geometry does, so the
-   prose cannot drift from the picture.
+   One hero — the right subwoofer, three-quarter — and one diagram: the room
+   drawn in plan with the pressure field at the demonstration tone painted on
+   it. Everything else that used to be in this scene (a floor-wide wash, three
+   dimension bars, two graph cards) is now prose.
 
    Room model — rigid-walled rectangular modal expansion:
      p(r,ω) = jωρ₀c²Q · Σₙ Ψₙ(rs)·Ψₙ(r) / [Kₙ·(ωₙ² − ω² − 2jδω)]
@@ -18,6 +19,10 @@ import * as DSP from '../core/dsp.js';
      δ  = 3·ln10/RT60   (amplitude decay giving 60 dB in RT60)
    The (0,0,0) term is kept: it is the uniform pressurisation that dominates
    below the first axial resonance.
+
+   Every number shown is derived here, at module scope, from LAYOUT and DSP,
+   and the drive level that sets the excursion and the seat SPL is stated in
+   content(), in the hero label and in the readouts.
    =========================================================================== */
 
 const C = DSP.C_SOUND_20C;                 // 343.2 m/s, dry air at 20 °C
@@ -31,25 +36,20 @@ const ABAR = 0.25;                          // stated mean absorption coefficien
 const RT60 = DSP.rt60Sabine(V_ROOM, ABAR * S_ROOM);
 const F_SCH = DSP.schroeder(RT60, V_ROOM);
 const DELTA = 3 * Math.LN10 / RT60;
-const DIAGFLOOR = Math.hypot(RM.W, RM.D);
-const DIAG3D = Math.hypot(RM.W, RM.D, RM.H);
+const DIAG3D = Math.hypot(RM.W, RM.D, RM.H);   // 12.06 m — the longest straight line
 
 const rx = (x) => x + RM.W / 2;             // room-local coords, corner origin
 const rz = (z) => z - RM.z0;
 
 const axial = (p, q, r) => DSP.roomMode(p, q, r, RM.W, RM.D, RM.H);
-const F_D1 = axial(0, 1, 0);
-const F_W1 = axial(1, 0, 0);
 const F_T11 = axial(1, 1, 0);   // 30.02 Hz — the first tangential mode, and the
                                 // demonstration tone: 30 Hz lands on it to 0.07 %
-const AXIALS = [F_D1, F_W1, axial(0, 2, 0), axial(2, 0, 0),
-  axial(0, 0, 1), axial(0, 3, 0), axial(3, 0, 0), axial(0, 4, 0)];
-const Z_NODE = RM.z0 + RM.D / 2;            // depth node of every odd-q mode
+const AXIALS = [axial(0, 1, 0), axial(1, 0, 0), axial(0, 2, 0), axial(2, 0, 0)];
 
 // ---- the subwoofer ----------------------------------------------------------
 const CAB = 0.50;                           // external cube edge
 const WALL = 0.030;
-const PED_H = 0.245;                        // machined pedestal (see report)
+const PED_H = 0.245;                        // machined pedestal
 const M_PANEL = (CAB ** 3 - (CAB - 2 * WALL) ** 3) * 750;   // 30 mm MDF @ 750 kg/m³
 const M_TOTAL = M_PANEL + 12 + 8 + 6 + 3;   // + driver, plate amp, bracing, trim
 const VB = (CAB - 2 * WALL) ** 3 - 0.008;   // net internal volume
@@ -61,6 +61,8 @@ const F3 = (() => {                         // −3 dB of the sealed alignment
   const b = 2 - 1 / (ALIGN.Qtc * ALIGN.Qtc);
   return ALIGN.fc * Math.sqrt((-b + Math.sqrt(b * b + 4)) / 2);
 })();
+/** The stated drive level. Everything downstream — excursion, volume velocity,
+ *  seat SPL — follows from it, so it is printed on screen, not buried here. */
 const SPL_REF = 100;                        // dB @ 1 m, half space, per sub
 
 // ---- acoustic centres -------------------------------------------------------
@@ -70,42 +72,8 @@ const subPt = (P) => new THREE.Vector3(
   P.x + Math.sin(P.ry) * DRV_FWD, DRV_Y, P.z + Math.cos(P.ry) * DRV_FWD);
 const SUB_R = subPt(LAYOUT.subR);
 const SUB_L = subPt(LAYOUT.subL);
-/** Main-speaker bass centre — a declared assumption, since the floorstander is
- *  another module's hardware: 0.40 m up the baffle, 0.17 m forward of its
- *  LAYOUT floor reference. */
-const MAIN_R = new THREE.Vector3(
-  LAYOUT.speakerR.x + Math.sin(LAYOUT.speakerR.ry) * 0.17, 0.40,
-  LAYOUT.speakerR.z + Math.cos(LAYOUT.speakerR.ry) * 0.17);
 const SEAT = new THREE.Vector3(LAYOUT.listener.x, LAYOUT.listener.y, LAYOUT.listener.z);
-
 const D_SUB = SUB_R.distanceTo(SEAT);
-const D_MAIN = MAIN_R.distanceTo(SEAT);
-const DELTA_D = D_SUB - D_MAIN;
-const DELTA_T = DELTA_D / C;
-const FC_X = 80;
-const PHASE_ERR = 360 * FC_X * DELTA_T;
-
-// ---- Linkwitz–Riley 4th order ----------------------------------------------
-// DSP.lrHigh() returns the complex CONJUGATE of the true high-pass: magnitude
-// right, phase sign-inverted, so DSP.lrSumDb() reads −1.08 dB an octave either
-// side of fc instead of 0.000 dB. Reported; correct closed form used here.
-const b2lp = (f, fc) => DSP.cDiv([1, 0], [1 - (f / fc) ** 2, Math.SQRT2 * (f / fc)]);
-const b2hp = (f, fc) => DSP.cDiv([-((f / fc) ** 2), 0], [1 - (f / fc) ** 2, Math.SQRT2 * (f / fc)]);
-const LR4_LP = (f, fc) => DSP.cMul(b2lp(f, fc), b2lp(f, fc));
-const LR4_HP = (f, fc) => DSP.cMul(b2hp(f, fc), b2hp(f, fc));
-const rot = (z, ph) => [z[0] * Math.cos(ph) - z[1] * Math.sin(ph), z[0] * Math.sin(ph) + z[1] * Math.cos(ph)];
-/** level-matched acoustic sum at the seat, sub late by tau relative to the main */
-const sumDb = (f, tau) =>
-  DSP.dB(DSP.cAbs(DSP.cAdd(LR4_HP(f, FC_X), rot(LR4_LP(f, FC_X), -TAU * f * tau))));
-
-const WRAP_EXTRA = (1 - PHASE_ERR / 360) / FC_X;    // phase knob wound to 360°
-function worstOf(tau) {
-  let db = 99, f0 = 0;
-  for (let f = 25; f <= 400; f += 0.25) { const v = sumDb(f, tau); if (v < db) { db = v; f0 = f; } }
-  return { db, f: f0 };
-}
-const WORST_INSTALLED = worstOf(DELTA_T);
-const WORST_WRAPPED = worstOf(DELTA_T + WRAP_EXTRA);
 
 // ---- modal room model -------------------------------------------------------
 const FMAX_TF = 400;
@@ -156,13 +124,13 @@ function freeField(f, srcs, rcv) {
   return [re, im];
 }
 
-// ---- precomputed seat-response envelopes ------------------------------------
+// ---- seat-to-seat spread, 20–80 Hz ------------------------------------------
 const FG = DSP.logSpace(15, 200, 220);
-const SOFA = [-0.85, -0.425, 0, 0.425, 0.85].map((x) => new THREE.Vector3(x, SEAT.y, SEAT.z));
-/** 1/6-octave smoothing — the resolution a measurement is normally read at */
-const SMOOTH = 6;
+const SOFA_X = [-0.85, -0.425, 0, 0.425, 0.85];
+const SOFA = SOFA_X.map((x) => new THREE.Vector3(x, SEAT.y, SEAT.z));
+const SMOOTH_N = 6;                         // 1/6-octave, how a measurement is read
 function smooth(arr) {
-  const k = Math.pow(2, 1 / (2 * SMOOTH));
+  const k = Math.pow(2, 1 / (2 * SMOOTH_N));
   return FG.map((f, i) => {
     let s = 0, n = 0;
     for (let j = 0; j < FG.length; j++) {
@@ -174,58 +142,141 @@ function smooth(arr) {
 function envelope(srcs) {
   const per = SOFA.map((s) => smooth(FG.map((f) =>
     DSP.dB(DSP.cAbs(green(f, srcs, s))) - DSP.dB(DSP.cAbs(freeField(f, srcs, s))))));
-  const up = FG.map((_, i) => Math.max(...per.map((a) => a[i])));
-  const lo = FG.map((_, i) => Math.min(...per.map((a) => a[i])));
   const band = FG.map((f, i) => i).filter((i) => FG[i] >= 20 && FG[i] <= 80);
-  const spread = band.reduce((a, i) => a + up[i] - lo[i], 0) / band.length;
+  const spread = band.reduce(
+    (a, i) => a + Math.max(...per.map((p) => p[i])) - Math.min(...per.map((p) => p[i])), 0
+  ) / band.length;
   const mid = band.map((i) => per[2][i]);
-  return { up, lo, spread, pp: Math.max(...mid) - Math.min(...mid) };
+  return { spread, pp: Math.max(...mid) - Math.min(...mid) };
 }
 const ENV1 = envelope([SUB_R]);                 // one sub
 const ENV2 = envelope([SUB_R, SUB_L]);          // the pair
-function atF(arr, f) {
-  const a = Math.log10(FG[0]), b = Math.log10(FG[FG.length - 1]);
-  const x = DSP.clamp((Math.log10(f) - a) / (b - a), 0, 1) * (FG.length - 1);
-  const i = Math.min(FG.length - 2, Math.floor(x));
-  return arr[i] + (arr[i + 1] - arr[i]) * (x - i);
-}
 
 // ---- demonstration tone: the first tangential mode --------------------------
 const F_TONE = F_T11;
 const LAM_TONE = DSP.lambda(F_TONE, C);
-const X_PK = DSP.excursionForSpl(SPL_REF, F_TONE, SD, 1);
-const Q_PK = SD * TAU * F_TONE * X_PK;
+const X_PK = DSP.excursionForSpl(SPL_REF, F_TONE, SD, 1);   // 4.85 mm peak
+const Q_PK = SD * TAU * F_TONE * X_PK;                      // 78.2 L/s peak
 const psi110 = (P) => Math.cos(Math.PI * rx(P.x) / RM.W) * Math.cos(Math.PI * rz(P.z) / RM.D);
 const PSI_R = psi110(SUB_R);
 const PSI_L = psi110(SUB_L);
 const seatSpl = (s) => DSP.splFromPa(DSP.cAbs(green(F_TONE, s, SEAT)) * Q_PK / Math.SQRT2);
 const SPL_ONE = seatSpl([SUB_R]);
-const SPL_TWO = seatSpl([SUB_R, SUB_L]);
+const SPL_TWO = seatSpl([SUB_R, SUB_L]);        // exactly SPL_ONE + 6.021 dB
 const LAM30 = DSP.lambda(30, C);
 const LAM2K = DSP.lambda(2000, C);
+const SUB_OFF = Math.abs(SUB_R.x);              // 2.84 m off the centre line
 
-// ---- visual helpers ---------------------------------------------------------
-/** Phase origin of the animation. Arbitrary — it only sets which instant of the
- *  standing wave a still frame catches. */
-const PH0 = -3.148;
-const SHOT = { position: [0.45, 3.55, 6.60], target: [1.55, 0.26, -1.80], fov: 44 };
-const CAMV = new THREE.Vector3(...SHOT.position);
+/**
+ * The floor field, decomposed by (p,q).
+ *
+ * At y = 0 every vertical index contributes cos(0) = 1, so the shape of the
+ * field on the floor depends only on (p,q); modes sharing a floor pattern can
+ * be summed once. The pair is not a separate field: the left sub's modal
+ * coupling is (−1)^p times the right one's, so a second sub at level `mix`
+ * scales every term by (1 + mix·(−1)^p) — exact, and it makes the odd-p terms
+ * vanish when the pair is level-matched.
+ */
+const NPAT = 18;
+const PAT = (() => {
+  const w = TAU * F_TONE, w2 = w * w, dw = -2 * DELTA * w;
+  const kk = w * DSP.RHO_AIR * C * C;
+  const pat = new Map();
+  const d0 = w2 * w2 + dw * dw;
+  pat.set('0,0', { p: 0, q: 0, re: (-w2 / V_ROOM) / d0, im: (-dw / V_ROOM) / d0 });
+  for (const m of MODES) {
+    if (m.f > 200) continue;
+    const num = psi(m, SUB_R);
+    if (Math.abs(num) < 1e-14) continue;
+    const dr = m.w2 - w2, d = dr * dr + dw * dw;
+    const key = `${m.p},${m.q}`;
+    const e = pat.get(key) || { p: m.p, q: m.q, re: 0, im: 0 };
+    e.re += num * m.invK * dr / d; e.im += num * m.invK * (-dw) / d;
+    pat.set(key, e);
+  }
+  const list = [...pat.values()].map((e) => ({ p: e.p, q: e.q, re: -kk * e.im, im: kk * e.re }));
+  list.sort((a, b) => Math.hypot(b.re, b.im) - Math.hypot(a.re, a.im));
+  return list.slice(0, NPAT);
+})();
+/** peak of the single-sub field over the floor, used to normalise the map */
+const PAT_PEAK = (() => {
+  let pk = 1e-30;
+  for (let i = 0; i <= 148; i++) {
+    for (let j = 0; j <= 180; j++) {
+      const u = i / 148, v = j / 180;
+      let sr = 0, si = 0;
+      for (const e of PAT) {
+        const g = Math.cos(Math.PI * e.p * u) * Math.cos(Math.PI * e.q * v);
+        sr += e.re * g; si += e.im * g;
+      }
+      pk = Math.max(pk, Math.hypot(sr, si));
+    }
+  }
+  return pk;
+})();
+
+// ---- camera -----------------------------------------------------------------
+const FOV = 36, ASPECT = 1.6;
+const TANV = Math.tan((FOV * Math.PI) / 360), TANH = TANV * ASPECT;
+/** Bounding centre and radius of one subwoofer, pedestal included. */
+const HERO = new THREE.Vector3(LAYOUT.subR.x, (PED_H + CAB) / 2, LAYOUT.subR.z);
+const HERO_R = 0.54;
+const BASE = frameShot([HERO.x, HERO.y, HERO.z], HERO_R,
+  { fill: 0.46, az: 0.34, el: 0.235, fov: FOV });
+const CAMV = new THREE.Vector3(...BASE.position);
+const AXIS = new THREE.Vector3(), RIGHT = new THREE.Vector3(), UPC = new THREE.Vector3();
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+/**
+ * Aim so the hero lands on a chosen pixel of the 1600×1000 frame. The Director
+ * shifts the principal point to 0.40 of the width, i.e. to (640, 500), so the
+ * hero sits right of centre in the safe box and the diagram gets the left half.
+ * Solves h = (A + R·tx + U·ty)/|…| for the axis A by fixed-point iteration.
+ */
+const SHOT = (() => {
+  const HX = 902, HY = 606;
+  const h = HERO.clone().sub(CAMV);
+  const dist = h.length();
+  h.normalize();
+  const tx = ((HX - 640) / 800) * TANH, ty = ((500 - HY) / 500) * TANV;
+  const L = Math.sqrt(1 + tx * tx + ty * ty);
+  AXIS.copy(h);
+  for (let i = 0; i < 10; i++) {
+    RIGHT.copy(AXIS).cross(WORLD_UP).normalize();
+    UPC.copy(RIGHT).cross(AXIS).normalize();
+    AXIS.copy(h).multiplyScalar(L).addScaledVector(RIGHT, -tx).addScaledVector(UPC, -ty).normalize();
+  }
+  RIGHT.copy(AXIS).cross(WORLD_UP).normalize();
+  UPC.copy(RIGHT).cross(AXIS).normalize();
+  const t = CAMV.clone().addScaledVector(AXIS, dist);
+  return { position: BASE.position, target: [t.x, t.y, t.z], fov: FOV };
+})();
+/** World point that projects to pixel (px, py) at `dist` metres from the lens. */
+function place(px, py, dist) {
+  const nx = ((px - 640) / 800) * TANH, ny = ((500 - py) / 500) * TANV;
+  return CAMV.clone()
+    .addScaledVector(AXIS, dist)
+    .addScaledVector(RIGHT, dist * nx)
+    .addScaledVector(UPC, dist * ny);
+}
 function faceCam(g) {
   const d = CAMV.clone().sub(g.position);
   g.rotation.set(0, Math.atan2(d.x, d.z), 0);
-  g.rotateX(-Math.atan2(d.y, Math.hypot(d.x, d.z)) * 0.55);
+  g.rotateX(-Math.atan2(d.y, Math.hypot(d.x, d.z)) * 0.62);
   return g;
 }
-function panel(gr, w, h) {
-  const wrap = new THREE.Group();
-  const card = DIAG.diagramCard(w, h, { opacity: 0.74, pad: 0.045 });
-  card.position.set(-w / 2, -h / 2, -0.002);
-  gr.position.set(-w / 2, -h / 2, 0);
-  wrap.add(card, gr);
-  return wrap;
-}
+
+// ---- the plan card ----------------------------------------------------------
+const PLAN_W = 0.80;
+const PLAN_H = PLAN_W * RM.D / RM.W;        // 0.973 m — true room aspect
+const PLAN_PAD = 0.030;
+const CARD_AT = [402, 392, 3.42];           // px, px, metres from the lens
+/** room x,z → card-local metres (up on the card = toward the back wall) */
+const mx = (x) => (x / RM.W) * PLAN_W;
+const my = (z) => ((RM.z0 + RM.D / 2) - z) / RM.D * PLAN_H;
+
 const dash = (n, col, wdt, op) => new DIAG.Trace(n, col, wdt,
-  { dashed: true, dashSize: 0.055, gapSize: 0.042, opacity: op });
+  { dashed: true, dashSize: 0.030, gapSize: 0.024, opacity: op });
+
 function roundedRect(sh, w, h, r) {
   const x = -w / 2, y = -h / 2;
   sh.moveTo(x + r, y);
@@ -234,7 +285,7 @@ function roundedRect(sh, w, h, r) {
   sh.lineTo(x + r, y + h); sh.quadraticCurveTo(x, y + h, x, y + h - r);
   sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y);
 }
-let _coneMat = null, _surrMat = null;
+let _coneMat = null, _surrMat = null, _ringMat = null;
 /** Pulp cone, lifted just enough to read against a black cabinet. */
 function CONE_MAT() {
   if (!_coneMat) { _coneMat = mats().cone.clone(); _coneMat.color.setHex(0x24272c); }
@@ -245,7 +296,6 @@ function SURR_MAT() {
   if (!_surrMat) { _surrMat = mats().rubber.clone(); _surrMat.color.setHex(0x191b1f); }
   return _surrMat;
 }
-let _ringMat = null;
 /** Diamond-turned alloy: the one bright element on an otherwise black cabinet. */
 function RING_MAT() {
   if (!_ringMat) {
@@ -271,11 +321,6 @@ function ringLathe(rIn, rOut, t, b = 0.0012) {
   return g;
 }
 
-const RUL_Z = [-1.95, -1.58, -1.21];
-const Z_FIELD_NEAR = 4.30;   // the field is drawn over the floor in shot, not the whole room
-const ZF = -2.05;            // the cyclorama cove hides the floor behind z ≈ −2.15
-const Y0 = 0.006;
-
 // ===========================================================================
 export default {
   id: 'sub',
@@ -291,47 +336,12 @@ export default {
   build(ctx) {
     const hardware = new THREE.Group();
     const overlay = new THREE.Group();
-    const S = this._s = { cones: [], coup: [], knobs: [] };
+    const S = this._s = { drivers: [], knobs: [], mix: 0, tNow: 0 };
 
-    for (const P of [LAYOUT.subL, LAYOUT.subR]) hardware.add(this._sub(P, S));
+    hardware.add(this._sub(LAYOUT.subL, S, true));
+    hardware.add(this._sub(LAYOUT.subR, S, false));
 
-    // ---- floor: room plan -------------------------------------------------
-    const pts = [[-RM.W / 2, ZF], [RM.W / 2, ZF], [RM.W / 2, RM.z0 + RM.D],
-      [-RM.W / 2, RM.z0 + RM.D], [-RM.W / 2, ZF]];
-    const plan = new DIAG.Trace(5, 0x8b939d, 1.4, { opacity: 0.62 });
-    plan.write((i) => [pts[i][0], Y0, pts[i][1]]);
-    overlay.add(plan);
-
-    // ---- floor: modal pressure field --------------------------------------
-    this._field(overlay, S);
-
-    // ---- floor: nodes, antinodes, seat ------------------------------------
-    const nodeW = dash(2, PAL.gr, 2.0, 0.95);
-    nodeW.write((i) => [0, Y0 + 0.002, i === 0 ? ZF : RM.z0 + RM.D]);
-    overlay.add(nodeW);
-    const nodeD = dash(2, PAL.gr, 2.0, 0.95);
-    nodeD.write((i) => [i === 0 ? -RM.W / 2 : RM.W / 2, Y0 + 0.002, Z_NODE]);
-    overlay.add(nodeD);
-    overlay.add(this._seat());
-    overlay.add(this._ruler());
-
-    // ---- how each sub couples to that mode --------------------------------
-    for (const [P, ps] of [[LAYOUT.subL, PSI_L], [LAYOUT.subR, PSI_R]]) {
-      // Ψ is a property of position, not time: a static signed bar about a zero line
-      const y0 = PED_H + CAB + 0.34;
-      const col = ps > 0 ? PAL.cy : PAL.am;
-      const zero = new DIAG.Trace(2, PAL.ink3, 1.3, { opacity: 0.65 });
-      zero.write((i) => [P.x + (i ? 0.10 : -0.10), y0, P.z]);
-      const t = new DIAG.Trace(2, col, 3.4, { opacity: 1 });
-      t.write((i) => [P.x, i === 0 ? y0 : y0 + 0.26 * ps, P.z]);
-      const cap = new DIAG.Trace(2, col, 3.4, { opacity: 1 });
-      cap.write((i) => [P.x + (i ? 0.06 : -0.06), y0 + 0.26 * ps, P.z]);
-      overlay.add(zero, t, cap);
-      S.coup.push(t);
-    }
-
-    overlay.add(this._graphA(S));
-    overlay.add(this._graphB());
+    overlay.add(this._plan(S));
     this._labels(ctx, S);
     return { hardware, overlay };
   },
@@ -339,7 +349,7 @@ export default {
   // =========================================================================
   // hardware
   // =========================================================================
-  _sub(P, S) {
+  _sub(P, S, isLeft) {
     const g = new THREE.Group();
     g.position.set(P.x, 0, P.z);
     g.rotation.y = P.ry;
@@ -358,6 +368,10 @@ export default {
       sp.position.set(sx * (half - 0.008), 0.008, sz * (half - 0.008));
       g.add(sp);
     }
+    // machined nameplate on the pedestal front
+    const plate2 = new THREE.Mesh(GEO.bevelBox(0.086, 0.011, 0.0022, 0.0004, 2), M.alu);
+    plate2.position.set(0, PED_H - 0.072, half + 0.0262);
+    g.add(plate2);
 
     // gloss cabinet body
     const bodyD = 0.40;
@@ -401,10 +415,10 @@ export default {
     cone.rotation.x = Math.PI / 2;
     drv.add(cone);
     g.add(drv);
-    S.cones.push(drv);
-    const flh = new THREE.Mesh(new THREE.SphereGeometry(0.0055, 12, 10), M.ledCyan);
+    const flh = new THREE.Mesh(new THREE.SphereGeometry(0.0055, 12, 10), M.ledCyan.clone());
     flh.position.set(0, PED_H + 0.052, half + 0.0035);
     g.add(flh);
+    S.drivers.push({ g: drv, led: flh, left: isLeft });
     const linerMat = M.rubber.clone();
     linerMat.side = THREE.DoubleSide;
     const liner = new THREE.Mesh(new THREE.CylinderGeometry(0.1918, 0.1918, bt * 0.94, 48, 1, true), linerMat);
@@ -450,152 +464,144 @@ export default {
   },
 
   // =========================================================================
-  // overlay
+  // overlay — one card: the room in plan, with the field at the tone
   // =========================================================================
-  _field(overlay, S) {
-    const NX = 62, NZ = 58;
-    const fw = RM.W, fd = Z_FIELD_NEAR - ZF;
-    const geo = new THREE.PlaneGeometry(fw, fd, NX, NZ);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position, nV = pos.count;
-    const col = new THREE.BufferAttribute(new Float32Array(nV * 3), 3);
-    geo.setAttribute('color', col);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 1, depthWrite: false,
-      blending: THREE.AdditiveBlending, toneMapped: false, side: THREE.DoubleSide,
-    }));
-    const cz = ZF + fd / 2;
-    mesh.position.set(0, Y0 - 0.0015, cz);
-    mesh.renderOrder = 3;
-    mesh.frustumCulled = false;
-    overlay.add(mesh);
-    S.field = mesh; S.col = col; S.nV = nV;
+  _plan(S) {
+    const wrap = new THREE.Group();
+    wrap.position.copy(place(CARD_AT[0], CARD_AT[1], CARD_AT[2]));
 
-    // Two static complex fields — one sub, and the pair — at F_TONE.
-    // Modes are grouped by their (p,q) floor pattern; at y = 0 every vertical
-    // index contributes cos(0) = 1, so the floor shape depends only on (p,q).
-    const w = TAU * F_TONE, w2 = w * w, dw = -2 * DELTA * w;
-    const kk = w * DSP.RHO_AIR * C * C;
-    const make = (srcs) => {
-      const pat = new Map();
-      const d0 = w2 * w2 + dw * dw, n0 = srcs.length / V_ROOM;
-      pat.set('0,0', { p: 0, q: 0, re: n0 * (-w2) / d0, im: n0 * (-dw) / d0 });
-      for (const m of MODES) {
-        if (m.f > 150) continue;
-        let num = 0;
-        for (const s of srcs) num += psi(m, s);
-        if (Math.abs(num) < 1e-12) continue;
-        num *= m.invK;
-        const dr = m.w2 - w2, d = dr * dr + dw * dw;
-        const key = `${m.p},${m.q}`;
-        const e = pat.get(key) || { p: m.p, q: m.q, re: 0, im: 0 };
-        e.re += num * dr / d; e.im += num * (-dw) / d;
-        pat.set(key, e);
-      }
-      const list = [...pat.values()];
-      const re = new Float32Array(nV), im = new Float32Array(nV);
-      for (let i = 0; i < nV; i++) {
-        const ax = Math.PI * rx(pos.getX(i)) / RM.W;
-        const az = Math.PI * rz(pos.getZ(i) + cz) / RM.D;
-        let sr = 0, si = 0;
-        for (const e of list) {
-          const s = Math.cos(ax * e.p) * Math.cos(az * e.q);
-          sr += e.re * s; si += e.im * s;
-        }
-        re[i] = -kk * si; im[i] = kk * sr;
-      }
-      return { re, im };
+    const card = DIAG.diagramCard(PLAN_W, PLAN_H, { opacity: 0.93, pad: PLAN_PAD });
+    // diagramCard installs a group-level userData.setOpacity; DIAG.fadeTree
+    // calls it and then still descends into the plate, capturing the already
+    // scaled opacity as the mesh's base. Removing the hook lets the per-mesh
+    // path own the fade, which is the one that survives a fade from zero.
+    delete card.userData.setOpacity;
+    card.position.set(-PLAN_W / 2, -PLAN_H / 2, -0.004);
+    wrap.add(card);
+
+    // ---- the field ---------------------------------------------------------
+    const pat = new Float32Array(NPAT * 4);
+    for (let i = 0; i < PAT.length; i++) {
+      pat[i * 4] = PAT[i].p; pat[i * 4 + 1] = PAT[i].q;
+      pat[i * 4 + 2] = PAT[i].re / PAT_PEAK; pat[i * 4 + 3] = PAT[i].im / PAT_PEAK;
+    }
+    const uni = {
+      uPat: { value: pat },
+      uMix: { value: 0 },
+      uPh: { value: new THREE.Vector2(1, 0) },
+      uOpacity: { value: 1 },
+      uPos: { value: new THREE.Color(PAL.cy) },
+      uNeg: { value: new THREE.Color(PAL.am) },
     };
-    S.f1 = make([SUB_R]);
-    S.f2 = make([SUB_R, SUB_L]);
-    let pk = 0;
-    for (let i = 0; i < nV; i++) pk = Math.max(pk, Math.hypot(S.f1.re[i], S.f1.im[i]));
-    S.gain = 1 / pk;
-  },
-
-  _seat() {
-    const g = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.150, 0.166, 56),
-      new THREE.MeshBasicMaterial({
-        color: PAL.am, transparent: true, opacity: 0.9, depthWrite: false,
-        toneMapped: false, side: THREE.DoubleSide,
-      }));
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(SEAT.x, Y0 + 0.004, SEAT.z);
-    ring.renderOrder = 11;
-    g.add(ring);
-    for (let i = 0; i < 4; i++) {
-      const t = new DIAG.Trace(2, PAL.am, 1.5, { opacity: 0.75 });
-      const a = i * Math.PI / 2 + Math.PI / 4;
-      t.write((k) => [SEAT.x + Math.cos(a) * (k ? 0.25 : 0.19), Y0 + 0.004,
-        SEAT.z + Math.sin(a) * (k ? 0.25 : 0.19)]);
-      g.add(t);
-    }
-    const stalk = dash(2, PAL.am, 1.3, 0.65);
-    stalk.write((i) => [SEAT.x, i === 0 ? Y0 : SEAT.y, SEAT.z]);
-    g.add(stalk);
-    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.024, 14, 10),
-      new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true }));
-    ear.position.copy(SEAT);
-    g.add(ear);
-    return g;
-  },
-
-  /** Three bars at true scale: the room, half a 30 Hz wave, and 2 kHz. */
-  _ruler() {
-    const g = new THREE.Group();
-    const y = Y0 + 0.004;
-    const bars = [
-      [RM.W / 2, RUL_Z[0], 0x9aa3ad, 1.5, 0.11],
-      [LAM30 / 4, RUL_Z[1], PAL.cy, 2.2, 0.085],
-      [LAM2K / 2, RUL_Z[2], PAL.cy, 2.4, 0.05],
-    ];
-    for (const [hx, z, col, wd, hd] of bars) {
-      g.add(DIAG.dimension([-hx, y, z], [hx, y, z], { color: col, width: wd, head: hd }));
-    }
-    for (const sx of [-1, 1]) {          // wall ticks on the room bar
-      const t = new DIAG.Trace(2, PAL.ink3, 1.2, { opacity: 0.6 });
-      t.write((i) => [sx * RM.W / 2, y, i === 0 ? RUL_Z[0] - 0.20 : RUL_Z[0] + 0.20]);
-      g.add(t);
-    }
-    return g;
-  },
-
-  _graphA(S) {
-    const w = 2.62, h = 1.06;
-    const gr = new DIAG.Graph({
-      w, h, xLog: true, xRange: [15, 160], yRange: [-16, 24],
-      yTicks: [-16, -8, 0, 8, 16, 24], zeroLine: 0,
+    const mat = new THREE.ShaderMaterial({
+      uniforms: uni,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        #define NPAT ${NPAT}
+        #define LEVELS 6.0
+        uniform vec4 uPat[NPAT];
+        uniform float uMix;
+        uniform vec2 uPh;
+        uniform float uOpacity;
+        uniform vec3 uPos;
+        uniform vec3 uNeg;
+        varying vec2 vUv;
+        void main() {
+          float u = vUv.x;              // rx / W
+          float v = 1.0 - vUv.y;        // rz / D, back wall at the top of the card
+          float sr = 0.0, si = 0.0;
+          for (int i = 0; i < NPAT; i++) {
+            float p = uPat[i].x;
+            float par = mod(p, 2.0) < 0.5 ? 1.0 : -1.0;
+            float g = (1.0 + uMix * par)
+                    * cos(3.14159265 * p * u)
+                    * cos(3.14159265 * uPat[i].y * v);
+            sr += uPat[i].z * g;
+            si += uPat[i].w * g;
+          }
+          float inst = sr * uPh.x - si * uPh.y;
+          float env = sqrt(sr * sr + si * si);
+          float m = clamp(0.45 * env + 0.55 * abs(inst), 0.0, 1.0);
+          float lv = m * LEVELS;
+          float band = floor(lv) / LEVELS;          // stepped choropleth fill
+          float f = fract(lv);
+          float edge = 1.0 - smoothstep(0.0, 0.10, min(f, 1.0 - f));
+          vec3 base = inst >= 0.0 ? uPos : uNeg;
+          float on = step(0.7, lv);                 // nothing drawn at the nodes
+          vec3 rgb = base * (band * 0.46 + edge * 0.30 * on);
+          gl_FragColor = vec4(rgb, uOpacity);
+        }`,
     });
-    const bw = w - gr.x(F_SCH);
-    const sb = gr.addBand(-16, 24, PAL.ink3, 0.11);
-    sb.scale.x = bw / w;
-    sb.position.x = gr.x(F_SCH) + bw / 2;
-    for (const f of AXIALS) gr.addMarker(f, { color: PAL.ink3, width: 1.0, dashed: false, opacity: 0.40 });
-    gr.addMarker(F_SCH, { color: PAL.gr, width: 1.7, dashed: true, opacity: 0.9 });
-    gr.addTrace((f) => atF(ENV1.up, f), { color: PAL.am, width: 1.7, dashed: true, n: 260 });
-    gr.addTrace((f) => atF(ENV1.lo, f), { color: PAL.am, width: 1.7, dashed: true, n: 260 });
-    gr.addTrace((f) => atF(ENV2.up, f), { color: PAL.cy, width: 2.8, n: 260 });
-    gr.addTrace((f) => atF(ENV2.lo, f), { color: PAL.cy, width: 2.8, n: 260 });
-    S.dot = gr.addDot(PAL.cy, 0.016);
-    S.dot.userData.setData(F_TONE, atF(ENV2.up, F_TONE));
-    const wrap = panel(gr, w, h);
-    wrap.position.set(0.95, 2.10, -3.05);
-    return faceCam(wrap);
-  },
+    const field = new THREE.Mesh(new THREE.PlaneGeometry(PLAN_W, PLAN_H, 1, 1), mat);
+    field.position.z = 0.0004;
+    field.renderOrder = 4;
+    field.userData.setOpacity = (o) => {
+      uni.uOpacity.value = o;
+      field.visible = o > 0.004;
+    };
+    wrap.add(field);
+    S.uni = uni;
 
-  _graphB() {
-    const w = 1.44, h = 0.64;
-    const gr = new DIAG.Graph({
-      w, h, xLog: true, xRange: [25, 320], yRange: [-9, 3],
-      yTicks: [-9, -6, -3, 0, 3], zeroLine: 0,
-    });
-    gr.addMarker(FC_X, { color: PAL.ink3, width: 1.2, opacity: 0.5 });
-    gr.addTrace((f) => sumDb(f, DELTA_T + WRAP_EXTRA), { color: PAL.vi, width: 1.6, dashed: true, n: 220 });
-    gr.addTrace((f) => sumDb(f, DELTA_T), { color: PAL.am, width: 2.5, n: 220 });
-    gr.addTrace((f) => sumDb(f, 0), { color: PAL.gr, width: 2.5, n: 220 });
-    const wrap = panel(gr, w, h);
-    wrap.position.set(-2.14, 2.00, -3.05);
+    // ---- room outline, nodal lines, markers --------------------------------
+    const box = new DIAG.Trace(5, 0x8b939d, 1.3, { opacity: 0.7, renderOrder: 12 });
+    const corners = [[-PLAN_W / 2, -PLAN_H / 2], [PLAN_W / 2, -PLAN_H / 2],
+      [PLAN_W / 2, PLAN_H / 2], [-PLAN_W / 2, PLAN_H / 2], [-PLAN_W / 2, -PLAN_H / 2]];
+    box.write((i) => [corners[i][0], corners[i][1], 0.002]);
+    wrap.add(box);
+
+    // Ψ₁₁₀ = 0 loci: the room's centre line and its mid-depth line
+    const nx = new DIAG.Trace(2, PAL.gr, 1.7, { opacity: 0.95, renderOrder: 13 });
+    nx.write((i) => [0, i ? PLAN_H / 2 : -PLAN_H / 2, 0.003]);
+    const nz = new DIAG.Trace(2, PAL.gr, 1.7, { opacity: 0.95, renderOrder: 13 });
+    nz.write((i) => [i ? PLAN_W / 2 : -PLAN_W / 2, 0, 0.003]);
+    wrap.add(nx, nz);
+
+    // λ/2 at 30 Hz, drawn to the plan's own scale
+    const rul = DIAG.dimension(
+      [mx(-LAM30 / 4), my(2.95), 0.004], [mx(LAM30 / 4), my(2.95), 0.004],
+      { color: PAL.cy, width: 1.7, head: 0.020 });
+    delete rul.userData.setOpacity;      // see the diagramCard note above
+    wrap.add(rul);
+
+    // the two subwoofers
+    S.marks = [];
+    for (const [P, left] of [[SUB_L, true], [SUB_R, false]]) {
+      const r = new THREE.Mesh(new THREE.RingGeometry(0.011, 0.017, 28),
+        new THREE.MeshBasicMaterial({
+          color: PAL.cy, transparent: true, opacity: 1, toneMapped: false,
+          depthWrite: false, side: THREE.DoubleSide,
+        }));
+      r.position.set(mx(P.x), my(P.z), 0.005);
+      r.renderOrder = 14;
+      wrap.add(r);
+      S.marks.push({ m: r, left });
+    }
+    // the sofa, five seats
+    for (const x of SOFA_X) {
+      const d = new THREE.Mesh(new THREE.CircleGeometry(0.0062, 14),
+        new THREE.MeshBasicMaterial({
+          color: PAL.am, transparent: true, opacity: 0.95, toneMapped: false, depthWrite: false,
+        }));
+      d.position.set(mx(x), my(SEAT.z), 0.005);
+      d.renderOrder = 14;
+      wrap.add(d);
+    }
+
+    // label anchors
+    S.aTitle = new THREE.Object3D(); S.aTitle.position.set(0, PLAN_H / 2 + PLAN_PAD, 0.01);
+    S.aRule = new THREE.Object3D(); S.aRule.position.set(mx(LAM30 / 4), my(2.95), 0.01);
+    S.aNode = new THREE.Object3D(); S.aNode.position.set(0, my(SEAT.z), 0.01);
+    wrap.add(S.aTitle, S.aRule, S.aNode);
+
     return faceCam(wrap);
   },
 
@@ -603,164 +609,121 @@ export default {
   _labels(ctx, S) {
     const L = ctx.labels;
     S.lab = {};
-    // NOTE: .t and .v render inline, so a trailing <br> in `text` is what puts
-    // the mono value on its own line.
-    S.lab.sub = L.add(new THREE.Vector3(LAYOUT.subR.x, 1.30, LAYOUT.subR.z), {
-      kicker: `Sealed · 380 mm · ${M_TOTAL.toFixed(0)} kg`,
-      text: `${(VB * 1000).toFixed(0)} L · f₃ ${F3.toFixed(1)} Hz · 12 dB/oct<br>`,
-      value: '', cls: 'am', offset: [0, 0],
+    S.lab.sub = L.add(new THREE.Vector3(LAYOUT.subR.x, PED_H + CAB + 0.10, LAYOUT.subR.z), {
+      kicker: `Sealed 380 mm · ${(VB * 1000).toFixed(0)} L · ${M_TOTAL.toFixed(0)} kg`,
+      text: `f₃ ${F3.toFixed(1)} Hz · 12 dB/oct · drive ${SPL_REF} dB @ 1 m<br>`,
+      value: '', cls: 'am', offset: [0, -18], priority: 3,
     });
-    S.lab.pair = L.add(new THREE.Vector3(LAYOUT.subL.x, 1.46, LAYOUT.subL.z), {
-      kicker: 'Right sub alone',
-      text: `Ψ₁₁₀ = ${PSI_L.toFixed(3)} / ${PSI_R.toFixed(3)}<br>`,
-      value: 'sum 0.000', cls: 'acc', offset: [40, 0],
+    S.lab.plan = L.add(S.aTitle, {
+      kicker: `Room in plan · ${RM.W} × ${RM.D} m · floor level`,
+      text: `pressure at ${F_TONE.toFixed(2)} Hz, shown at 1 : 50<br>`,
+      value: '', cls: 'acc', offset: [0, -20], occlude: false, priority: 2,
     });
-    S.lab.seat = L.add(new THREE.Vector3(SEAT.x, SEAT.y + 0.20, SEAT.z), {
-      kicker: 'Seat · on the node', text: 'Ψ₁₁₀ = 0.000<br>',
-      value: '', cls: 'am', offset: [0, -22],
+    S.lab.node = L.add(S.aNode, {
+      kicker: 'Ψ₁₁₀ = 0', text: 'the sofa sits on the centre line',
+      cls: 'plain', offset: [8, 30], occlude: false, priority: 1,
     });
-    S.lab.node = L.add(new THREE.Vector3(-2.30, Y0, Z_NODE), {
-      kicker: `Nodes · mode (1,1,0) · ${F_TONE.toFixed(2)} Hz`,
-      text: 'the seat sits on one', cls: 'acc', offset: [0, -16],
-    });
-    S.lab.rul = L.add(new THREE.Vector3(-1.85, Y0, RUL_Z[0]), {
-      kicker: 'Room width', value: `${RM.W.toFixed(2)} m`, offset: [0, -16],
-    });
-    S.lab.rul2 = L.add(new THREE.Vector3(1.43, Y0, RUL_Z[1]), {
+    S.lab.rul = L.add(S.aRule, {
       kicker: 'λ/2 at 30 Hz', value: `${(LAM30 / 2).toFixed(2)} m`,
-      cls: 'acc', offset: [0, -16],
-    });
-    S.lab.rul3 = L.add(new THREE.Vector3(LAM2K / 2, Y0, RUL_Z[2]), {
-      kicker: 'λ at 2 kHz · same scale', value: `${(LAM2K * 1000).toFixed(0)} mm`,
-      cls: 'acc', offset: [100, -6],
-    });
-    S.lab.gA = L.add(new THREE.Vector3(0.95, 2.80, -3.05), {
-      kicker: 'At the sofa — computed',
-      text: '5 seats · ⅙-oct · dB re free field<br>', value: '', offset: [0, 0],
-    });
-    S.lab.gB = L.add(new THREE.Vector3(-2.14, 2.48, -3.05), {
-      kicker: `Sub + main · LR4 ${FC_X} Hz`,
-      text: `Δd ${DELTA_D.toFixed(2)} m = ${(DELTA_T * 1e3).toFixed(2)} ms = ${PHASE_ERR.toFixed(0)}°`,
-      cls: 'am', offset: [0, 0],
+      cls: 'acc', offset: [46, 4], occlude: false, priority: 0,
     });
   },
 
   // =========================================================================
   update(dt, t) {
     const S = this._s;
-    if (!S || !S.field) return;
-    const ph = TAU * F_TONE * t + PH0;
-    const cs = Math.cos(ph), sn = Math.sin(ph);
+    if (!S || !S.uni) return;
     S.tNow = t;
 
-    // slow A/B between one sub and the pair (period 0.32 simulated seconds)
+    // 30.019 Hz at timeScale 0.02 → 0.60 Hz on screen, i.e. 1 : 50
+    const ph = TAU * F_TONE * t;
+    const cs = Math.cos(ph), sn = Math.sin(ph);
+    S.uni.uPh.value.set(cs, sn);
+
+    // slow A/B: the left sub's level ramps 0 → 1 → 0 (period 0.32 sim seconds)
     const P = 0.32;
     const u = (((t % P) + P) % P) / P;
-    const mix = DSP.smoothstep(0.45, 0.55, u) - DSP.smoothstep(0.955, 1.0, u);
+    const mix = DSP.smoothstep(0.42, 0.56, u) - DSP.smoothstep(0.94, 1.0, u);
     S.mix = mix;
+    S.uni.uMix.value = mix;
 
-    // Floor field. Brightness = 0.30·(standing-wave envelope) + 0.70·|instantaneous|,
-    // so the node/antinode geography stays legible through the zero crossing.
-    // Cyan = compression, amber = rarefaction.
-    const f1 = S.f1, f2 = S.f2, cA = S.col.array, g = S.gain;
-    for (let i = 0; i < S.nV; i++) {
-      const re = f1.re[i] + (f2.re[i] - f1.re[i]) * mix;
-      const im = f1.im[i] + (f2.im[i] - f1.im[i]) * mix;
-      const inst = (re * cs - im * sn) * g;
-      const env = Math.hypot(re, im) * g;
-      let b = 0.26 * env + 0.74 * Math.abs(inst);
-      if (b > 1) b = 1;
-      const s = Math.pow(b, 1.35) * 0.24;
-      if (inst >= 0) { cA[i * 3] = s * 0.30; cA[i * 3 + 1] = s * 0.72; cA[i * 3 + 2] = s; }
-      else { cA[i * 3] = s; cA[i * 3 + 1] = s * 0.68; cA[i * 3 + 2] = s * 0.30; }
-    }
-    S.col.needsUpdate = true;
-
-    // cones at true-scale excursion, both fed the same signal
+    // cones at true-scale excursion; the left one only plays at level `mix`
     const x = X_PK * cs;
-    for (const c of S.cones) c.position.z = CAB / 2 - 0.0055 + x;
-
+    for (const d of S.drivers) {
+      const lv = d.left ? mix : 1;
+      d.g.position.z = CAB / 2 - 0.0055 + x * lv;
+      d.led.material.color.setRGB(0.388 * lv + 0.02, 0.784 * lv + 0.03, 0.961 * lv + 0.05);
+    }
+    for (const m of S.marks) m.m.material.opacity = m.left ? 0.18 + 0.82 * mix : 1;
     for (const k of S.knobs) k.rotation.z = -1.25 + 2.4 * mix;
 
-    S.lab.sub.setValue(`x ${(x * 1000).toFixed(1)} mm of ${(XMAX * 1000).toFixed(0)}`);
-    S.lab.seat.setValue(`${(mix > 0.5 ? SPL_TWO : SPL_ONE).toFixed(1)} dB SPL`);
-    S.lab.pair.setKicker(mix > 0.5 ? 'Both subs playing' : 'Right sub alone');
-    S.lab.pair.setValue(mix > 0.5 ? 'sum 0.000 — mode gone' : 'sum 0.000 if both play');
-    S.lab.gA.setValue(mix > 0.5 ? 'both subs — seats agree' : 'one sub — seats disagree');
-    S.dot.userData.setData(F_TONE, atF(mix > 0.5 ? ENV2.up : ENV1.up, F_TONE));
+    const both = mix > 0.5;
+    S.lab.sub.setValue(`x ${(x * 1000).toFixed(2)} mm of ${(XMAX * 1000).toFixed(0)} peak`);
+    S.lab.plan.setValue(both
+      ? `both subs — Ψ₁₁₀ sums to 0.000`
+      : `right sub alone — Ψ₁₁₀ = ${PSI_R.toFixed(3)}`);
   },
 
   // =========================================================================
   content() {
     const n = (v) => `<span class="num">${v}</span>`;
     return `
-<p>One wavelength at ${n('30 Hz')} is ${n(LAM30.toFixed(2) + ' m')}; the room's floor
-diagonal, its longest straight line, is ${n(DIAGFLOOR.toFixed(2) + ' m')}. The wave is
-${n((100 * LAM30 / DIAGFLOOR).toFixed(0) + '%')} of it, so it cannot cross the room as a
-travelling wave. The air pressurises as a body, then settles into a pattern fixed by the
-walls. At ${n('2 kHz')} λ is ${n((LAM2K * 1000).toFixed(0) + ' mm')} —
-${n((LAM30 / LAM2K).toFixed(0) + '×')} shorter, and the room is acoustically large.</p>
+<p>One wavelength at ${n('30 Hz')} is ${n(LAM30.toFixed(2) + ' m')}; the room's longest
+straight line, corner to corner, is ${n(DIAG3D.toFixed(2) + ' m')}. No point in the room is
+more than half a wavelength from a wall, so the steady state is not a travelling wave but a
+standing pattern fixed by the boundaries. At ${n('2 kHz')} λ is
+${n((LAM2K * 1000).toFixed(0) + ' mm')} and the room is acoustically large.</p>
+
+<div class="key"><span class="lab">The idea</span><p>Below Schroeder the room is a resonator
+with a fixed geography of loud and quiet places. A source excites a mode by where it stands,
+not by how well it is made.</p></div>
 
 <h3>The modes are arithmetic</h3>
 <div class="eq">f = <span class="hl">c/2</span> · √( (p/W)² + (q/D)² + (r/H)² )
 <span class="c">W ${RM.W} · D ${RM.D} · H ${RM.H} m · c ${C} m/s</span>
-<span class="c">axial </span>${AXIALS.slice(0, 4).map((f) => f.toFixed(2)).join('  ')} Hz
-<span class="c">      </span>${AXIALS.slice(4).map((f) => f.toFixed(2)).join('  ')} Hz
-δ = 3·ln10/RT60 = ${DELTA.toFixed(1)} s⁻¹  <span class="c">rigid walls; real ones</span>
-<span class="c">absorb more at 20 Hz, so the peaks are gentler</span></div>
-<p>30 Hz sits within ${n((100 * Math.abs(F_TONE - 30) / 30).toFixed(2) + '%')} of the first
-tangential mode, ${n('(1,1,0)')} at ${n(F_TONE.toFixed(2) + ' Hz')} — the pattern on the
-floor. Sabine with ᾱ = ${n(ABAR)} over ${n(S_ROOM.toFixed(1) + ' m²')} gives RT60
-${n(RT60.toFixed(2) + ' s')}, so the Schroeder frequency is 2000·√(RT60/V) =
-${n(F_SCH.toFixed(0) + ' Hz')}. Every subwoofer frequency is below it — discrete
-resonances, not statistics.</p>
+<span class="c">axial </span>${AXIALS.map((f) => f.toFixed(2)).join('  ')} Hz
+δ = 3·ln10/RT60 = ${DELTA.toFixed(1)} s⁻¹</div>
+<p>Sabine with ᾱ = ${n(ABAR)} over ${n(S_ROOM.toFixed(1) + ' m²')} gives RT60
+${n(RT60.toFixed(2) + ' s')}, so 2000·√(RT60/V) puts Schroeder at
+${n(F_SCH.toFixed(0) + ' Hz')}: every subwoofer frequency is below it, discrete resonances
+rather than statistics. 30 Hz falls within
+${n((100 * Math.abs(F_TONE - 30) / 30).toFixed(2) + '%')} of the first tangential mode
+${n('(1,1,0)')} at ${n(F_TONE.toFixed(2) + ' Hz')}. The plan sums the ${NPAT} strongest floor
+patterns at that frequency; ${n('(1,1,0)')} carries most of it. Walls here are rigid — real
+ones absorb more at 20 Hz, so the peaks are gentler.</p>
 
 <h3>The box</h3>
 <div class="eq">Vas ${(TS.Vas * 1000).toFixed(0)} L / Vb ${(VB * 1000).toFixed(0)} L → α ${ALIGN.alpha.toFixed(2)}
-fc = fs·√(α+1) = <span class="hl">${ALIGN.fc.toFixed(1)} Hz</span> · Qtc = ${ALIGN.Qtc.toFixed(2)}
-f₃ ${F3.toFixed(1)} Hz, <span class="hl">12 dB/oct</span> <span class="c">— sealed is 2nd order</span></div>
+fc = fs·√(α+1) = <span class="hl">${ALIGN.fc.toFixed(1)} Hz</span> · Qtc ${ALIGN.Qtc.toFixed(2)}
+f₃ ${F3.toFixed(1)} Hz, <span class="hl">12 dB/oct</span> <span class="c">— sealed is 2nd order</span>
+${SPL_REF} dB @ 1 m half space → x̂ ${(X_PK * 1000).toFixed(2)} mm
+Û = Sd·ω·x̂ = ${(Q_PK * 1000).toFixed(1)} L/s peak</div>
 
-<h3>Why two — and what they fix</h3>
-<p>The subs stand ${n(Math.abs(LAYOUT.subR.x).toFixed(2) + ' m')} either side of the centre
-line, so any mode with an odd lateral index meets them with equal and opposite
-pressure: Ψ₁₁₀ = ${n(PSI_R.toFixed(3))} and ${n(PSI_L.toFixed(3))}. It sums to zero and the
-mode is never excited: watch the floor pattern collapse as the second joins.</p>
+<h3>Why two</h3>
+<p>Each sub stands ${n(SUB_OFF.toFixed(2) + ' m')} off the centre line, where Ψ₁₁₀ meets them
+equal and opposite: ${n(PSI_R.toFixed(3))} and ${n(PSI_L.toFixed(3))}. Their sum drives the
+mode with no net force, and it is never excited — watch the quadrants collapse as the second
+comes up.</p>
 <div class="myth"><span class="lab">Commonly got wrong</span><p>Two subwoofers do not flatten
-the curve at one seat. Computed here, 20–80 Hz peak-to-peak at the central seat is
-${n(ENV1.pp.toFixed(1) + ' dB')} with one sub and an identical ${n(ENV2.pp.toFixed(1) + ' dB')}
-with two: a centre-line seat is already blind to every odd lateral mode. What collapses
-is the <em>disagreement between seats</em>, ${n(ENV1.spread.toFixed(1) + ' dB')} to
-${n(ENV2.spread.toFixed(1) + ' dB')} — the prize, because one equalisation now serves them
-all.</p></div>
-
-<h3>Arrival times</h3>
-<p>The subs are ${n(D_SUB.toFixed(2) + ' m')} from the seat, the mains
-${n(D_MAIN.toFixed(2) + ' m')}: ${n(DELTA_D.toFixed(2) + ' m')} further,
-${n((DELTA_T * 1e3).toFixed(2) + ' ms')}, which at ${FC_X} Hz is ${n(PHASE_ERR.toFixed(0) + '°')}.
-LR4 sums flat only in phase, so as installed the sum falls to
-${n(WORST_INSTALLED.db.toFixed(1) + ' dB')} at ${n(WORST_INSTALLED.f.toFixed(0) + ' Hz')}. Winding
-the sub's phase control until it wraps a whole cycle
-(${n(((DELTA_T + WRAP_EXTRA) * 1e3).toFixed(2) + ' ms')}) is exact at ${FC_X} Hz and wrong
-either side: still ${n(WORST_WRAPPED.db.toFixed(1) + ' dB')} at
-${n(WORST_WRAPPED.f.toFixed(0) + ' Hz')}. Delay the <em>mains</em> by
-${n((DELTA_T * 1e3).toFixed(2) + ' ms')} instead — the green trace, flat to ${n('0.00 dB')}.</p>
-
-<div class="key"><span class="lab">The idea</span><p>Below Schroeder the room is a resonator
-with a fixed geography of loud and quiet places. A source excites a mode by where it
-stands, not by how good it is.</p></div>`;
+the response at one seat. Computed here, 20–80 Hz peak-to-peak at the central seat is
+${n(ENV1.pp.toFixed(1) + ' dB')} with one and ${n(ENV2.pp.toFixed(1) + ' dB')} with two, and
+the pair adds a flat ${n('6.02 dB')}: a centre-line seat is already blind to every odd
+lateral mode. What collapses is the disagreement <em>between</em> seats,
+${n(ENV1.spread.toFixed(1) + ' dB')} to ${n(ENV2.spread.toFixed(1) + ' dB')} — the prize,
+because one equalisation then serves them all.</p></div>`;
   },
 
   readouts() {
     const S = this._s || {};
-    const two = (S.mix ?? 0) > 0.5;
-    const bar = Math.abs(Math.cos(TAU * F_TONE * (S.tNow || 0) + PH0));
+    const both = (S.mix ?? 0) > 0.5;
+    const x = X_PK * Math.cos(TAU * F_TONE * (S.tNow || 0));
     return [
       { k: 'MODE (1,1,0)', v: F_TONE.toFixed(2), u: 'Hz', cls: 'acc' },
-      { k: 'λ AT TONE', v: LAM_TONE.toFixed(2), u: 'm', cls: 'acc', bar: DSP.clamp(LAM_TONE / DIAG3D, 0, 1) },
-      { k: 'SEAT SPL', v: (two ? SPL_TWO : SPL_ONE).toFixed(1), u: 'dB', cls: '', bar },
-      { k: 'SUB DELAY', v: (DELTA_T * 1e3).toFixed(2), u: 'ms', cls: 'am' },
-      { k: 'PHASE @80', v: PHASE_ERR.toFixed(0), u: '°', cls: 'am' },
-      { k: 'SUM DEV', v: WORST_INSTALLED.db.toFixed(1), u: 'dB', cls: 'am' },
+      { k: 'DRIVE, 1 m', v: SPL_REF.toFixed(0), u: 'dB', cls: 'am' },
+      { k: 'CONE x', v: (x * 1000).toFixed(2), u: 'mm', cls: '', bar: Math.abs(x) / XMAX },
+      { k: 'SEAT SPL', v: (both ? SPL_TWO : SPL_ONE).toFixed(1), u: 'dB', cls: '', bar: Math.abs(Math.cos(TAU * F_TONE * (S.tNow || 0))) },
+      { k: 'SEAT SPREAD', v: (both ? ENV2.spread : ENV1.spread).toFixed(1), u: 'dB', cls: 'am' },
+      { k: 'SCHROEDER', v: F_SCH.toFixed(0), u: 'Hz', cls: 'acc' },
     ];
   },
 };

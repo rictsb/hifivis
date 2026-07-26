@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LAYOUT } from '../core/layout.js';
+import { LAYOUT, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
@@ -7,16 +7,18 @@ import * as DSP from '../core/dsp.js';
 import { radialSprite } from '../core/tex.js';
 
 /**
- * POWER AMPLIFICATION — two monoblocks.
+ * POWER AMPLIFICATION — the left monoblock, shot as the hero.
  *
- * The claim of this stage: an amplifier does not make the signal bigger, it
- * uses the signal to modulate a current drawn from a power supply. Everything
- * below is derived from that one sentence, and every number on screen is
- * computed here rather than chosen.
+ * The claim: an amplifier does not make the signal bigger, it uses the signal
+ * to modulate a current drawn from a power supply. The supply current is
+ * unipolar — it always runs +V → upper device → node → lower device → −V — and
+ * only the load current reverses. That asymmetry is the whole picture.
+ *
+ * Every number on screen is computed here from stated inputs.
  */
 
 // ---------------------------------------------------------------------------
-// THE MODEL — all constants either measured-standard or derived
+// THE MODEL
 // ---------------------------------------------------------------------------
 
 const RL        = 8;                          // Ω, nominal load
@@ -24,8 +26,7 @@ const P_RATED   = 300;                        // W, the specification
 const V_RMS     = DSP.vrmsFor(P_RATED, RL);   // √(300·8)   = 48.99 V
 const V_PK      = V_RMS * Math.SQRT2;         //            = 69.28 V
 const I_PK      = V_PK / RL;                  //            =  8.66 A
-const I_RMS     = V_RMS / RL;                 //            =  6.12 A
-const RAIL      = 75;                         // V, chosen ≥ V_PK + losses
+const RAIL      = 75;                         // V, loaded mean, chosen ≥ V_PK + losses
 const HEADROOM  = RAIL - V_PK;                //            =  5.72 V
 
 const NPAIR     = 3;                          // complementary pairs per rail
@@ -39,40 +40,33 @@ const IS_DEV    = 5e-12;                      // A, device saturation current
  *  voltage across each emitter resistor equals V_T. */
 const IQ        = VT / RE;                    // 117.5 mA per device
 const VBE_Q     = VT * Math.log(IQ / IS_DEV); // 617.4 mV
-const VBIAS     = 2 * VBE_Q + 2 * IQ * RE;    // 1.2865 V across the spreader
+const VBIAS     = 2 * VBE_Q + 2 * IQ * RE;    // 1.2864 V across the spreader
 const IQ_TOT    = NPAIR * IQ;                 // 352.5 mA per rail
 const P_QUIES   = 2 * RAIL * IQ_TOT;          // 52.9 W burnt doing nothing
 const VBIAS_LOW = 0.90;                       // V, the under-biased comparison
 
 const P_MAX     = (RAIL * RAIL) / (2 * RL);   // 351.6 W ideal rail-to-rail
-const M_WORST   = 2 / Math.PI;                // level at peak dissipation
-const P_D_IDEAL = DSP.classABDissipation(RAIL, RL, M_WORST); // 142.5 W
+const M_CLIP    = V_PK / RAIL;                // 0.9238 — where the amp actually clips
+const X_CLIP    = M_CLIP * M_CLIP;            // 0.853 of P_MAX = the 300 W rating
 
 // --- cable, output impedance, damping ---------------------------------------
 const RHO_CU    = 1.724e-8;                   // Ω·m, annealed copper at 20 °C
 const CAB_LEN   = 3.0;                        // m, one way
 const CAB_AREA  = 2.5e-6;                     // m² (2.5 mm²)
-const R_PER_M   = RHO_CU / CAB_AREA;          // 6.90 mΩ/m
-const R_CABLE   = 2 * CAB_LEN * R_PER_M;      // 41.4 mΩ, out and back
+const R_CABLE   = (2 * CAB_LEN * RHO_CU) / CAB_AREA;         // 41.4 mΩ, out and back
 const Z_OUT     = 0.02;                       // Ω, amplifier output impedance
 const DF_TERM   = DSP.dampingFactor(RL, Z_OUT);              // 400
 const DF_DRIVE  = DSP.dampingFactor(RL, Z_OUT + R_CABLE);    // 130
 const RE_COIL   = 5.4;                        // Ω, voice-coil dc resistance
-const BL        = 12;                         // N/A (= V·s/m) force factor
-const F_BEMF    = 40;                         // Hz, stated operating point
-const X_BEMF    = 0.004;                      // m, peak excursion there
-const V_CONE    = DSP.TAU * F_BEMF * X_BEMF;  // 1.005 m/s peak
-const E_BEMF    = DSP.backEmf(BL, V_CONE);    // 12.06 V peak
-const I_BEMF    = E_BEMF / (RE_COIL + Z_OUT + R_CABLE);      // 2.21 A
-const F_BRAKE   = DSP.motorForce(BL, I_BEMF); // 26.5 N opposing the motion
 const DAMP_PEN  = (RE_COIL + Z_OUT + R_CABLE) / (RE_COIL + Z_OUT) - 1; // 0.76 %
 
 // --- reservoir ---------------------------------------------------------------
 const F_RIPPLE  = 100;                        // Hz, full-wave off 50 Hz mains
 const C_RES     = 0.015;                      // F per rail
-const I_DC_FULL = I_PK / Math.PI;             // 2.76 A mean rail current
+const I_DC_FULL = I_PK / Math.PI;             // 2.76 A mean rail current at full output
 const V_RIPPLE  = I_DC_FULL / (F_RIPPLE * C_RES);            // 1.84 V p-p
 const E_RES     = 0.5 * C_RES * RAIL * RAIL;  // 42.2 J stored per rail
+const P_DC_FULL = 2 * RAIL * I_DC_FULL;       // 413.5 W drawn at full output
 
 // --- what is actually moving in the wire ------------------------------------
 const F_SIG     = 1000;                       // Hz test tone
@@ -128,6 +122,23 @@ function iqFor(vb) {
 const IQ_LOW = iqFor(VBIAS_LOW);               // 0.18 mA — badly under-biased
 
 /**
+ * Drive voltage at which the *unbiased* stage first reaches a given fraction of
+ * the correctly-biased transfer curve. This is the honest measure of the
+ * crossover dead band: the textbook "±V_be" is where conduction begins, but the
+ * stage is still delivering almost nothing well past it.
+ */
+function deadbandAt(frac) {
+  let lo = 0, hi = 3;
+  for (let k = 0; k < 50; k++) {
+    const m = 0.5 * (lo + hi);
+    if (stageOut(m, 0) / stageOut(m, VBIAS) < frac) lo = m; else hi = m;
+  }
+  return 0.5 * (lo + hi);
+}
+const DB_1PC  = deadbandAt(0.01);              // ±0.456 V
+const DB_HALF = deadbandAt(0.50);              // ±1.152 V
+
+/**
  * Mean current drawn from one rail at output level m (fraction of full swing).
  * For an exponential complementary pair i_N·i_P ≈ I_q², so
  *   i_N = ½(i_out + √(i_out² + 4I_q²))
@@ -148,18 +159,58 @@ const pDc   = (m) => 2 * RAIL * railCurrent(m);
 const pDiss = (m) => Math.max(0, pDc(m) - pOut(m));
 
 // peak of the modelled dissipation curve, found numerically
-let M_PEAK = M_WORST, P_D_PEAK = 0;
-for (let k = 1; k <= 400; k++) {
-  const m = k / 400, p = pDiss(m);
+let M_PEAK = 2 / Math.PI, P_D_PEAK = 0;
+for (let k = 1; k <= 600; k++) {
+  const m = k / 600, p = pDiss(m);
   if (p > P_D_PEAK) { P_D_PEAK = p; M_PEAK = m; }
 }
-const X_PEAK = M_PEAK * M_PEAK;                // as a fraction of full output
+const X_PEAK = M_PEAK * M_PEAK;                // as a fraction of maximum output power
 
 // meter law: logarithmic, 30 dB of scale ending at the rated power
 const MET_DB   = 30;
 const MET_FS   = P_RATED;
 const MET_SWEEP = 0.87266;                     // ±50° in radians
 const meterFrac = (p) => DSP.clamp((10 * Math.log10(Math.max(p, 1e-9) / MET_FS) + MET_DB) / MET_DB, 0, 1);
+
+// ---------------------------------------------------------------------------
+// THE SHOT — one monoblock as the hero, instrument plate beside it
+// ---------------------------------------------------------------------------
+// The clear stage is 960 × 840 at 1600 × 1000 and the Director already shifts
+// the principal point to its centre. So: frame the monoblock, then TRUCK the
+// whole rig sideways (position and target together, which slides the subject
+// across the frame without rotating it) so the amp sits left-of-centre and the
+// plate has the right-hand third to itself.
+const AZ = 0.46, EL = 0.17, FOV = 30, FILL = 0.52;
+const MONO_R = 0.2765;                          // half the amp's overall height
+const MONO_C = [LAYOUT.monoL.x, 0.315, LAYOUT.monoL.z];
+const TAN_H = Math.tan((FOV * Math.PI) / 360);
+const D_CAM = MONO_R / (FILL * 0.84 * TAN_H);   // 2.362 m
+const PX_PER_M = 500 / (D_CAM * TAN_H);         // 790 px per metre at the subject
+const TRUCK = 225 / PX_PER_M;                   // slide the amp 225 px left of centre
+
+const _base = frameShot(MONO_C, MONO_R, { fill: FILL, az: AZ, el: EL, fov: FOV });
+const CAM_R = new THREE.Vector3(Math.cos(AZ), 0, -Math.sin(AZ));   // screen-right, in world
+const SHOT = {
+  position: [_base.position[0] + CAM_R.x * TRUCK, _base.position[1], _base.position[2] + CAM_R.z * TRUCK],
+  target: [_base.target[0] + CAM_R.x * TRUCK, _base.target[1], _base.target[2] + CAM_R.z * TRUCK],
+  fov: FOV,
+};
+
+/** World point on the ray through a screen pixel (1600 × 1000, axis at 640,500). */
+function rayPoint(px, py, dist) {
+  const f = new THREE.Vector3(-Math.sin(AZ) * Math.cos(EL), -Math.sin(EL), -Math.cos(AZ) * Math.cos(EL));
+  const u = CAM_R.clone().cross(f);
+  const r = f.clone()
+    .addScaledVector(CAM_R, ((px - 640) / 800) * TAN_H * 1.6)
+    .addScaledVector(u, (-(py - 500) / 500) * TAN_H)
+    .normalize();
+  return new THREE.Vector3(...SHOT.position).addScaledVector(r, dist);
+}
+
+// The plate: 435 px wide, centred at (883, 508), floated 1.65 m from the lens so
+// it clears the rack in depth as well as on screen.
+const CARD_PX = 435, CARD_CX = 883, CARD_CY = 508, CARD_D = 1.65;
+const CARD_S = (CARD_PX * CARD_D) / (PX_PER_M * D_CAM);        // metres per card unit
 
 // ---------------------------------------------------------------------------
 // small geometry helpers
@@ -177,11 +228,21 @@ function roundRect(w, h, r, cx = 0, cy = 0, Ctor = THREE.Shape) {
 /** Extruded panels get UVs in metres; remap them to 0..1 so brushed maps read. */
 function remapUV(geo, w, h) {
   const p = geo.attributes.position, uv = geo.attributes.uv;
-  for (let i = 0; i < uv.count; i++) {
-    uv.setXY(i, p.getX(i) / w + 0.5, p.getY(i) / h + 0.5);
-  }
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, p.getX(i) / w + 0.5, p.getY(i) / h + 0.5);
   uv.needsUpdate = true;
   return geo;
+}
+/** A very shallow cylindrical section — a lens, not a flat decal. */
+function curvedPlane(w, h, sag, sx = 24, sy = 16) {
+  const g = new THREE.PlaneGeometry(w, h, sx, sy);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const u = (2 * p.getY(i)) / h;
+    p.setZ(i, sag * (1 - u * u));
+  }
+  p.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
 }
 /**
  * The material library is shared by every stage, and a stage that puts a
@@ -201,8 +262,7 @@ function own(mat) {
       // `mats().alu` carries anisotropy 0.72, but none of the geometry helpers
       // emit a tangent attribute, so three's anisotropic specular has no frame
       // to work in and returns enormous values: the chassis vanishes into a
-      // white bloom. Measured here at 0.81 mean luminance against a 0.17 plate.
-      // The brushed look survives on the roughness and normal maps alone.
+      // white bloom. The brushed look survives on the roughness/normal maps.
       if (c.anisotropy) c.anisotropy = 0;
     }
     _own.set(mat.uuid, c);
@@ -229,87 +289,6 @@ function extrudePanel(shape, depth, w, h, mat, bevel = 0.0012) {
 }
 
 // ---------------------------------------------------------------------------
-// The meter dial — silkscreen on a backlit face, drawn once into a canvas
-// ---------------------------------------------------------------------------
-let _dialTex = null;
-function dialTexture() {
-  if (_dialTex) return _dialTex;
-  const W = 1024, H = Math.round((W * MET_H) / MET_W);
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const g = c.getContext('2d');
-
-  // backlit face: lamps sit below the scale, so the hotspot is low and central
-  const bg = g.createRadialGradient(W / 2, H * 0.92, 40, W / 2, H * 0.80, W * 0.86);
-  bg.addColorStop(0.00, '#7fd3fb');
-  bg.addColorStop(0.26, '#41abe6');
-  bg.addColorStop(0.64, '#1f7cba');
-  bg.addColorStop(1.00, '#12558c');
-  g.fillStyle = bg;
-  g.fillRect(0, 0, W, H);
-  // faint vertical falloff at the very top of the window
-  const vg = g.createLinearGradient(0, 0, 0, H * 0.5);
-  vg.addColorStop(0, 'rgba(6,26,44,0.34)');
-  vg.addColorStop(1, 'rgba(6,26,44,0.00)');
-  g.fillStyle = vg; g.fillRect(0, 0, W, H);
-
-  const PX = W / MET_W;                    // pixels per metre
-  const cx = W / 2, cy = H / 2 + PIVOT_DY * PX;   // needle pivot, in canvas pixels
-  const rTick = R_TICK * PX, rNum = R_NUM * PX;
-  const ink = 'rgba(4,16,28,0.95)';
-  const inkS = 'rgba(4,16,28,0.62)';
-
-  // 1 dB ticks across 30 dB, majors every 5 dB
-  for (let d = 0; d <= MET_DB; d++) {
-    const a = (-MET_SWEEP + (d / MET_DB) * 2 * MET_SWEEP);
-    const major = d % 5 === 0;
-    const len = major ? 40 : (d % 5 === 0 ? 26 : 18);
-    g.strokeStyle = major ? ink : inkS;
-    g.lineWidth = major ? 6.5 : 2.6;
-    g.beginPath();
-    g.moveTo(cx + Math.sin(a) * rTick, cy - Math.cos(a) * rTick);
-    g.lineTo(cx + Math.sin(a) * (rTick - len), cy - Math.cos(a) * (rTick - len));
-    g.stroke();
-  }
-  // scale arc
-  g.strokeStyle = 'rgba(4,16,28,0.50)'; g.lineWidth = 2.4;
-  g.beginPath(); g.arc(cx, cy, rTick, -Math.PI / 2 - MET_SWEEP, -Math.PI / 2 + MET_SWEEP); g.stroke();
-
-  // numerals: 0.3 1 3 10 30 100 300 W — five decibels apart, so evenly spaced
-  const labels = ['0.3', '1', '3', '10', '30', '100', '300'];
-  g.fillStyle = ink;
-  g.textAlign = 'center'; g.textBaseline = 'middle';
-  for (let i = 0; i < labels.length; i++) {
-    const a = -MET_SWEEP + (i / (labels.length - 1)) * 2 * MET_SWEEP;
-    const x = cx + Math.sin(a) * rNum, y = cy - Math.cos(a) * rNum;
-    g.save(); g.translate(x, y); g.rotate(a * 0.55);
-    g.font = '600 40px ui-sans-serif, -apple-system, Helvetica, Arial';
-    g.fillText(labels[i], 0, 0);
-    g.restore();
-  }
-
-  g.font = '600 26px ui-sans-serif, -apple-system, Helvetica, Arial';
-  g.fillStyle = 'rgba(4,16,28,0.82)';
-  g.letterSpacing = '7px';
-  g.fillText('POWER OUTPUT', cx, H * 0.155);
-  g.font = '500 21px ui-sans-serif, -apple-system, Helvetica, Arial';
-  g.fillStyle = 'rgba(4,16,28,0.68)';
-  g.fillText('WATTS INTO 8 Ω', cx, H * 0.855);
-  g.letterSpacing = '0px';
-  g.font = '500 19px ui-sans-serif, -apple-system, Helvetica, Arial';
-  g.fillStyle = 'rgba(4,16,28,0.56)';
-  g.fillText('−30 dB', cx - rTick * 0.90, cy - rTick * 0.30);
-  g.fillText('0 dB', cx + rTick * 0.92, cy - rTick * 0.30);
-
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
-  t.needsUpdate = true;
-  _dialTex = t;
-  return t;
-}
-
-// ---------------------------------------------------------------------------
 // HARDWARE — one monoblock, built once and cloned
 // ---------------------------------------------------------------------------
 const W_BODY = 0.240, H_BODY = 0.400, D_BODY = 0.384;
@@ -322,11 +301,93 @@ const PIVOT_DY = 0.056;                     // pivot below the window centre
 const PIVOT_Y = Y_MET - PIVOT_DY;
 const R_TICK = 0.086, R_NUM = 0.0672, NEEDLE_L = 0.091;
 
+// ---------------------------------------------------------------------------
+// The meter dial — silkscreen on a backlit face, drawn once into a canvas
+// ---------------------------------------------------------------------------
+let _dialTex = null;
+function dialTexture(renderer) {
+  if (_dialTex) return _dialTex;
+  const W = 1536, H = Math.round((W * MET_H) / MET_W);
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+
+  // Backlit face. Real McIntosh meter glass is a deep cyan-leaning cobalt with
+  // a modest lamp lift, not a lightbox: the silkscreen has to stay the darkest
+  // thing in the window or the ticks disappear into bloom.
+  const bg = g.createRadialGradient(W / 2, H * 0.92, 60, W / 2, H * 0.80, W * 0.86);
+  bg.addColorStop(0.00, '#4fb6ee');
+  bg.addColorStop(0.26, '#2f8ecb');
+  bg.addColorStop(0.64, '#17629c');
+  bg.addColorStop(1.00, '#0d4272');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, W, H);
+  const vg = g.createLinearGradient(0, 0, 0, H * 0.5);
+  vg.addColorStop(0, 'rgba(4,18,34,0.40)');
+  vg.addColorStop(1, 'rgba(4,18,34,0.00)');
+  g.fillStyle = vg; g.fillRect(0, 0, W, H);
+
+  const PX = W / MET_W;                    // pixels per metre
+  const cx = W / 2, cy = H / 2 + PIVOT_DY * PX;   // needle pivot, in canvas pixels
+  const rTick = R_TICK * PX, rNum = R_NUM * PX;
+  const ink = 'rgba(3,13,24,1.00)';
+  const inkS = 'rgba(3,13,24,0.80)';
+
+  // 1 dB ticks across 30 dB, majors every 5 dB
+  for (let d = 0; d <= MET_DB; d++) {
+    const a = -MET_SWEEP + (d / MET_DB) * 2 * MET_SWEEP;
+    const major = d % 5 === 0;
+    const len = major ? 58 : 26;
+    g.strokeStyle = major ? ink : inkS;
+    g.lineWidth = major ? 12 : 5.2;
+    g.lineCap = 'butt';
+    g.beginPath();
+    g.moveTo(cx + Math.sin(a) * rTick, cy - Math.cos(a) * rTick);
+    g.lineTo(cx + Math.sin(a) * (rTick - len), cy - Math.cos(a) * (rTick - len));
+    g.stroke();
+  }
+  g.strokeStyle = 'rgba(3,13,24,0.66)'; g.lineWidth = 3.6;
+  g.beginPath(); g.arc(cx, cy, rTick, -Math.PI / 2 - MET_SWEEP, -Math.PI / 2 + MET_SWEEP); g.stroke();
+
+  // numerals: 0.3 1 3 10 30 100 300 W — five decibels apart, so evenly spaced
+  const labels = ['0.3', '1', '3', '10', '30', '100', '300'];
+  g.fillStyle = ink;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let i = 0; i < labels.length; i++) {
+    const a = -MET_SWEEP + (i / (labels.length - 1)) * 2 * MET_SWEEP;
+    const x = cx + Math.sin(a) * rNum, y = cy - Math.cos(a) * rNum;
+    g.save(); g.translate(x, y); g.rotate(a * 0.55);
+    g.font = '700 62px ui-sans-serif, -apple-system, Helvetica, Arial';
+    g.fillText(labels[i], 0, 0);
+    g.restore();
+  }
+
+  g.font = '700 38px ui-sans-serif, -apple-system, Helvetica, Arial';
+  g.fillStyle = 'rgba(3,13,24,0.94)';
+  g.letterSpacing = '11px';
+  g.fillText('POWER OUTPUT', cx, H * 0.150);
+  g.font = '600 30px ui-sans-serif, -apple-system, Helvetica, Arial';
+  g.fillStyle = 'rgba(3,13,24,0.84)';
+  g.fillText('WATTS INTO 8 Ω', cx, H * 0.862);
+  g.letterSpacing = '0px';
+  g.font = '600 27px ui-sans-serif, -apple-system, Helvetica, Arial';
+  g.fillStyle = 'rgba(3,13,24,0.72)';
+  g.fillText('−30 dB', cx - rTick * 0.90, cy - rTick * 0.28);
+  g.fillText('0 dB', cx + rTick * 0.92, cy - rTick * 0.28);
+
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.anisotropy = renderer ? renderer.capabilities.getMaxAnisotropy() : 8;
+  t.needsUpdate = true;
+  _dialTex = t;
+  return t;
+}
+
 /** Variants tuned for this chassis: bead-blasted rather than mirror-polished. */
 function ampMetals() {
   const M = mats();
-  // clone, force opaque (a library material may already have been driven to
-  // opacity 0 by another stage's overlay fade), then apply the overrides
   const mk = (src, o) => {
     const m = src.clone();
     m.transparent = false; m.opacity = 1; m.depthWrite = true;
@@ -335,15 +396,42 @@ function ampMetals() {
     return m;
   };
   return {
-    // the top deck faces the strip light square-on, so it is the matt one
     top: mk(M.alu, { roughness: 0.46, envMapIntensity: 0.70, anisotropy: 0 }),
     fascia: mk(M.alu, { roughness: 0.25, envMapIntensity: 1.30, anisotropy: 0 }),
     rib: mk(M.aluV, { roughness: 0.42, envMapIntensity: 0.82, anisotropy: 0 }),
     bezel: mk(M.chrome, { roughness: 0.085, envMapIntensity: 1.15 }),
+    // Fin tips are 3 mm of rounded metal seen almost edge-on. They only read if
+    // they are glossy enough to carry a specular line off the front strip; the
+    // stock heatsink material renders the whole stack as a black void.
+    fin: mk(M.anodGrey, { roughness: 0.30, envMapIntensity: 1.55, anisotropy: 0 }),
+    finBase: mk(M.anodGrey, { roughness: 0.55, envMapIntensity: 0.85, anisotropy: 0 }),
   };
 }
 
-function buildMono() {
+/**
+ * Fin stack with a generous tip break. `GEO.heatsink` uses a 0.6 mm bevel on a
+ * 2.2 mm fin, which is not enough radius to hold a highlight; 1.2 mm on a 3 mm
+ * fin makes each tip a half-round that catches the light.
+ */
+function finStack(span, h, out, n, A) {
+  const g = new THREE.Group();
+  const baseT = 0.008, finT = 0.0030;
+  const base = new THREE.Mesh(GEO.bevelBox(span, h, baseT, 0.0012, 3), A.finBase);
+  base.position.z = -out / 2 + baseT / 2;
+  g.add(base);
+  const im = new THREE.InstancedMesh(GEO.bevelBox(finT, h, out - baseT, 0.0012, 3), A.fin, n);
+  const m = new THREE.Matrix4();
+  const pitch = span / n;
+  for (let i = 0; i < n; i++) {
+    m.makeTranslation(-span / 2 + pitch * (i + 0.5), 0, baseT / 2);
+    im.setMatrixAt(i, m);
+  }
+  g.add(im);
+  GEO.shadowed(g);
+  return g;
+}
+
+function buildMono(renderer) {
   const M = mats();
   const A = ampMetals();
   const g = new THREE.Group();
@@ -364,17 +452,16 @@ function buildMono() {
   g.add(shell);
 
   // ---- flanking heatsinks --------------------------------------------------
-  // heatsink() builds fins running out along its local +Z; rotate so they
-  // protrude sideways and the base plate lands flush on the chassis cheek.
+  // fins run out along local +Z; rotate so they protrude sideways and the base
+  // plate lands flush on the chassis cheek.
   for (const sx of [-1, 1]) {
-    const hs = GEO.heatsink(0.350, 0.330, 0.062, 26, { mat: M.anodGrey, baseT: 0.007, finT: 0.0026 });
-    hs.rotation.y = sx * Math.PI / 2;
-    hs.position.set(sx * (W_BODY / 2 + 0.031), Y_MID, 0);
+    const hs = finStack(0.350, 0.330, 0.064, 30, A);
+    hs.rotation.y = (sx * Math.PI) / 2;
+    hs.position.set(sx * (W_BODY / 2 + 0.032), Y_MID, 0);
     g.add(hs);
-    // a machined cap top and bottom ties the fin stack to the chassis
     for (const sy of [-1, 1]) {
-      const cap = new THREE.Mesh(GEO.bevelBox(0.066, 0.010, 0.354, 0.0015, 3), M.anodBlack);
-      cap.position.set(sx * (W_BODY / 2 + 0.031), Y_MID + sy * 0.170, 0);
+      const cap = new THREE.Mesh(GEO.bevelBox(0.068, 0.010, 0.354, 0.0018, 3), M.anodBlack);
+      cap.position.set(sx * (W_BODY / 2 + 0.032), Y_MID + sy * 0.170, 0);
       g.add(cap);
     }
   }
@@ -395,18 +482,14 @@ function buildMono() {
   fascia.position.set(0, Y_MID, Z_FACE);
   g.add(fascia);
 
-  // proud vertical accent ribs either side of the fascia
   for (const sx of [-1, 1]) {
     const rib = new THREE.Mesh(GEO.bevelBox(0.013, 0.392, 0.006, 0.0016, 3), A.rib);
     rib.position.set(sx * 0.107, Y_MID, Z_FACE + 0.0185);
-    rib.castShadow = rib.receiveShadow = true;
     g.add(rib);
   }
-  // a machined channel across the lower fascia carries the controls
   const chanY = Y_MID - 0.112;
   const chan = new THREE.Mesh(GEO.bevelBox(0.198, 0.058, 0.004, 0.0016, 3), M.anodBlack);
   chan.position.set(0, chanY, Z_FACE + 0.0166);
-  chan.castShadow = chan.receiveShadow = true;
   g.add(chan);
   const kn = GEO.knob(0.0165, 0.013, { body: A.fascia, mark: A.bezel });
   kn.rotation.x = Math.PI / 2;
@@ -419,7 +502,6 @@ function buildMono() {
     led.castShadow = led.receiveShadow = false;
     g.add(led);
   }
-  // engraved hairlines break up the lower panel
   for (const dy of [-0.052, 0.052]) {
     const ln = new THREE.Mesh(GEO.bevelBox(0.198, 0.0016, 0.0016, 0.0004, 2), M.anodBlack);
     ln.position.set(0, chanY + dy, Z_FACE + 0.0172);
@@ -432,13 +514,12 @@ function buildMono() {
   // ---- the meter -----------------------------------------------------------
   const Z_DIAL = Z_FACE + 0.0042;
   const dial = new THREE.Mesh(new THREE.PlaneGeometry(MET_W - 0.002, MET_H - 0.002),
-    new THREE.MeshBasicMaterial({ map: dialTexture(), toneMapped: false }));
+    new THREE.MeshBasicMaterial({ map: dialTexture(renderer), toneMapped: false }));
   dial.position.set(0, Y_MET, Z_DIAL);
   g.add(dial);
 
-  // the backlight itself, a hairline of near-white just inside the bottom lip
   const lamp = new THREE.Mesh(new THREE.PlaneGeometry(MET_W - 0.030, 0.0016),
-    new THREE.MeshBasicMaterial({ color: 0xf2f9ff, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: 0xdff0ff, toneMapped: false }));
   lamp.position.set(0, Y_MET - MET_H / 2 + 0.0026, Z_DIAL + 0.0006);
   g.add(lamp);
 
@@ -446,9 +527,7 @@ function buildMono() {
   const pivot = new THREE.Group();
   pivot.name = 'needle';
   pivot.position.set(0, PIVOT_Y, Z_DIAL + 0.0082);
-  // A lit dielectric pointer 1.6 px wide renders at almost exactly the dial's
-  // own brightness and disappears. A flat unlit silhouette always reads.
-  const needleMat = new THREE.MeshBasicMaterial({ color: 0x081826 });
+  const needleMat = new THREE.MeshBasicMaterial({ color: 0x06121e });
   needleMat.userData.ampOwned = true;
   const nd = new THREE.Mesh(GEO.bevelBox(0.0044, NEEDLE_L, 0.0020, 0.0007, 2), needleMat);
   nd.position.y = NEEDLE_L / 2;
@@ -465,22 +544,38 @@ function buildMono() {
   hub.position.set(0, PIVOT_Y, Z_DIAL + 0.0076);
   g.add(hub);
 
-  // bezel + glass
   const bShape = roundRect(MET_W + 0.020, MET_H + 0.020, 0.008);
   bShape.holes.push(roundRect(MET_W - 0.006, MET_H - 0.006, 0.005, 0, 0, THREE.Path));
   const bez = extrudePanel(bShape, 0.009, MET_W + 0.020, MET_H + 0.020, A.bezel, 0.0010);
   bez.position.set(0, Y_MET, Z_FACE + 0.0125);
   g.add(bez);
 
+  // Glass, in two layers. On a MeshPhysicalMaterial `opacity` scales the whole
+  // shaded result, specular included, so a single 22 %-opaque pane multiplies
+  // its own reflection down to nothing and the meter reads as a printed decal.
+  // Layer 1 is the smoke tint; layer 2 adds an env-only specular on top of the
+  // glow rather than multiplying it down, and is a shallow cylindrical section
+  // so the front strip lands as a sweeping highlight instead of missing.
   const smoked = M.glass.clone();
   smoked.userData.ampOwned = true;
   smoked.transparent = true;
-  smoked.opacity = 0.22;
+  smoked.opacity = 0.20;
   smoked.depthWrite = false;
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(MET_W - 0.004, MET_H - 0.004), smoked);
-  glass.position.set(0, Y_MET, Z_FACE + 0.0185);
+  glass.position.set(0, Y_MET, Z_FACE + 0.0178);
   glass.renderOrder = 2;
   g.add(glass);
+
+  const specMat = new THREE.MeshPhysicalMaterial({
+    color: 0x000000, metalness: 0, roughness: 0.02, envMapIntensity: 2.6,
+    transparent: true, opacity: 1, depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  specMat.userData.ampOwned = true;
+  const spec = new THREE.Mesh(curvedPlane(MET_W - 0.007, MET_H - 0.007, 0.0004), specMat);
+  spec.position.set(0, Y_MET, Z_FACE + 0.0190);
+  spec.renderOrder = 3;
+  g.add(spec);
 
   // ---- rear panel ----------------------------------------------------------
   const rear = new THREE.Mesh(GEO.bevelBox(0.238, 0.398, 0.008, 0.0022, 3), M.anodGrey);
@@ -497,7 +592,6 @@ function buildMono() {
   put(GEO.xlr(), -0.058, Y_MID + 0.118);
   put(GEO.rcaJack(0xd94b3a), 0.042, Y_MID + 0.118);
   put(GEO.iecInlet(), 0.058, Y_MID - 0.178);
-  // mains switch: rocker in a bezel
   const sw = new THREE.Group();
   const swb = new THREE.Mesh(GEO.bevelBox(0.024, 0.017, 0.006, 0.0010, 2), M.plastic);
   swb.position.z = 0.003; sw.add(swb);
@@ -511,29 +605,35 @@ function buildMono() {
   dial.castShadow = dial.receiveShadow = false;
   lamp.castShadow = lamp.receiveShadow = false;
   glass.castShadow = glass.receiveShadow = false;
+  spec.castShadow = spec.receiveShadow = false;
 
-  const sh = GEO.contactShadow(0.62, 0.72, 0.55, 0.0);
-  sh.position.y = 0.001;
+  // The amp stands on a 0.40 × 0.50 m plate, so the contact shadow must be that
+  // size — a wider blob hangs in mid air and darkens the floor behind.
+  const sh = GEO.contactShadow(0.40, 0.50, 0.62, 0.0);
+  sh.position.y = 0.0013;
   g.add(sh);
   return g;
 }
 
 // ---------------------------------------------------------------------------
-// OVERLAY — the schematic panel
+// OVERLAY — one instrument plate, two zones
+//
+// Zone 1: the output stage as a closed loop. Zone 2: what is actually moving
+// inside the speaker cable. Everything else this stage has to say — the
+// transfer curve, the dissipation peak, damping — is prose, because the plate
+// is beside the hardware, not instead of it.
 // ---------------------------------------------------------------------------
-const P_ORIGIN = [-0.58, 0.20, -2.66];
-const P_RY = 0.26;
-const P_SCALE = 0.74;
 
-// zone 1 — the output stage
-const Y_RP = 0.980, Y_UP = 0.912, Y_OUT = 0.828, Y_LO = 0.744, Y_RN = 0.676;
-const Y_0V = 0.790, Y_GND = 0.618;
-const DEV_X = [0.450, 0.545, 0.640];
-const X_AMP_T = 0.780, X_SPK_T = 0.940, X_LOAD = 1.000;
-// zone 2 — inside the cable
-const Y_HOT = 0.505, Y_RET = 0.425, X_C0 = 0.140, X_C1 = 1.060;
-// zone rules
-const Y_RULE1 = 0.578, Y_RULE2 = 0.352;
+// zone 1 (card-local units; the plate is 1.00 × 0.99 units)
+const Y_RP = 0.855, Y_UP = 0.755, Y_OUT = 0.635, Y_LO = 0.515, Y_RN = 0.415, Y_RET = 0.345;
+const X_SUP = 0.080, X_RETC = 0.030;
+const X_DRV = 0.275;
+const DEV_X = [0.345, 0.455, 0.565];
+const X_OUT0 = 0.315, X_AMP_T = 0.680, X_SPK_T = 0.800, X_LOAD = 0.900;
+const DEV_HW = 0.026, DEV_HH = 0.028;
+// zone 2
+const Y_RULE = 0.235, Y_HOT = 0.150, Y_RTN = 0.055;
+const X_C0 = 0.075, X_C1 = 0.905;
 
 function seg(parent, pts, color, width, opts = {}) {
   const t = new DIAG.Trace(pts.length, color, width, opts);
@@ -542,88 +642,83 @@ function seg(parent, pts, color, width, opts = {}) {
   return t;
 }
 /**
- * `diagramCard` installs a `userData.setOpacity` hook. `fadeTree` calls that
- * hook on the group *before* it reaches the plate mesh, where it caches the
- * (already scaled, therefore ~0) opacity as the base — and the plate never
- * comes back. Removing the hook lets fadeTree cache the pristine value.
+ * `diagramCard` installs a `userData.setOpacity` hook, but `fadeTree` still
+ * descends into the group afterwards and the plate mesh caches the
+ * already-scaled (therefore ~0) opacity as its base — so the plate never comes
+ * back. Removing the hook lets fadeTree cache the pristine value.
  */
 function unhookCard(card) { delete card.userData.setOpacity; return card; }
 
 function anchor(parent, x, y) {
   const o = new THREE.Object3D();
-  o.position.set(x, y, 0.004);
+  o.position.set(x, y, 0.006);
   parent.add(o);
   return o;
 }
 
-function buildOverlay(ctx) {
-  const M = mats();
+function buildOverlay() {
   const root = new THREE.Group();
   const P = new THREE.Group();
-  P.position.set(...P_ORIGIN);
-  P.rotation.y = P_RY;
-  P.scale.setScalar(P_SCALE);
+
+  // plate centre on the ray through (CARD_CX, CARD_CY), then back off to the
+  // group origin, which sits at local (0.48, 0.475)
+  const c = rayPoint(CARD_CX, CARD_CY, CARD_D);
+  P.position.copy(c)
+    .addScaledVector(CAM_R, -CARD_S * 0.48)
+    .add(new THREE.Vector3(0, -CARD_S * 0.475, 0));
+  P.rotation.y = AZ;                     // face the lens
+  P.scale.setScalar(CARD_S);
   root.add(P);
 
-  // one instrument plate, three zones divided by hairlines
-  const card = unhookCard(DIAG.diagramCard(1.12, 1.05, { opacity: 0.95 }));
-  card.position.set(0.02, 0.01, -0.004);
+  const card = unhookCard(DIAG.diagramCard(0.96, 0.95, { opacity: 0.92 }));
   P.add(card);
 
   const dimWire = 0x7b848f;
-  const dash = { dashed: true, dashSize: 0.009, gapSize: 0.007, opacity: 0.5 };
-  for (const y of [Y_RULE1, Y_RULE2]) seg(P, [[0.02, y], [1.14, y]], 0x39414c, 1.0, { opacity: 0.7 });
+  const dash = { dashed: true, dashSize: 0.010, gapSize: 0.008, opacity: 0.42 };
+  seg(P, [[-0.01, Y_RULE], [0.97, Y_RULE]], 0x39414c, 1.0, { opacity: 0.7 });
 
-  // ---- supply rails --------------------------------------------------------
-  const railP = [[0.155, Y_RP]];
-  const railN = [[0.155, Y_RN]];
-  for (const x of DEV_X) {
-    railP.push([x, Y_RP], [x, Y_UP + 0.029], [x, Y_RP]);
-    railN.push([x, Y_RN], [x, Y_LO - 0.029], [x, Y_RN]);
-  }
-  railP.push([0.74, Y_RP]);
-  railN.push([0.74, Y_RN]);
-  const railPT = seg(P, railP, PAL.am, 2.8);
-  const railNT = seg(P, railN, PAL.am, 2.8);
+  // ---- supply: two reservoirs in series, 0 V at their junction -------------
+  const railPT = seg(P, [[X_SUP, Y_RP], [0.660, Y_RP]], PAL.am, 2.8);
+  const railNT = seg(P, [[X_SUP, Y_RN], [0.660, Y_RN]], PAL.am, 2.8);
+  const capPlate = (y) => {
+    seg(P, [[X_SUP - 0.032, y + 0.010], [X_SUP + 0.032, y + 0.010]], PAL.am, 2.6, { opacity: 0.95, z: 0.004 });
+    seg(P, [[X_SUP - 0.032, y - 0.010], [X_SUP + 0.032, y - 0.010]], PAL.am, 2.6, { opacity: 0.95, z: 0.004 });
+  };
+  seg(P, [[X_SUP, Y_RP], [X_SUP, 0.760]], PAL.am, 2.0);
+  capPlate(0.750);
+  seg(P, [[X_SUP, 0.740], [X_SUP, Y_OUT]], PAL.am, 2.0);
+  seg(P, [[X_SUP, Y_OUT], [X_SUP, 0.530]], PAL.am, 2.0);
+  capPlate(0.520);
+  seg(P, [[X_SUP, 0.510], [X_SUP, Y_RN]], PAL.am, 2.0);
+  const node0 = new THREE.Mesh(new THREE.CircleGeometry(0.0075, 16),
+    new THREE.MeshBasicMaterial({ color: PAL.ink, toneMapped: false, transparent: true }));
+  node0.position.set(X_SUP, Y_OUT, 0.010);
+  node0.renderOrder = 13;
+  P.add(node0);
 
-  // ---- reservoir bank ------------------------------------------------------
-  const canGeo = GEO.bevelCyl(0.030, 0.030, 0.090, 30, 0.0028);
-  const canMat = new THREE.MeshBasicMaterial({ color: 0x2c333c, toneMapped: false, transparent: true });
-  const canEdge = [];
-  for (const [cy, top, bot] of [[0.885, Y_RP, Y_0V], [0.721, Y_0V, Y_RN]]) {
-    const can = new THREE.Mesh(canGeo, canMat);
-    can.position.set(0.155, cy, 0.010);
-    P.add(can);
-    // outline + polarity band so it reads as a capacitor, not a grey lump
-    canEdge.push(seg(P, [[0.125, cy - 0.045], [0.185, cy - 0.045], [0.185, cy + 0.045],
-      [0.125, cy + 0.045], [0.125, cy - 0.045]], PAL.am, 1.4, { opacity: 0.8, z: 0.012 }));
-    seg(P, [[0.127, cy + 0.028], [0.183, cy + 0.028]], PAL.am, 2.2, { opacity: 0.95, z: 0.012 });
-    seg(P, [[0.155, top], [0.155, cy + 0.045]], PAL.am, 2.0);
-    seg(P, [[0.155, cy - 0.045], [0.155, bot]], PAL.am, 2.0);
-  }
-  // 0 V node, and the drop to the return bus
-  seg(P, [[0.060, Y_0V], [0.300, Y_0V]], PAL.ink, 2.2, { opacity: 0.9 });
-  seg(P, [[0.060, Y_0V], [0.060, Y_GND]], PAL.ink, 2.2, { opacity: 0.9 });
+  // ---- the return: out of the 0 V node, round the outside, back to the load
+  const retRun = seg(P, [[X_SUP, Y_OUT], [X_RETC, Y_OUT], [X_RETC, Y_RET], [X_LOAD, Y_RET]],
+    PAL.ink, 3.0, { opacity: 0.92 });
 
-  // ---- driver + bias spreader ---------------------------------------------
+  // ---- driver / bias spreader ---------------------------------------------
   const blockMat = new THREE.MeshBasicMaterial({ color: 0x1b222b, toneMapped: false, transparent: true });
-  const drv = new THREE.Mesh(GEO.bevelBox(0.062, 0.048, 0.006, 0.0018, 2), blockMat);
-  drv.position.set(0.310, Y_OUT, 0.004);
-  P.add(drv);
-  seg(P, [[0.279, Y_OUT + 0.048], [0.279, Y_OUT + 0.024]], PAL.cy, 1.8, { opacity: 0.9 });
-  seg(P, [[0.341, Y_OUT], [0.385, Y_OUT]], PAL.cy, 2.0);
-  seg(P, [[0.385, Y_LO], [0.385, Y_UP], [0.425, Y_UP]], PAL.cy, 2.0);
-  seg(P, [[0.385, Y_LO], [0.425, Y_LO]], PAL.cy, 2.0);
-  const spread = new THREE.Mesh(GEO.bevelBox(0.020, 0.070, 0.005, 0.0015, 2), blockMat);
-  spread.position.set(0.385, Y_OUT, 0.004);
+  const spread = new THREE.Mesh(GEO.bevelBox(0.048, 0.185, 0.006, 0.0018, 2), blockMat);
+  spread.position.set(X_DRV, Y_OUT, 0.005);
   P.add(spread);
-  for (const [x0, y0, x1, y1] of [[0.375, Y_OUT + 0.028, 0.395, Y_OUT + 0.028],
-    [0.375, Y_OUT - 0.028, 0.395, Y_OUT - 0.028]]) {
-    seg(P, [[x0, y0], [x1, y1]], PAL.cy, 1.4, { opacity: 0.7, z: 0.006 });
-  }
+  seg(P, [[X_DRV - 0.024, Y_OUT - 0.092], [X_DRV + 0.024, Y_OUT - 0.092],
+    [X_DRV + 0.024, Y_OUT + 0.092], [X_DRV - 0.024, Y_OUT + 0.092],
+    [X_DRV - 0.024, Y_OUT - 0.092]], 0x707a86, 1.1, { opacity: 0.75, z: 0.010 });
+  seg(P, [[0.160, Y_OUT], [X_DRV - 0.024, Y_OUT]], PAL.cy, 2.0);
+  const inArrow = new THREE.Mesh(new THREE.ConeGeometry(0.0085, 0.020, 12),
+    new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true }));
+  inArrow.position.set(0.180, Y_OUT, 0.009);
+  inArrow.rotation.z = -Math.PI / 2;
+  P.add(inArrow);
+  seg(P, [[X_DRV, Y_OUT + 0.092], [X_DRV, Y_UP], [DEV_X[2], Y_UP]], PAL.cy, 1.8, { opacity: 0.85 });
+  seg(P, [[X_DRV, Y_OUT - 0.092], [X_DRV, Y_LO], [DEV_X[2], Y_LO]], PAL.cy, 1.8, { opacity: 0.85 });
 
   // ---- output devices ------------------------------------------------------
-  const devGeo = GEO.bevelBox(0.050, 0.058, 0.010, 0.0026, 3);
+  const devGeo = GEO.bevelBox(DEV_HW * 2, DEV_HH * 2, 0.010, 0.0026, 3);
   const devMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, transparent: true });
   const banks = [];
   for (const [yc, sgn] of [[Y_UP, 1], [Y_LO, -1]]) {
@@ -637,133 +732,102 @@ function buildOverlay(ctx) {
     P.add(im);
     banks.push(im);
     for (const x of DEV_X) {
-      // outline so the device reads even when it is not conducting
-      seg(P, [[x - 0.025, yc - 0.029], [x + 0.025, yc - 0.029], [x + 0.025, yc + 0.029],
-        [x - 0.025, yc + 0.029], [x - 0.025, yc - 0.029]], 0x707a86, 1.1, { opacity: 0.8, z: 0.014 });
-      // emitter resistor, then the lead to the output node
-      seg(P, [[x, yc - sgn * 0.029], [x, yc - sgn * 0.038]], PAL.am, 2.0);
-      seg(P, [[x, yc - sgn * 0.055], [x, Y_OUT]], PAL.am, 2.0);
-      const r = new THREE.Mesh(GEO.bevelBox(0.017, 0.018, 0.006, 0.0014, 2), blockMat);
-      r.position.set(x, yc - sgn * 0.0465, 0.005);
+      seg(P, [[x - DEV_HW, yc - DEV_HH], [x + DEV_HW, yc - DEV_HH], [x + DEV_HW, yc + DEV_HH],
+        [x - DEV_HW, yc + DEV_HH], [x - DEV_HW, yc - DEV_HH]], 0x707a86, 1.1, { opacity: 0.8, z: 0.014 });
+      // collector to its rail, emitter through R_E to the output node
+      seg(P, [[x, yc + sgn * DEV_HH], [x, sgn > 0 ? Y_RP : Y_RN]], PAL.am, 2.0);
+      seg(P, [[x, yc - sgn * DEV_HH], [x, yc - sgn * 0.039]], PAL.am, 1.8);
+      seg(P, [[x, yc - sgn * 0.065], [x, Y_OUT]], PAL.am, 1.8);
+      const r = new THREE.Mesh(GEO.bevelBox(0.017, 0.026, 0.006, 0.0014, 2), blockMat);
+      r.position.set(x, yc - sgn * 0.052, 0.005);
       P.add(r);
-      seg(P, [[x - 0.0085, yc - sgn * 0.0555], [x + 0.0085, yc - sgn * 0.0555],
-        [x + 0.0085, yc - sgn * 0.0375], [x - 0.0085, yc - sgn * 0.0375],
-        [x - 0.0085, yc - sgn * 0.0555]], PAL.am, 1.0, { opacity: 0.65, z: 0.008 });
+      seg(P, [[x - 0.0085, yc - sgn * 0.039], [x + 0.0085, yc - sgn * 0.039],
+        [x + 0.0085, yc - sgn * 0.065], [x - 0.0085, yc - sgn * 0.065],
+        [x - 0.0085, yc - sgn * 0.039]], PAL.am, 1.0, { opacity: 0.6, z: 0.008 });
     }
   }
 
-  // ---- output node, terminals, load, return bus ---------------------------
-  const hotRun = seg(P, [[0.420, Y_OUT], [X_LOAD, Y_OUT]], PAL.cy, 3.2);
-  const retRun = seg(P, [[0.060, Y_GND], [X_LOAD, Y_GND]], PAL.ink, 3.2, { opacity: 0.92 });
-  seg(P, [[X_LOAD, Y_OUT], [X_LOAD, 0.800]], PAL.cy, 2.6);
-  seg(P, [[X_LOAD, 0.646], [X_LOAD, Y_GND]], PAL.ink, 2.6, { opacity: 0.92 });
-  const NW = 6, coilPts = [];
-  for (let i = 0; i <= NW * 14; i++) {
-    const u = i / (NW * 14);
-    coilPts.push([X_LOAD - 0.017 + Math.cos(u * NW * DSP.TAU) * 0.017, 0.800 - u * 0.154]);
-  }
-  seg(P, coilPts, PAL.cy, 2.2, { opacity: 0.95 });
-
-  // amplifier terminals and loudspeaker terminals: the cable runs between them
+  // ---- output node, terminals, load ---------------------------------------
+  const hotRun = seg(P, [[X_OUT0, Y_OUT], [X_LOAD, Y_OUT]], PAL.cy, 3.2);
   const ring = (x, y, col) => {
-    const t = new THREE.Mesh(new THREE.RingGeometry(0.0055, 0.0095, 22),
+    const t = new THREE.Mesh(new THREE.RingGeometry(0.0060, 0.0100, 22),
       new THREE.MeshBasicMaterial({ color: col, toneMapped: false, transparent: true, side: THREE.DoubleSide }));
-    t.position.set(x, y, 0.010);
+    t.position.set(x, y, 0.011);
     t.renderOrder = 13;
     P.add(t);
   };
-  for (const x of [X_AMP_T, X_SPK_T]) { ring(x, Y_OUT, PAL.rd); ring(x, Y_GND, 0xa8b0ba); }
-  seg(P, [[X_AMP_T, Y_OUT - 0.012], [X_AMP_T, Y_RULE1 + 0.006]], dimWire, 1.0, dash);
-  seg(P, [[X_SPK_T, Y_OUT - 0.012], [X_SPK_T, Y_RULE1 + 0.006]], dimWire, 1.0, dash);
+  for (const x of [X_AMP_T, X_SPK_T]) { ring(x, Y_OUT, PAL.rd); ring(x, Y_RET, 0xa8b0ba); }
 
-  // ---- direction arrows: the loop, and it reverses -------------------------
-  const arrowMat = new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true });
-  const arrows = [];
-  for (const [ax, ay, base] of [[0.700, Y_OUT, 0], [0.860, Y_OUT, 0],
-    [0.700, Y_GND, Math.PI], [0.300, Y_GND, Math.PI]]) {
-    const a = new THREE.Mesh(new THREE.ConeGeometry(0.0085, 0.021, 12), arrowMat);
-    a.position.set(ax, ay, 0.009);
-    a.userData.base = base;
-    P.add(a);
-    arrows.push(a);
+  const NW = 6, coilPts = [];
+  for (let i = 0; i <= NW * 14; i++) {
+    const u = i / (NW * 14);
+    coilPts.push([X_LOAD - 0.018 + Math.cos(u * NW * DSP.TAU) * 0.018, 0.612 - u * 0.234]);
   }
+  seg(P, [[X_LOAD, Y_OUT], [X_LOAD, 0.612]], PAL.cy, 2.4);
+  seg(P, coilPts, PAL.cy, 2.2, { opacity: 0.95 });
+  seg(P, [[X_LOAD, 0.378], [X_LOAD, Y_RET]], PAL.ink, 2.4, { opacity: 0.9 });
+
+  // magnification callout: the strip below IS the cable between those terminals
+  seg(P, [[X_AMP_T, Y_RET - 0.014], [X_C0, Y_HOT + 0.030]], dimWire, 1.0, dash);
+  seg(P, [[X_SPK_T, Y_RET - 0.014], [X_C1, Y_HOT + 0.030]], dimWire, 1.0, dash);
+
+  // ---- direction arrows ----------------------------------------------------
+  // The rail currents never reverse: charge always runs +V → upper device →
+  // node → lower device → −V. Only the load loop changes sign. Two fixed
+  // arrows, two that flip.
+  const arrowMat = new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true });
+  const mkArrow = (x, y, rot) => {
+    const a = new THREE.Mesh(new THREE.ConeGeometry(0.0090, 0.022, 12), arrowMat);
+    a.position.set(x, y, 0.010);
+    a.rotation.z = rot;
+    P.add(a);
+    return a;
+  };
+  mkArrow(0.190, Y_RP, -Math.PI / 2);          // +V rail: always toward the devices
+  mkArrow(0.190, Y_RN, Math.PI / 2);           // −V rail: always back to the supply
+  const arrowOut = mkArrow(0.600, Y_OUT, -Math.PI / 2);
+  const arrowRet = mkArrow(0.600, Y_RET, Math.PI / 2);
 
   // ---- zone 2: inside the cable -------------------------------------------
-  seg(P, [[X_C0, Y_HOT], [X_C1, Y_HOT]], 0x5b6774, 6.5, { opacity: 0.95 });
-  seg(P, [[X_C0, Y_RET], [X_C1, Y_RET]], 0x5b6774, 6.5, { opacity: 0.95 });
-  const dim = DIAG.dimension([X_C0, Y_RULE2 + 0.026, 0.002], [X_C1, Y_RULE2 + 0.026, 0.002],
-    { color: dimWire, head: 0.011 });
-  P.add(dim);
+  for (const y of [Y_HOT, Y_RTN]) seg(P, [[X_C0, y], [X_C1, y]], 0x5b6774, 7.0, { opacity: 0.95 });
+  P.add(DIAG.dimension([X_C0, 0.014, 0.002], [X_C1, 0.014, 0.002], { color: dimWire, head: 0.012 }));
 
   const front = [];
-  for (const y of [Y_HOT, Y_RET]) {
-    const s = DIAG.glow(PAL.cy, 0.070, 0.9, radialSprite(128));
-    s.position.set(X_C0, y, 0.012);
+  for (const y of [Y_HOT, Y_RTN]) {
+    const s = DIAG.glow(PAL.cy, 0.072, 0.9, radialSprite(128));
+    s.position.set(X_C0, y, 0.013);
     P.add(s);
     front.push(s);
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.0045, 0.024),
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.0050, 0.026),
       new THREE.MeshBasicMaterial({ color: 0xdff2ff, toneMapped: false, transparent: true }));
-    b.position.set(X_C0, y, 0.013);
+    b.position.set(X_C0, y, 0.014);
     P.add(b);
     front.push(b);
   }
 
-  const NC = 24;
-  const carriers = new DIAG.Swarm(NC * 2, { color: PAL.am, size: 0.0048, additive: false });
+  const NC = 22;
+  const carriers = new DIAG.Swarm(NC * 2, { color: PAL.am, size: 0.0050, additive: false });
   P.add(carriers);
   const marks = [];
-  for (let i = 0; i < NC; i++) marks.push(X_C0 + 0.024 + (i / (NC - 1)) * (X_C1 - X_C0 - 0.048));
+  for (let i = 0; i < NC; i++) marks.push(X_C0 + 0.030 + (i / (NC - 1)) * (X_C1 - X_C0 - 0.060));
   const tickPts = [];
-  for (const x of marks) tickPts.push([x, Y_HOT - 0.016], [x, Y_HOT - 0.009], [x, Y_HOT - 0.016]);
-  seg(P, tickPts, dimWire, 0.9, { opacity: 0.4 });
+  for (const x of marks) tickPts.push([x, Y_HOT - 0.017], [x, Y_HOT - 0.010], [x, Y_HOT - 0.017]);
+  seg(P, tickPts, dimWire, 0.9, { opacity: 0.38 });
 
-  // ---- zone 3: the two graphs ---------------------------------------------
-  const gain = stageOut(2, VBIAS) / 2;
-  const gT = new DIAG.Graph({
-    w: 0.44, h: 0.22, xRange: [-2, 2], yRange: [-2, 2],
-    xTicks: [-2, -1, 0, 1, 2], yTicks: [-2, -1, 0, 1, 2], zeroLine: 0,
-  });
-  gT.position.set(0.085, 0.060, 0);
-  // the class-B deadband: neither device conducts until the drive clears 2·V_be
-  const dead = new THREE.Mesh(
-    new THREE.PlaneGeometry(gT.x(VBE_Q * 2) - gT.x(-VBE_Q * 2), 0.22),
-    new THREE.MeshBasicMaterial({ color: PAL.rd, transparent: true, opacity: 0.11, depthWrite: false, toneMapped: false }));
-  dead.position.set(gT.x(0), 0.11, -0.0003);
-  dead.renderOrder = 6;
-  gT.add(dead);
-  gT.addTrace((x) => x * gain, { color: dimWire, width: 1.1, n: 2, dashed: true, opacity: 0.5 });
-  gT.addTrace((x) => stageOut(x, 0), { color: PAL.rd, width: 2.4, n: 190 });
-  gT.addTrace((x) => stageOut(x, VBIAS_LOW), { color: PAL.vi, width: 1.8, n: 190, dashed: true });
-  gT.addTrace((x) => stageOut(x, VBIAS), { color: PAL.cy, width: 2.8, n: 190 });
-  P.add(gT);
-
-  const gD = new DIAG.Graph({
-    w: 0.44, h: 0.22, xRange: [0, 1], yRange: [0, 470],
-    xTicks: [0, 0.25, 0.5, 0.75, 1], yTicks: [0, 117.5, 235, 352.5, 470],
-  });
-  gD.position.set(0.625, 0.060, 0);
-  gD.addTrace((x) => pDc(Math.sqrt(x)), { color: PAL.vi, width: 1.6, n: 140, opacity: 0.75 });
-  gD.addTrace((x) => x * P_MAX, { color: PAL.cy, width: 2.2, n: 140 });
-  gD.addTrace((x) => pDiss(Math.sqrt(x)), { color: PAL.am, width: 2.8, n: 140 });
-  gD.addMarker(X_PEAK, { color: PAL.am, width: 1.3 });
-  const dotD = gD.addDot(PAL.am, 0.0065);
-  const dotP = gD.addDot(PAL.cy, 0.0055);
-  P.add(gD);
-
-  return { root, P, banks, arrows, front, carriers, marks, hotRun, retRun, railPT, railNT, dotD, dotP };
+  return { root, P, banks, front, carriers, marks, hotRun, retRun, railPT, railNT, arrowOut, arrowRet };
 }
 
 // ---------------------------------------------------------------------------
 // animation constants (all derived from the geometry above)
 // ---------------------------------------------------------------------------
-const CAR_SCALE = (X_C1 - X_C0 - 0.040) / CAB_LEN;  // screen metres per real metre
-const CAR_AMP   = 0.0060;                            // visible amplitude, metres
-const CAR_EXAG  = CAR_AMP / (X_DRIFT * CAR_SCALE);   // ≈ 5 × 10⁵
+const CAR_SCALE = (X_C1 - X_C0 - 0.060) / CAB_LEN;   // card units per real metre
+const CAR_AMP   = 0.0105;                            // visible amplitude, card units
+const CAR_EXAG  = CAR_AMP / (X_DRIFT * CAR_SCALE);   // ≈ 9 × 10⁵
 const FRONT_RUN = 1.0;                               // real seconds per traverse
 const FRONT_GAP = 0.45;
 const FRONT_RAT = FRONT_RUN / T_CABLE;               // ≈ 6.6 × 10⁷ slow-down
 
-const _cA = new THREE.Color(), _cB = new THREE.Color();
+const _cA = new THREE.Color();
 const HOT = new THREE.Color(PAL.am), COLD = new THREE.Color(0x39414b);
 const exp10 = (v, d = 1) => {
   const e = Math.floor(Math.log10(Math.abs(v)));
@@ -778,13 +842,13 @@ export default {
   nav: 'Monoblocks',
   kicker: 'Monoblocks',
   standfirst: 'The amplifier is a valve on the power supply, not a source of energy.',
-  shot: { position: [0.442, 0.995, -0.560], target: [-0.122, 0.625, -2.78], fov: 31 },
+  shot: SHOT,
   timeScale: TS,
   alwaysUpdate: true,
 
   build(ctx) {
     const hardware = new THREE.Group();
-    const a = buildMono();
+    const a = buildMono(ctx.renderer);
     a.position.set(LAYOUT.monoL.x, LAYOUT.monoL.y, LAYOUT.monoL.z);
     a.rotation.y = LAYOUT.monoL.ry;
     const b = a.clone(true);
@@ -793,55 +857,44 @@ export default {
     hardware.add(a, b);
 
     const needles = [a.getObjectByName('needle'), b.getObjectByName('needle')];
+    // clear of the chassis, above its front-left corner, so the label sits on
+    // empty backdrop and never prints on the fascia or reaches the chapter rail
     const metAnchor = new THREE.Object3D();
-    metAnchor.position.set(-0.06, Y_MET + 0.062, Z_FACE + 0.02);
+    metAnchor.position.set(-0.135, 0.470, 0.210);
     a.add(metAnchor);
 
-    const S = buildOverlay(ctx);
+    const S = buildOverlay();
     S.needles = needles;
     S.deflect = [0.5, 0.5];
     this._s = S;
-    this._live = { v: 0, i: 0, p: 0, pd: P_QUIES, mean: 0 };
+    this._live = { v: 0, i: 0, p: 0, pd: P_QUIES, mean: 0, dc: P_QUIES };
 
     const L = ctx.labels;
     const P = S.P;
     S.L = {
       meter: L.add(metAnchor, {
-        kicker: 'Meter', cls: 'acc', offset: [10, -104],
-        text: `log · ${MET_DB} dB to ${MET_FS} W<br>`, value: '—',
+        kicker: 'Meter', cls: 'acc', priority: 4, offset: [72, -34],
+        text: `log · ${MET_DB} dB to ${MET_FS} W`, value: '—',
       }),
-      supply: L.add(anchor(P, 0.10, Y_RP), {
-        kicker: 'Supply', cls: 'am', offset: [-14, -28],
-        text: `±${RAIL} V · ${(C_RES * 1000).toFixed(0)} mF · ${E_RES.toFixed(0)} J<br>`,
+      supply: L.add(anchor(P, X_SUP, Y_RP), {
+        kicker: 'Supply', cls: 'am', priority: 3, occlude: false, offset: [10, -62],
+        text: `±${RAIL} V mean · ${(C_RES * 1000).toFixed(0)} mF · ${E_RES.toFixed(0)} J<br>`
+          + `${V_RIPPLE.toFixed(2)} V p-p ripple at full output`,
         value: '—',
       }),
-      dev: L.add(anchor(P, 0.545, 1.062), {
-        kicker: 'Output devices', cls: 'am', offset: [0, -16],
-        text: `${NPAIR} NPN · ${NPAIR} PNP<br>`, value: '—',
+      dev: L.add(anchor(P, DEV_X[1], Y_RP), {
+        kicker: 'Output devices', cls: 'am', priority: 3, occlude: false, offset: [40, -62],
+        text: `${NPAIR} NPN · ${NPAIR} PNP · I<sub>q</sub> ${(IQ * 1000).toFixed(0)} mA each`,
+        value: '—',
       }),
-      load: L.add(anchor(P, X_LOAD, 0.723), {
-        kicker: 'Load', cls: 'acc', offset: [44, 0],
-        text: `${RL} Ω coil<br>Bl ${BL} N/A<br>`,
-        value: `e ${E_BEMF.toFixed(1)} V pk`,
+      ret: L.add(anchor(P, 0.42, Y_RET), {
+        kicker: 'Return path', cls: '', priority: 1, occlude: false, offset: [0, 26],
+        value: `DF ${DF_TERM.toFixed(0)} → ${DF_DRIVE.toFixed(0)}`,
       }),
-      ret: L.add(anchor(P, 0.17, Y_GND), {
-        kicker: 'Return path', cls: '', offset: [16, 24],
-        text: 'the loop closes<br>', value: `DF ${DF_TERM.toFixed(0)} → ${DF_DRIVE.toFixed(0)}`,
-      }),
-      cable: L.add(anchor(P, 0.60, Y_HOT), {
-        kicker: 'Inside the cable', cls: 'am', offset: [0, -36],
-        text: `field ${exp10(V_FIELD, 2)} m/s<br>carriers ${exp10(V_DRIFT, 2)} m/s<br>`,
-        value: `× ${exp10(SPEED_RAT)}`,
-      }),
-      gT: L.add(anchor(P, 0.305, 0.292), {
-        kicker: 'Class AB handover', cls: 'acc', offset: [0, -16],
-        text: `±2 V of a ±${V_PK.toFixed(0)} V swing<br>`,
-        value: `I_q ${(IQ * 1000).toFixed(0)} vs ${(IQ_LOW * 1000).toFixed(2)} mA`,
-      }),
-      gD: L.add(anchor(P, 0.845, 0.292), {
-        kicker: 'Device dissipation', cls: 'am', offset: [0, -16],
-        text: '0 → 470 W vs output<br>',
-        value: `peak ${P_D_PEAK.toFixed(0)} W at ${(X_PEAK * 100).toFixed(0)} %`,
+      cable: L.add(anchor(P, 0.49, Y_HOT), {
+        kicker: 'Inside the cable', cls: 'am', priority: 2, occlude: false, offset: [0, 92],
+        text: `field ${exp10(V_FIELD, 2)} m/s · carriers ${exp10(V_DRIFT, 2)} m/s`,
+        value: `ratio ${exp10(SPEED_RAT)}`,
       }),
     };
 
@@ -873,7 +926,7 @@ export default {
     const p = v * i;
     const mean = DSP.powerW(vpk / Math.SQRT2, RL);
     const pd = pDiss(mm);
-    this._live = { v, i, p, pd, mean };
+    this._live = { v, i, p, pd, mean, dc: pDc(mm) };
 
     // --- meters: a 180 ms ballistic on a logarithmic power scale ------------
     const meanR = DSP.powerW((V_PK * envR) / Math.SQRT2, RL);
@@ -888,9 +941,7 @@ export default {
     if (ctx.stage.reveal < 0.004) return;        // overlay is invisible — stop here
 
     // --- which bank is the valve right now ---------------------------------
-    const duty = Math.abs(i) / I_PK;
-    // both banks always carry at least I_q; the split follows i_N·i_P ≈ I_q².
-    // Brightness is √(i_device/I_pk) — a monotone map, not a linear one.
+    // Both banks always carry at least I_q; the split follows i_N·i_P ≈ I_q².
     const iUp = 0.5 * (i + Math.sqrt(i * i + 4 * IQ_TOT * IQ_TOT));
     const iDn = iUp - i;
     for (let b = 0; b < 2; b++) {
@@ -899,97 +950,81 @@ export default {
       for (let d = 0; d < NPAIR; d++) S.banks[b].setColorAt(d, _cA);
       S.banks[b].instanceColor.needsUpdate = true;
     }
-    S.railPT._baseOpacity = i >= 0 ? 0.45 + 0.55 * duty : 0.30;
-    S.railNT._baseOpacity = i < 0 ? 0.45 + 0.55 * duty : 0.30;
-    S.hotRun._baseOpacity = 0.50 + 0.50 * duty;
-    S.retRun._baseOpacity = 0.50 + 0.50 * duty;
+    const duty = Math.abs(i) / I_PK;
+    S.railPT._baseOpacity = 0.34 + 0.66 * Math.sqrt(DSP.clamp(iUp / I_PK, 0, 1));
+    S.railNT._baseOpacity = 0.34 + 0.66 * Math.sqrt(DSP.clamp(iDn / I_PK, 0, 1));
+    S.hotRun._baseOpacity = 0.48 + 0.52 * duty;
+    S.retRun._baseOpacity = 0.48 + 0.52 * duty;
 
-    for (const a of S.arrows) a.rotation.z = (i >= 0 ? -Math.PI / 2 : Math.PI / 2) + a.userData.base;
+    // only the load loop reverses; the rails do not
+    S.arrowOut.rotation.z = i >= 0 ? -Math.PI / 2 : Math.PI / 2;
+    S.arrowRet.rotation.z = i >= 0 ? Math.PI / 2 : -Math.PI / 2;
 
     // --- inside the cable ---------------------------------------------------
-    // carriers: displacement is the integral of current, so it goes as −cos.
+    // carriers: displacement is the integral of current, so it goes as −cos,
+    // and the two conductors move in antiphase — that is the return path.
     const disp = -Math.cos(ph) * CAR_AMP * env;
     const N = S.marks.length;
     S.carriers.update((n) => {
       const lane = n < N ? 0 : 1;
       const x = S.marks[n % N] + (lane === 0 ? disp : -disp);
-      return { p: [x, lane === 0 ? Y_HOT : Y_RET, 0.008], s: 1, c: PAL.am };
+      return { p: [x, lane === 0 ? Y_HOT : Y_RTN, 0.009], s: 1, c: PAL.am };
     });
     // field front: its own clock, and the label says so
     const u = (tp % (FRONT_RUN + FRONT_GAP)) / FRONT_RUN;
-    const live = u <= 1;
     const fx = X_C0 + DSP.clamp(u, 0, 1) * (X_C1 - X_C0);
-    const fade = live ? Math.min(1, (1 - u) * 6) : 0;
-    for (let f = 0; f < S.front.length; f++) {
-      const o = S.front[f];
+    const fade = u <= 1 ? Math.min(1, (1 - u) * 6) : 0;
+    for (const o of S.front) {
       o.position.x = fx;
-      if (o.isSprite) { o.material.color.setRGB(0.36 * fade, 0.75 * fade, 0.95 * fade); }
-      else { o.material.color.setRGB(0.87 * fade, 0.95 * fade, 1.0 * fade); }
+      if (o.isSprite) o.material.color.setRGB(0.36 * fade, 0.75 * fade, 0.95 * fade);
+      else o.material.color.setRGB(0.87 * fade, 0.95 * fade, 1.0 * fade);
     }
 
-    // --- the dissipation graph tracks the operating point -------------------
-    const x = mm * mm;
-    S.dotD.userData.setData(x, pd);
-    S.dotP.userData.setData(x, pOut(mm));
-
-    S.L.supply.setValue(`${(railCurrent(mm)).toFixed(2)} A mean`);
-    S.L.dev.setValue(`${Math.abs(i).toFixed(2)} A · ${i >= 0 ? 'upper' : 'lower'}`);
+    S.L.supply.setValue(`${railCurrent(mm).toFixed(2)} A per rail`);
+    S.L.dev.setValue(`${Math.abs(i).toFixed(2)} A · ${i >= 0 ? 'upper' : 'lower'} bank`);
   },
 
   content() {
     return `
-<p>The input carries almost no energy. The monoblock does not enlarge it — it uses it to <b>modulate a current drawn from the power supply</b>. The signal is only the valve setting.</p>
+<div class="key"><span class="lab">The idea</span><p>The input carries almost no energy. The monoblock uses it to <b>modulate a current drawn from the supply</b>, and that current is a loop: every ampere out of the red terminal returns through the black one. Nothing is consumed at the loudspeaker.</p></div>
 
 <h3>300 W into 8 Ω</h3>
 <div class="eq">V<sub>rms</sub> = √(P·R) = √(300 × 8) = <span class="hl">${V_RMS.toFixed(1)} V</span>
-V<sub>pk</sub>  = ${V_RMS.toFixed(1)} × √2       = <span class="hl">${V_PK.toFixed(1)} V</span>
-I<sub>pk</sub>  = ${V_PK.toFixed(1)} / 8        = <span class="hl">${I_PK.toFixed(2)} A</span>
-<span class="c">±${RAIL} V rails leave ${HEADROOM.toFixed(1)} V for saturation,
-driver headroom and I·R<sub>E</sub> = ${(I_PK / NPAIR * RE).toFixed(2)} V</span></div>
+V<sub>pk</sub>  = ${V_RMS.toFixed(1)} × √2      = <span class="hl">${V_PK.toFixed(1)} V</span>
+I<sub>pk</sub>  = ${V_PK.toFixed(1)} / 8       = <span class="hl">${I_PK.toFixed(2)} A</span>
+I<sub>rail</sub> = I<sub>pk</sub>/π = ${I_DC_FULL.toFixed(2)} A mean per rail
+V<sub>ripple</sub> = I/(f·C) = ${I_DC_FULL.toFixed(2)}/(100 × 0.015)
+       = <span class="hl">${V_RIPPLE.toFixed(2)} V p-p</span></div>
+<p>The <span class="num">±${RAIL} V</span> is the loaded mean, not a no-load peak. It leaves <span class="num">${HEADROOM.toFixed(1)} V</span>, of which <span class="num">${(V_RIPPLE / 2).toFixed(2)} V</span> is the ripple trough: <span class="num">${(HEADROOM - V_RIPPLE / 2).toFixed(1)} V</span> for V<sub>ce(sat)</sub>, driver V<sub>be</sub> and I·R<sub>E</sub> = <span class="num">${((I_PK / NPAIR) * RE).toFixed(2)} V</span>. Transformer regulation would take more still.</p>
 
 <h3>Class AB</h3>
 <p>Both banks idle slightly on. Oliver's condition puts one thermal voltage across each emitter resistor:</p>
 <div class="eq">V<sub>T</sub>  = kT/q at 300 K       = ${(VT * 1000).toFixed(2)} mV
-I<sub>q</sub>  = V<sub>T</sub>/R<sub>E</sub> = ${(VT * 1000).toFixed(2)}/${RE}  = <span class="hl">${(IQ * 1000).toFixed(0)} mA</span> per device
-V<sub>bias</sub> = 2V<sub>be</sub> + 2I<sub>q</sub>R<sub>E</sub>      = <span class="hl">${VBIAS.toFixed(3)} V</span>
+I<sub>q</sub>  = V<sub>T</sub>/R<sub>E</sub> = ${(VT * 1000).toFixed(2)}/${RE} = <span class="hl">${(IQ * 1000).toFixed(0)} mA</span>
+V<sub>bias</sub> = 2V<sub>be</sub> + 2I<sub>q</sub>R<sub>E</sub>     = <span class="hl">${VBIAS.toFixed(3)} V</span>
 P<sub>idle</sub> = 2 × ${RAIL} × ${NPAIR} × ${(IQ * 1000).toFixed(0)} mA = <span class="hl">${P_QUIES.toFixed(1)} W</span></div>
-<p>At <span class="num">${VBIAS_LOW.toFixed(2)} V</span> of bias the idle current collapses to <span class="num">${(IQ_LOW * 1e3).toFixed(2)} mA</span> and the curve flattens through zero. Unbiased, the deadband is the full <span class="num">±${(VBE_Q * 2).toFixed(2)} V</span> — crossover distortion, worst at low level.</p>
-<p>Worst-case heat is not at full power. Ideal class B peaks at m = 2/π — <span class="num">${(M_WORST * M_WORST * 100).toFixed(1)}%</span> of maximum output power:</p>
-<div class="eq">P<sub>d</sub> = 2V<sub>cc</sub>²/(π²R) = 2 × ${RAIL}²/(π² × 8) = <span class="hl">${P_D_IDEAL.toFixed(1)} W</span></div>
-<p>The idle current moves the modelled peak to <span class="num">${P_D_PEAK.toFixed(0)} W</span> at <span class="num">${(X_PEAK * 100).toFixed(0)}%</span>, against <span class="num">${pOut(M_PEAK).toFixed(0)} W</span> delivered: <span class="num">${(P_D_PEAK / (2 * NPAIR)).toFixed(0)} W</span> per device.</p>
+<p>Solved without bias, the same stage gives under 1 % of that curve out to <span class="num">±${DB_1PC.toFixed(2)} V</span> of drive and half of it only at <span class="num">±${DB_HALF.toFixed(2)} V</span>; conduction begins at <span class="num">±V<sub>be</sub> = ±${VBE_Q.toFixed(2)} V</span>, a dead band <span class="num">${(2 * VBE_Q).toFixed(2)} V</span> wide. Crossover distortion is therefore worst at low level, where that volt is most of the signal. At <span class="num">${VBIAS_LOW.toFixed(2)} V</span> of bias, I<sub>q</sub> collapses to <span class="num">${(IQ_LOW * 1e3).toFixed(2)} mA</span> and it is nearly as bad.</p>
 
-<h3>The meter</h3>
-<p>The needle reads power, so the scale is logarithmic: ${MET_DB} dB ending at the rated ${MET_FS} W, so the left stop is <span class="num">${(MET_FS / Math.pow(10, MET_DB / 10)).toFixed(1)} W</span>. Instantaneous power pulses at twice the signal frequency; the needle integrates it.</p>
-<div class="eq">p(t) = v·i = v²/R   <span class="c">pulsing at 2f, never negative</span>
-P    = V<sub>pk</sub>²/2R      <span class="c">what the needle settles on</span>
-θ ∝ (10·log₁₀(P/${MET_FS}) + ${MET_DB}) / ${MET_DB}</div>
+<h3>Heat</h3>
+<p>Worst-case dissipation is not at full power. With idle current included the peak is <span class="num">${P_D_PEAK.toFixed(0)} W</span> total, <span class="num">${(P_D_PEAK / (2 * NPAIR)).toFixed(0)} W</span> per device, at <span class="num">${(X_PEAK * 100).toFixed(1)} %</span> of maximum output, where only <span class="num">${pOut(M_PEAK).toFixed(0)} W</span> is delivered. Clipping arrives at <span class="num">${(X_CLIP * 100).toFixed(0)} %</span> of the ideal rail-to-rail <span class="num">${P_MAX.toFixed(1)} W</span> — which is the ${P_RATED} W rating.</p>
+<div class="myth"><span class="lab">Commonly got wrong</span><p>That is the resistive worst case. A loudspeaker is reactive; at 4 Ω and 60° of phase angle the same output level roughly doubles the V<sub>ce</sub>·I<sub>c</sub> product in the conducting device. That is what the safe-operating-area limiter is for.</p></div>
 
-<h3>Damping and back-EMF</h3>
-<p>The moving coil generates <span class="num">e = Bl·v</span> back into the amplifier. A low output impedance short-circuits it; the resulting current makes a force opposing the motion.</p>
-<div class="eq">at ${F_BEMF} Hz, ${(X_BEMF * 1000).toFixed(0)} mm pk: v = ω·x = ${V_CONE.toFixed(2)} m/s
-e = Bl·v = ${BL} × ${V_CONE.toFixed(2)} = <span class="hl">${E_BEMF.toFixed(1)} V pk</span>
-→ ${I_BEMF.toFixed(2)} A → ${F_BRAKE.toFixed(0)} N braking the cone
-
-DF at the terminals = 8/${Z_OUT}     = <span class="hl">${DF_TERM.toFixed(0)}</span>
-2 × ${CAB_LEN} m of 2.5 mm² copper  = ${(R_CABLE * 1000).toFixed(1)} mΩ
-DF at the driver = 8/${(Z_OUT + R_CABLE).toFixed(3)}  = <span class="hl">${DF_DRIVE.toFixed(0)}</span></div>
-<div class="myth"><span class="lab">Commonly got wrong</span><p>${DF_TERM.toFixed(0)} is not three times better than ${DF_DRIVE.toFixed(0)}. The coil's own <span class="num">${RE_COIL} Ω</span> is in the same loop, so total damping resistance rises only from <span class="num">${(RE_COIL + Z_OUT).toFixed(3)} Ω</span> to <span class="num">${(RE_COIL + Z_OUT + R_CABLE).toFixed(3)} Ω</span> — <span class="num">${(DAMP_PEN * 100).toFixed(1)}%</span>. Cable cross-section matters a little; the last digit of a damping-factor figure does not.</p></div>
+<h3>Damping</h3>
+<p>DF = <span class="num">8/${Z_OUT}</span> = <span class="num">${DF_TERM.toFixed(0)}</span> at the terminals; <span class="num">2 × ${CAB_LEN} m</span> of 2.5 mm² copper adds <span class="num">${(R_CABLE * 1000).toFixed(1)} mΩ</span>, giving <span class="num">${DF_DRIVE.toFixed(0)}</span> at the driver. That is not three times worse: the coil's own <span class="num">${RE_COIL} Ω</span> is in the same loop, so the total damping resistance rises from <span class="num">${(RE_COIL + Z_OUT).toFixed(2)} Ω</span> to <span class="num">${(RE_COIL + Z_OUT + R_CABLE).toFixed(2)} Ω</span> — <span class="num">${(DAMP_PEN * 100).toFixed(1)} %</span>.</p>
 
 <h3>Inside the cable</h3>
-<p>At ${I_PK.toFixed(2)} A peak in 2.5 mm² copper the drift velocity is <span class="num">${exp10(V_DRIFT, 2)} m/s</span>, and on a 1 kHz tone the carriers do not travel — they oscillate about a fixed point, peak displacement <span class="num">${(X_DRIFT * 1e9).toFixed(1)} nm</span>. The field carries the energy at <span class="num">${VF} c = ${exp10(V_FIELD, 2)} m/s</span> and crosses the ${CAB_LEN} m run in <span class="num">${(T_CABLE * 1e9).toFixed(1)} ns</span>; in that time a carrier moves <span class="num">${(X_IN_T * 1e12).toFixed(1)} pm</span>, less than one atomic spacing. On screen the drift is exaggerated ${exp10(CAR_EXAG, 0)}× and the front slowed ${exp10(FRONT_RAT, 0)}×.</p>
-
-<div class="key"><span class="lab">The idea</span><p>Current is a loop. Every ampere out of the red terminal returns through the black one to the supply; the two conductors carry equal and opposite currents at every instant. Nothing is used up at the loudspeaker.</p></div>`;
+<p>At <span class="num">${I_PK.toFixed(2)} A</span> peak in 2.5 mm² copper the carriers drift at <span class="num">${exp10(V_DRIFT, 2)} m/s</span> — and on a 1 kHz tone they do not travel at all, they oscillate <span class="num">±${(X_DRIFT * 1e9).toFixed(1)} nm</span> about a fixed point. The field crosses the ${CAB_LEN} m run at <span class="num">${VF} c</span> in <span class="num">${(T_CABLE * 1e9).toFixed(1)} ns</span>, in which time a carrier moves <span class="num">${(X_IN_T * 1e12).toFixed(1)} pm</span>. On the plate the drift is exaggerated <span class="num">${exp10(CAR_EXAG, 0)}×</span> and the front slowed <span class="num">${exp10(FRONT_RAT, 0)}×</span>.</p>`;
   },
 
   readouts() {
-    const s = this._live || { v: 0, i: 0, p: 0, pd: P_QUIES };
+    const s = this._live || { v: 0, i: 0, p: 0, pd: P_QUIES, mean: 0, dc: P_QUIES };
     return [
       { k: 'Out V', v: s.v.toFixed(1), u: 'V', cls: 'acc', bar: Math.abs(s.v) / V_PK },
       { k: 'Out I', v: s.i.toFixed(2), u: 'A', cls: 'am', bar: Math.abs(s.i) / I_PK },
       { k: 'P inst', v: s.p.toFixed(0), u: 'W', cls: 'am', bar: s.p / (V_PK * I_PK) },
-      { k: 'Rail', v: `±${RAIL.toFixed(1)}`, u: 'V', cls: '', bar: 1 - Math.abs(s.v) / RAIL },
-      { k: 'Device P', v: s.pd.toFixed(0), u: 'W', cls: 'am', bar: s.pd / P_D_PEAK },
-      { k: 'Damping', v: `${DF_TERM.toFixed(0)} → ${DF_DRIVE.toFixed(0)}`, u: 'term → driver', cls: '' },
+      { k: 'P mean', v: s.mean < 10 ? s.mean.toFixed(2) : s.mean.toFixed(0), u: 'W', cls: 'acc', bar: meterFrac(s.mean) },
+      { k: 'Device heat', v: s.pd.toFixed(0), u: 'W', cls: 'am', bar: s.pd / P_D_PEAK },
+      { k: 'Supply draw', v: s.dc.toFixed(0), u: 'W', cls: '', bar: s.dc / P_DC_FULL },
     ];
   },
 };

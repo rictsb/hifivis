@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LAYOUT } from '../core/layout.js';
+import { LAYOUT, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
@@ -15,101 +15,72 @@ import * as DSP from '../core/dsp.js';
 const TAU = DSP.TAU;
 
 // ---- supply -----------------------------------------------------------------
+// ONE system draw for the whole piece: the same operating point overview.js
+// states — both monoblocks at full output, class AB at ~55 %, plus 100 W of
+// front end. Treated as unity power factor, which is an idealisation and is
+// said to be one on screen.
 const F_MAINS = 50;                                  // Hz  (EN 50160, UK/EU)
 const V_RMS = 230;                                   // V   (EN 50160 nominal)
-const V_PK = V_RMS * Math.SQRT2;                     // 325.269 V
-const I_RMS = 5.00;                                  // A — system draw, 1150 VA
-const I_PK = I_RMS * Math.SQRT2;                     // 7.0711 A
-const VA = V_RMS * I_RMS;                            // 1150 VA (unity PF assumed)
+const V_PK = V_RMS * Math.SQRT2;                     // 325.27 V
+const P_AMP = 600, ETA_AB = 0.55, P_FRONT = 100;
+const P_SYS = (2 * P_AMP) / ETA_AB + P_FRONT;        // 2281.8 W
+const I_RMS = P_SYS / V_RMS;                         // 9.921 A rms
+const I_PK = I_RMS * Math.SQRT2;                     // 14.030 A
+const VA = V_RMS * I_RMS;                            // 2281.8 VA
 
-// ---- the lead: 3 × 2.5 mm², individually insulated, laid up on a filler -----
+// ---- copper -----------------------------------------------------------------
+// 100 % IACS at 20 °C, the value amp.js uses. σ is derived from ρ so the two
+// can never drift apart.
+const RHO_CU = 1.7241e-8;                            // Ω·m
+const SIGMA_CU = 1 / RHO_CU;                         // 5.8001e7 S/m
+
+// ---- the lead: 3 × 2.5 mm² H05VV-F, cores laid up on a filler ---------------
 const A_MM2 = 2.5;                                   // mm²
 const R_COND = Math.sqrt(A_MM2 / Math.PI) * 1e-3;    // 8.9206e-4 m
 const D_COND = 2 * R_COND;                           // 1.7841 mm
 const T_INS = 0.80e-3;                               // m, insulation wall
 const R_INS_R = R_COND + T_INS;                      // 1.6921 mm
-const PITCH_CORE = 6.80e-3;                          // m, lay-up triangle side
-const LEAD_OD = 2 * (PITCH_CORE / Math.sqrt(3) + R_INS_R + 1.4e-3); // 14.04 mm
-const L_LEAD = 2.00;                                 // m
-const RHO_CU = 1.678e-8;                             // Ω·m at 20 °C
-const R_LOOP = (RHO_CU * 2 * L_LEAD) / (A_MM2 * 1e-6); // 26.85 mΩ, out AND back
-const V_DROP = I_RMS * R_LOOP;                       // 0.134 V
-const P_LOSS = I_RMS * I_RMS * R_LOOP;               // 0.671 W
+const PITCH_CORE = 3.90e-3;                          // m, lay-up triangle side
+const T_SHEATH = 1.60e-3;                            // m, filler + sheath
+const LEAD_OD = 2 * (PITCH_CORE / Math.sqrt(3) + R_INS_R + T_SHEATH); // 11.09 mm
 
 // ---- carriers ---------------------------------------------------------------
-const V_DRIFT_PK = DSP.driftVelocity(I_PK, A_MM2);   // 2.0785e-4 m/s
-const X_DRIFT_PK = DSP.driftDisplacement(V_DRIFT_PK, F_MAINS); // 6.616e-7 m
+const V_DRIFT_PK = DSP.driftVelocity(I_PK, A_MM2);   // 4.1243e-4 m/s
+const X_DRIFT_PK = DSP.driftDisplacement(V_DRIFT_PK, F_MAINS); // 1.3128e-6 m
 
 // Sommerfeld free-electron gas in copper. The classical equipartition figure
 // √(3kT/m) = 1.15e5 m/s is in most textbooks and is wrong for a metal: the gas
 // is degenerate, so the relevant speed is the Fermi velocity.
 const HBAR = 1.054571817e-34;                        // J·s
 const M_E = 9.1093837015e-31;                        // kg
-const K_F = Math.cbrt(3 * Math.PI * Math.PI * DSP.N_CU);   // 1.3599e10 m⁻¹
-const V_FERMI = (HBAR * K_F) / M_E;                  // 1.5743e6 m/s  (E_F = 7.05 eV)
+const K_F = Math.cbrt(3 * Math.PI * Math.PI * DSP.N_CU);   // 1.3596e10 m⁻¹
+const V_FERMI = (HBAR * K_F) / M_E;                  // 1.5739e6 m/s  (E_F = 7.05 eV)
 const V_CLASSICAL = 1.1543e5;                        // √(3kT/m) at 293 K, for contrast
-const SIGMA_CU = 5.96e7;                             // S/m at 20 °C (100 % IACS)
-const TAU_COLL = (M_E * SIGMA_CU) / (DSP.N_CU * DSP.E_CHARGE ** 2); // 2.490e-14 s
-const MFP = V_FERMI * TAU_COLL;                      // 3.920e-8 m  (39.2 nm)
-const D_DIFF = (V_FERMI * MFP) / 3;                  // 0.02057 m²/s
-const X_THERMAL = Math.sqrt((2 * D_DIFF) / F_MAINS); // 0.02869 m rms in one period
-const N_COLL = 1 / F_MAINS / TAU_COLL;               // 8.03e11 collisions per cycle
+const TAU_COLL = (M_E * SIGMA_CU) / (DSP.N_CU * DSP.E_CHARGE ** 2); // 2.423e-14 s
+const MFP = V_FERMI * TAU_COLL;                      // 3.814e-8 m  (38 nm)
+const D_DIFF = (V_FERMI * MFP) / 3;                  // 0.02001 m²/s
+const X_THERMAL = Math.sqrt((2 * D_DIFF) / F_MAINS); // 0.02829 m rms in one period
+const N_COLL = 1 / F_MAINS / TAU_COLL;               // 8.25e11 collisions per cycle
 
 // ---- field ------------------------------------------------------------------
 const VF_CABLE = 0.66;                               // velocity factor, PVC flex
 const V_FIELD = DSP.signalSpeed(VF_CABLE);           // 1.9786e8 m/s
-const SPEED_RATIO = V_FIELD / V_DRIFT_PK;            // 9.52e11
+const SPEED_RATIO = V_FIELD / V_DRIFT_PK;            // 4.80e11
 const LAMBDA_MAINS = V_FIELD / F_MAINS;              // 3.957e6 m  (3957 km)
 
-// ---- linear supply downstream ----------------------------------------------
-const V_SEC = 40;                                    // V rms secondary
-const V_SEC_PK = V_SEC * Math.SQRT2;                 // 56.569 V
-const V_DIODE = 0.85;                                // V, soft-recovery Si at rating
-const V_RECT_PK = V_SEC_PK - 2 * V_DIODE;            // 54.869 V (a bridge = 2 drops)
-const C_RES = 20e-3;                                 // F  (2 × 10 mF)
-const I_DC = 2.0;                                    // A
-const F_RIPPLE = 2 * F_MAINS;                        // 100 Hz, full wave
-const V_RIPPLE_EST = I_DC / (F_RIPPLE * C_RES);      // 1.000 V pk-pk
-
-// Peak-detect model of the reservoir: it holds the rectified peak, then sags at
-// dV/dt = I/C until the next peak overtakes it.
-const RAIL_N = 400;
-const RAIL = (() => {
-  const T = 1 / F_MAINS;
-  const steps = RAIL_N * 4;
-  const dt = (4 * T) / steps;
-  const buf = new Float64Array(steps);
-  let v = V_RECT_PK;
-  for (let i = 0; i < steps; i++) {
-    const rect = Math.max(0, V_SEC_PK * Math.abs(Math.sin(TAU * F_MAINS * i * dt)) - 2 * V_DIODE);
-    v = Math.max(rect, v - (I_DC / C_RES) * dt);
-    buf[i] = v;
-  }
-  const out = new Float64Array(RAIL_N);
-  let conducting = 0;
-  for (let i = 0; i < RAIL_N; i++) {
-    out[i] = buf[steps - RAIL_N + i];
-    const rect = Math.max(0, V_SEC_PK * Math.abs(Math.sin(TAU * F_MAINS * i * dt)) - 2 * V_DIODE);
-    if (Math.abs(rect - out[i]) < 1e-9) conducting++;
-  }
-  let mx = -1e9, mn = 1e9;
-  for (const q of out) { if (q > mx) mx = q; if (q < mn) mn = q; }
-  return { v: out, max: mx, min: mn, ripple: mx - mn, mean: (mx + mn) / 2, duty: conducting / RAIL_N };
-})();
-const V_RIPPLE_SIM = RAIL.ripple;                    // 0.942 V pk-pk
-const COND_MS = (RAIL.duty * 1000) / F_MAINS / 2;    // 0.58 ms per half cycle
-const I_CHARGE = I_DC / RAIL.duty;                   // 34 A mean while conducting
-
 // ---- drawing scales — every one of these is printed on screen ---------------
-const MAG = 25;                                      // ×, the copper and its jacket
-const MAG_DRIFT = 75000;                             // ×, carrier displacement only
-const MAG_EXTRA = MAG_DRIFT / MAG;                   // 3000× the copper's own scale
-const MAG_LATTICE = 7.04e7;                          // ×, lattice inset
-const A_CU = 0.36149e-9;                             // m, fcc lattice parameter
-const D_NN = A_CU / Math.SQRT2;                      // 0.2556 nm, {100} square pitch
-const FIELD_SLOW = 1e8;                              // field clock ÷ this, vs sim time
+const MAG = 26;                                      // ×, the copper and its jacket
+const MAG_DRIFT = 26000;                             // ×, carrier displacement only
+const MAG_EXTRA = MAG_DRIFT / MAG;                   // ×1000 on the copper's own scale
+const FIELD_SLOW = 4e7;                              // field clock ÷ this, vs sim time
 const TIME_SCALE = 0.02;                             // sim s per real s → 1 : 50
-const FIELD_TOTAL_SLOW = FIELD_SLOW / TIME_SCALE;    // 1 : 5×10⁹ vs real time
+const FIELD_TOTAL_SLOW = FIELD_SLOW / TIME_SCALE;    // 1 : 1.25×10⁹ vs real time
+
+// What the eye actually reads, in card metres per REAL second. Both exaggerations
+// collapse into these two numbers, so their ratio is quotable.
+const SEEN_DRIFT = V_DRIFT_PK * MAG_DRIFT * TIME_SCALE;          // 0.198 m/s
+const SEEN_FIELD = (V_FIELD * MAG * TIME_SCALE) / FIELD_SLOW;    // 3.166 m/s
+const SEEN_RATIO = SEEN_FIELD / SEEN_DRIFT;                      // ×16
 
 const SUPS = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '-': '⁻' };
 const sup = (n) => String(n).split('').map((c) => SUPS[c] || c).join('');
@@ -119,7 +90,7 @@ function sci(v, d = 2) {
   const m = v / Math.pow(10, e);
   return `${m.toFixed(d)}×10${sup(e)}`;
 }
-const CYS = '#5cc0f2', AMS = '#f0b35a', GYS = '#8f98a4', RDS = '#f2795c', GRS = '#7fd6a2';
+const CYS = '#5cc0f2', AMS = '#f0b35a', GYS = '#98a1ad', RDS = '#f2795c';
 
 // ---------------------------------------------------------------------------
 // small local helpers
@@ -135,16 +106,10 @@ function preFade(root, op) {
   return root;
 }
 
-function card(w, h, opacity = 0.62) {
+function card(w, h, opacity = 0.90) {
   const g = DIAG.diagramCard(w, h, { opacity, pad: 0.024 });
   g.userData.plate.userData._baseOp = opacity;
   return g;
-}
-
-function ringTrace(cx, cy, r, color, width = 1.2, n = 56, opts = {}) {
-  const t = new DIAG.Trace(n, color, width, opts);
-  t.write((i, u) => [cx + Math.cos(u * TAU) * r, cy + Math.sin(u * TAU) * r, opts.z || 0]);
-  return t;
 }
 
 function poly(pts, color, width = 1.4, opts = {}) {
@@ -291,6 +256,21 @@ function buildConditioner() {
       const s = new THREE.Mesh(GEO.bevelBox(w - 0.004, 0.0035, 0.0055, 0.0008, 2), M.anodGrey);
       s.position.set(cx, yTopFace - TOPT / 2, z - FT / 2);
       s.castShadow = s.receiveShadow = true;
+      g.add(s);
+    }
+  }
+
+  // brushed inlay along the top front edge — catches the key light and gives the
+  // lid a second material, which is most of what stops it reading as a slab
+  const inlay = new THREE.Mesh(GEO.bevelBox(CW - 0.09, 0.0022, 0.030, 0.0007, 2), M.aluV);
+  inlay.position.set(0, yTopFace - TOPT + 0.0006, CD / 2 - FT - 0.030);
+  inlay.castShadow = inlay.receiveShadow = true;
+  g.add(inlay);
+  for (const sx of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const s = GEO.screw(0.0014);
+      s.rotation.x = 0;                              // lid screws face +Y
+      s.position.set(sx * (CW / 2 - 0.014), yTopFace - TOPT + 0.0012, -0.140 + i * 0.088 - FT / 2);
       g.add(s);
     }
   }
@@ -444,24 +424,35 @@ function buildConditioner() {
 // ===========================================================================
 // HARDWARE — the mains lead
 // ===========================================================================
+// Out of the inlet, down the rack's right rear corner, a slack hairpin on the
+// floor beside the rack (the only part the hero shot sees), then away behind
+// the rack to a wall socket. The length is measured off the curve, not asserted.
 
 const LEAD_PTS = [
-  [0.207, 0.1725, -3.522], [0.240, 0.166, -3.585], [0.300, 0.128, -3.622],
-  [0.362, 0.066, -3.598], [0.404, 0.020, -3.520], [0.436, 0.014, -3.400],
-  [0.470, 0.014, -3.180], [0.462, 0.014, -2.940], [0.404, 0.014, -2.700],
-  [0.286, 0.015, -2.430], [0.128, 0.016, -2.190], [-0.086, 0.017, -2.010],
-  [-0.330, 0.018, -1.925], [-0.600, 0.019, -1.895], [-0.880, 0.019, -1.912],
-  [-1.160, 0.018, -1.980], [-1.430, 0.017, -2.100],
+  [0.207, 0.1725, -3.522], [0.228, 0.1660, -3.580], [0.276, 0.1380, -3.628],
+  [0.344, 0.0900, -3.646], [0.416, 0.0400, -3.612], [0.456, 0.0170, -3.530],
+  [0.462, 0.0160, -3.420], [0.458, 0.0160, -3.290], [0.446, 0.0160, -3.160],
+  [0.424, 0.0160, -3.072], [0.386, 0.0160, -3.022], [0.344, 0.0160, -3.030],
+  [0.320, 0.0160, -3.092], [0.326, 0.0160, -3.200], [0.340, 0.0160, -3.330],
+  [0.344, 0.0170, -3.470], [0.318, 0.0175, -3.594], [0.220, 0.0180, -3.684],
+  [0.030, 0.0180, -3.762], [-0.230, 0.0180, -3.910], [-0.480, 0.0180, -4.190],
+  [-0.668, 0.0180, -4.570], [-0.740, 0.0180, -4.980],
 ];
+
+const LEAD_CURVE = new THREE.CatmullRomCurve3(LEAD_PTS.map((p) => new THREE.Vector3(...p)));
+const L_LEAD = LEAD_CURVE.getLength();               // ≈ 3.1 m, inlet to socket
+const R_LOOP = (RHO_CU * 2 * L_LEAD) / (A_MM2 * 1e-6); // out AND back
+const V_DROP = I_RMS * R_LOOP;
+const P_LOSS = I_RMS * I_RMS * R_LOOP;
 
 function buildLead() {
   const M = mats();
   const g = new THREE.Group();
-  const curve = new THREE.CatmullRomCurve3(LEAD_PTS.map((p) => new THREE.Vector3(...p)));
-  const jacket = M.plastic.clone();
-  jacket.color.setHex(0x17191d);
-  jacket.roughness = 0.44;
-  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 200, LEAD_OD / 2, 14, false), jacket);
+  const curve = LEAD_CURVE;
+  const jacket = M.rubber.clone();
+  jacket.color.setHex(0x191b1f);
+  jacket.roughness = 0.62;
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 320, LEAD_OD / 2, 16, false), jacket);
   tube.castShadow = tube.receiveShadow = true;
   g.add(tube);
 
@@ -473,22 +464,28 @@ function buildLead() {
   collar.position.set(0.207, 0.1725, -3.524);
   g.add(collar);
 
-  for (const t of [0.055, 0.32, 0.62]) {
+  // a moulded strain relief and two cable ties: small parts sell the scale
+  for (const t of [0.055, 0.30]) {
     const p = curve.getPointAt(t);
     const tan = curve.getTangentAt(t);
-    const fr = new THREE.Mesh(GEO.bevelCyl(0.0092, 0.0092, 0.013, 18, 0.0008), M.anodGrey);
+    const fr = new THREE.Mesh(GEO.bevelCyl(0.0072, 0.0072, 0.011, 18, 0.0008), M.anodGrey);
     fr.position.copy(p);
     fr.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan);
     fr.castShadow = true;
     g.add(fr);
   }
 
+  // the hairpin on the floor gets its own contact shadow, or it floats
+  const sh = GEO.contactShadow(0.40, 0.62, 0.55, 0.0010);
+  sh.position.set(0.392, 0, -3.26);
+  g.add(sh);
+
   // Instantaneous power p(t) = VI(1 − cos 2ωt): real, 100 Hz, never negative.
   const sheathMat = new THREE.MeshBasicMaterial({
     color: PAL.am, transparent: true, opacity: 0.0, depthWrite: false,
     blending: THREE.AdditiveBlending, toneMapped: false, side: THREE.BackSide,
   });
-  const sheath = new THREE.Mesh(new THREE.TubeGeometry(curve, 180, LEAD_OD * 0.92, 12, false), sheathMat);
+  const sheath = new THREE.Mesh(new THREE.TubeGeometry(curve, 220, LEAD_OD * 1.35, 12, false), sheathMat);
   sheath.renderOrder = 12;
   g.add(sheath);
 
@@ -498,18 +495,18 @@ function buildLead() {
 }
 
 // ===========================================================================
-// OVERLAY — card A: the cable
+// OVERLAY — the one card: the lead in section
 // ===========================================================================
 
-const A_W = 1.02, A_H = 1.14;
-const XA0 = 0.115, XA1 = 0.885;                   // 30.8 mm of real cable
-const R_CU = R_COND * MAG;                        // 0.02230
-const R_INS = R_INS_R * MAG;                      // 0.04230
-const PITCH = PITCH_CORE * MAG;                   // 0.17000
-const Y_L = 0.895, Y_N = Y_L - PITCH, Y_E = Y_L - 2 * PITCH;   // 0.895 / 0.725 / 0.555
-const Y_DIM = 1.055;                              // the ×25 comparison row
-const Z_CORE = 0.055;
-const N_CARR = 30;
+const A_W = 0.80, A_H = 0.42;
+const XA0 = 0.118, XA1 = 0.712;                   // 29.7 mm of real cable at ×20
+const R_CU = R_COND * MAG;                        // 0.017841
+const R_INS = R_INS_R * MAG;                      // 0.033841
+const PITCH = PITCH_CORE * MAG;                   // 0.078
+const Y_L = 0.335, Y_N = Y_L - PITCH, Y_E = Y_L - 2 * PITCH;   // 0.335 / 0.257 / 0.179
+const Y_DIM = 0.400;                              // the ×20 comparison row
+const Z_CORE = 0.050;
+const N_CARR = 26;
 
 function halfCyl(len, r, mat, seg) {
   const gm = new THREE.CylinderGeometry(r, r, len, seg, 1, true, Math.PI / 2, Math.PI);
@@ -520,29 +517,23 @@ function halfCyl(len, r, mat, seg) {
 
 function buildCableCard() {
   const root = new THREE.Group();
-  root.position.set(-1.36 + A_W / 2, 0.100 + A_H / 2, -2.55);
+  root.position.set(0.06, 0.554, -2.88);
   const g = new THREE.Group();
   g.position.set(-A_W / 2, -A_H / 2, 0);
   root.add(g);
-  g.add(card(A_W, A_H, 0.93));
+  g.add(card(A_W, A_H, 0.90));
 
   const M = mats();
-  // Everything in the section is drawn back-to-front by renderOrder with
-  // depthWrite off, so the layers stack predictably however the card is tilted.
-  const layer = (m, order) => {
-    m.transparent = true; m.depthWrite = false; m.side = THREE.DoubleSide;
-    m.userData.order = order;
-    return m;
-  };
+  const layer = (m) => { m.transparent = true; m.depthWrite = false; m.side = THREE.DoubleSide; return m; };
   // NOTE: a concave metal half-tube is a mirror. Keep it rough and dim or it
   // focuses the studio strip into a caustic that punches straight through bloom.
-  const cuMat = layer(M.copper.clone(), 8);
+  const cuMat = layer(M.copper.clone());
   cuMat.color.setHex(0xb06a38);
   cuMat.roughness = 0.62;
   cuMat.metalness = 0.75;
   cuMat.envMapIntensity = 0.55;
   const cuE = cuMat.clone(); cuE.color.setHex(0x7d4b2b); cuE.envMapIntensity = 0.45;
-  const insMat = layer(M.plastic.clone(), 6);
+  const insMat = layer(M.plastic.clone());
   insMat.color.setHex(0x0c0f13);
   insMat.roughness = 0.82;
   insMat.clearcoat = 0.25;
@@ -593,38 +584,38 @@ function buildCableCard() {
       g.add(face);
     }
     for (const dy of [R_CU, -R_CU]) {
-      g.add(poly([[XA0, c.y + dy, Z_CORE + 0.001], [XA1, c.y + dy, Z_CORE + 0.001]], 0xe8b98c, 1.2, { opacity: 0.8, renderOrder: 11 }));
+      g.add(poly([[XA0, c.y + dy, Z_CORE + 0.001], [XA1, c.y + dy, Z_CORE + 0.001]], 0xe8b98c, 1.1, { opacity: 0.75, renderOrder: 11 }));
     }
     for (const dy of [R_INS, -R_INS]) {
-      g.add(poly([[XA0, c.y + dy, Z_CORE + 0.001], [XA1, c.y + dy, Z_CORE + 0.001]], 0x5b636e, 1.0, { opacity: 0.65, renderOrder: 11 }));
+      g.add(poly([[XA0, c.y + dy, Z_CORE + 0.001], [XA1, c.y + dy, Z_CORE + 0.001]], 0x5b636e, 0.9, { opacity: 0.6, renderOrder: 11 }));
     }
   }
 
   // ---- the closed loop, drawn unbroken ------------------------------------
-  const XS = 0.048, XLD = 0.972, ZL = Z_CORE + 0.006;
-  for (const [x, h] of [[XS, PITCH + 0.09], [XLD, PITCH + 0.09]]) {
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.050, h), new THREE.MeshBasicMaterial({
+  const XS = 0.048, XLD = 0.760, ZL = Z_CORE + 0.006;
+  for (const [x, h] of [[XS, PITCH + 0.070], [XLD, PITCH + 0.070]]) {
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.042, h), new THREE.MeshBasicMaterial({
       color: 0x0f151c, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false,
     }));
     b.position.set(x, (Y_L + Y_N) / 2, Z_CORE - 0.003);
     b.renderOrder = 9;
     b.userData._baseOp = 0.9;
     g.add(b);
-    g.add(poly([[x - 0.025, (Y_L + Y_N) / 2 - h / 2, ZL], [x + 0.025, (Y_L + Y_N) / 2 - h / 2, ZL],
-      [x + 0.025, (Y_L + Y_N) / 2 + h / 2, ZL], [x - 0.025, (Y_L + Y_N) / 2 + h / 2, ZL],
-      [x - 0.025, (Y_L + Y_N) / 2 - h / 2, ZL]], 0x49525d, 1.0, { opacity: 0.85, renderOrder: 10 }));
+    g.add(poly([[x - 0.021, (Y_L + Y_N) / 2 - h / 2, ZL], [x + 0.021, (Y_L + Y_N) / 2 - h / 2, ZL],
+      [x + 0.021, (Y_L + Y_N) / 2 + h / 2, ZL], [x - 0.021, (Y_L + Y_N) / 2 + h / 2, ZL],
+      [x - 0.021, (Y_L + Y_N) / 2 - h / 2, ZL]], 0x49525d, 1.0, { opacity: 0.85, renderOrder: 10 }));
   }
-  g.add(poly([[XS, Y_L, ZL], [XA0, Y_L, ZL]], PAL.am, 2.2, { opacity: 0.9, renderOrder: 12 }));
-  g.add(poly([[XA1, Y_L, ZL], [XLD, Y_L, ZL], [XLD, Y_N, ZL], [XA1, Y_N, ZL]], PAL.am, 2.2, { opacity: 0.9, renderOrder: 12 }));
-  g.add(poly([[XA0, Y_N, ZL], [XS, Y_N, ZL], [XS, Y_L, ZL]], PAL.am, 2.2, { opacity: 0.9, renderOrder: 12 }));
+  g.add(poly([[XS, Y_L, ZL], [XA0, Y_L, ZL]], PAL.am, 2.0, { opacity: 0.9, renderOrder: 12 }));
+  g.add(poly([[XA1, Y_L, ZL], [XLD, Y_L, ZL], [XLD, Y_N, ZL], [XA1, Y_N, ZL]], PAL.am, 2.0, { opacity: 0.9, renderOrder: 12 }));
+  g.add(poly([[XA0, Y_N, ZL], [XS, Y_N, ZL], [XS, Y_L, ZL]], PAL.am, 2.0, { opacity: 0.9, renderOrder: 12 }));
 
-  // earth: bonded at both ends, no current
-  const eOpt = { opacity: 0.8, renderOrder: 12, dashed: true, dashSize: 0.011, gapSize: 0.009 };
-  g.add(poly([[XA1, Y_E, ZL], [XLD, Y_E, ZL], [XLD, Y_N - 0.045, ZL]], PAL.gr, 1.7, eOpt));
-  g.add(poly([[XA0, Y_E, ZL], [XS, Y_E, ZL], [XS, Y_E - 0.042, ZL]], PAL.gr, 1.7, eOpt));
+  // earth: bonded at both ends, no return current
+  const eOpt = { opacity: 0.75, renderOrder: 12, dashed: true, dashSize: 0.010, gapSize: 0.008 };
+  g.add(poly([[XA1, Y_E, ZL], [XLD, Y_E, ZL], [XLD, Y_N - 0.040, ZL]], PAL.gr, 1.5, eOpt));
+  g.add(poly([[XA0, Y_E, ZL], [XS, Y_E, ZL], [XS, Y_E - 0.038, ZL]], PAL.gr, 1.5, eOpt));
   for (let i = 0; i < 3; i++) {
-    const w = 0.034 - i * 0.010;
-    g.add(poly([[XS - w / 2, Y_E - 0.042 - i * 0.009, ZL], [XS + w / 2, Y_E - 0.042 - i * 0.009, ZL]], PAL.gr, 1.8, { opacity: 0.8, renderOrder: 12 }));
+    const w = 0.030 - i * 0.009;
+    g.add(poly([[XS - w / 2, Y_E - 0.038 - i * 0.008, ZL], [XS + w / 2, Y_E - 0.038 - i * 0.008, ZL]], PAL.gr, 1.6, { opacity: 0.8, renderOrder: 12 }));
   }
 
   // ---- current arrows: they reverse 100 times a second ---------------------
@@ -632,81 +623,44 @@ function buildCableCard() {
   for (const c of cores) {
     if (c.sign === 0) continue;
     for (let i = 0; i < 4; i++) {
-      const a = arrowHead(0.0135, PAL.am, 0.95);
-      a.position.set(XA0 + len * (0.15 + i * 0.235), c.y, Z_CORE + 0.014);
+      const a = arrowHead(0.0115, PAL.am, 0.95);
+      a.position.set(XA0 + len * (0.14 + i * 0.24), c.y, Z_CORE + 0.014);
       g.add(a);
       arrows.push({ m: a, sign: c.sign });
     }
   }
 
-  // ---- E in the dielectric, alternating with S = E × H --------------------
+  // ---- E in the dielectric, alternating; S = E × H, which does not --------
   const gapMid = (Y_L + Y_N) / 2;
   const eLines = [], eHeads = [], sHeads = [];
-  for (let i = 0; i < 6; i++) {
-    const x = 0.345 + i * 0.098;
+  for (let i = 0; i < 5; i++) {
+    const x = 0.276 + i * 0.088;
     const t = poly([[x, Y_L - R_INS, Z_CORE + 0.010], [x, gapMid, Z_CORE + 0.010], [x, Y_N + R_INS, Z_CORE + 0.010]],
-      PAL.cy, 1.4, { opacity: 0.55, renderOrder: 12, dashed: true, dashSize: 0.008, gapSize: 0.006 });
+      PAL.cy, 1.3, { opacity: 0.55, renderOrder: 12, dashed: true, dashSize: 0.007, gapSize: 0.005 });
     g.add(t); eLines.push(t);
-    const h = arrowHead(0.0095, PAL.cy, 0.8);
+    const h = arrowHead(0.0080, PAL.cy, 0.8);
     h.position.set(x, gapMid, Z_CORE + 0.012);
     g.add(h); eHeads.push(h);
   }
-  for (let i = 0; i < 5; i++) {
-    const a = arrowHead(0.0115, PAL.am, 0.55);
-    a.position.set(0.394 + i * 0.098, gapMid, Z_CORE + 0.012);
+  for (let i = 0; i < 4; i++) {
+    const a = arrowHead(0.0098, PAL.am, 0.55);
+    a.position.set(0.320 + i * 0.088, gapMid, Z_CORE + 0.012);
     g.add(a); sHeads.push(a);
-  }
-  // fringing outside the pair
-  for (const [yc, s] of [[Y_L + R_INS, 1], [Y_E - R_INS, -1]]) {
-    for (let i = 0; i < 3; i++) {
-      const x = XA0 + len * (0.24 + i * 0.26);
-      const t = new DIAG.Trace(20, PAL.cy, 1.0, { opacity: 0.24, renderOrder: 12 });
-      t.write((j, u) => {
-        const a = Math.PI * u;
-        return [x + Math.sin(a) * 0.062, yc + s * (1 - Math.cos(a)) * 0.026, Z_CORE + 0.006];
-      });
-      g.add(t); eLines.push(t);
-    }
-  }
-
-  // ---- B notation: ⊙ out of the page, ⊗ into it ---------------------------
-  // live current +x ⇒ B out of the page above it, into the page below it; the
-  // neutral's opposite current makes the two add between the pair.
-  const bGlyphs = [];
-  for (const s of [
-    { x: 0.235, y: Y_L + R_INS + 0.040, base: +1 },
-    { x: 0.235, y: gapMid, base: -1 },
-    { x: 0.800, y: gapMid, base: -1 },
-    { x: 0.800, y: (Y_N + Y_E) / 2, base: +1 },
-  ]) {
-    const grp = new THREE.Group();
-    grp.position.set(s.x, s.y, Z_CORE + 0.016);
-    const r = 0.0095;
-    grp.add(ringTrace(0, 0, r, PAL.cy, 1.2, 28, { opacity: 0.7, renderOrder: 13 }));
-    const out = disc(0, 0, 0.0006, 0.0028, PAL.cy, 0.9, 12);
-    const cross = new THREE.Group();
-    cross.add(poly([[-r * 0.68, -r * 0.68, 0.0006], [r * 0.68, r * 0.68, 0.0006]], PAL.cy, 1.2, { opacity: 0.85, renderOrder: 13 }));
-    cross.add(poly([[-r * 0.68, r * 0.68, 0.0006], [r * 0.68, -r * 0.68, 0.0006]], PAL.cy, 1.2, { opacity: 0.85, renderOrder: 13 }));
-    grp.add(out, cross);
-    g.add(grp);
-    bGlyphs.push({ out, cross, base: s.base });
   }
 
   // ---- travelling energy front, in the dielectric only --------------------
   const frontGrp = new THREE.Group();
   // |S| is far larger between live and neutral than anywhere else, so the band
   // is weighted rather than uniform.
-  const GAPH = (PITCH - 2 * R_INS) * 0.78;
-  const frontBands = [];
-  for (const [y, h, wgt] of [[gapMid, GAPH, 1.00], [(Y_N + Y_E) / 2, GAPH, 0.42],
-    [Y_L + R_INS + 0.030, 0.032, 0.28], [Y_E - R_INS - 0.030, 0.032, 0.28]]) {
-    const b = bandPlane(0.190, h, PAL.am, 0.19 * wgt);
+  const GAPH = (PITCH - 2 * R_INS) * 0.80;
+  for (const [y, h, wgt] of [[gapMid, GAPH, 1.00], [(Y_N + Y_E) / 2, GAPH, 0.40],
+    [Y_L + R_INS + 0.022, 0.024, 0.26], [Y_E - R_INS - 0.022, 0.024, 0.26]]) {
+    const b = bandPlane(0.140, h, PAL.am, 0.22 * wgt);
     b.position.set(0, y, Z_CORE + 0.020);
-    b.userData.wgt = 0.19 * wgt;
+    b.userData.wgt = 0.22 * wgt;
     frontGrp.add(b);
-    frontBands.push(b);
-    const e = poly([[0.064, y - h / 2, Z_CORE + 0.021], [0.064, y + h / 2, Z_CORE + 0.021]],
-      PAL.am, 1.8, { opacity: 0.50 * wgt, renderOrder: 14 });
+    const e = poly([[0.047, y - h / 2, Z_CORE + 0.021], [0.047, y + h / 2, Z_CORE + 0.021]],
+      PAL.am, 1.7, { opacity: 0.55 * wgt, renderOrder: 14 });
     frontGrp.add(e);
   }
   g.add(frontGrp);
@@ -718,7 +672,7 @@ function buildCableCard() {
     for (let i = 0; i < N_CARR; i++) {
       const k = ci * 97 + i * 7 + 3;
       carriers.push({
-        x: XA0 + 0.070 + rnd(k) * (len - 0.140),
+        x: XA0 + 0.062 + rnd(k) * (len - 0.124),
         y: c.y + (rnd(k * 3 + 1) - 0.5) * R_CU * 1.45,
         z: Z_CORE - R_CU * 0.5 + rnd(k * 5 + 2) * R_CU * 0.7,
         s: c.sign,
@@ -728,252 +682,50 @@ function buildCableCard() {
       });
     }
   });
-  const swarm = new DIAG.Swarm(carriers.length, { color: PAL.cy, size: 0.0048, additive: true });
+  const swarm = new DIAG.Swarm(carriers.length, { color: PAL.cy, size: 0.0042, additive: true });
   g.add(swarm);
 
-  // ---- dimensions ----------------------------------------------------------
-  // (a) conductor diameter, vertical across the live core — true ×25
-  const xd = 0.070;
-  const dimD = DIAG.dimension([xd, Y_L - R_CU, Z_CORE + 0.004], [xd, Y_L + R_CU, Z_CORE + 0.004],
-    { color: PAL.ink3, width: 1.3, head: 0.0085 });
-  preFade(dimD, 0.9); g.add(dimD);
-  for (const dy of [R_CU, -R_CU]) {
-    g.add(poly([[xd - 0.014, Y_L + dy, Z_CORE + 0.004], [XA0 + 0.008, Y_L + dy, Z_CORE + 0.004]], PAL.ink3, 0.8, { opacity: 0.4, renderOrder: 11 }));
-  }
-
-  // (b) the same ×25 scale, laid out horizontally: ⌀ beside the carrier swing
-  const yD = Y_DIM, xRef = 0.132;
+  // ---- the ×20 / ×1200 comparison row -------------------------------------
+  const yD = Y_DIM;
   const tick = (x, half, col, w) => poly([[x, yD - half, Z_CORE + 0.004], [x, yD + half, Z_CORE + 0.004]], col, w, { opacity: 0.9, renderOrder: 13 });
+  const xRef = 0.118;
   const dimRef = DIAG.dimension([xRef, yD, Z_CORE + 0.004], [xRef + D_COND * MAG, yD, Z_CORE + 0.004],
-    { color: PAL.ink3, width: 1.3, head: 0.0085 });
+    { color: PAL.ink3, width: 1.3, head: 0.0080 });
   preFade(dimRef, 0.9); g.add(dimRef);
-  g.add(tick(xRef, 0.013, PAL.ink3, 1.1));
-  g.add(tick(xRef + D_COND * MAG, 0.013, PAL.ink3, 1.1));
+  g.add(tick(xRef, 0.011, PAL.ink3, 1.1));
+  g.add(tick(xRef + D_COND * MAG, 0.011, PAL.ink3, 1.1));
 
-  const xTrue = 0.250;
-  g.add(tick(xTrue, 0.021, PAL.rd, 2.6));
+  const xTrue = 0.238;
+  g.add(tick(xTrue, 0.018, PAL.rd, 2.6));
   const dimTrue = DIAG.dimension([xTrue, yD, Z_CORE + 0.004], [xTrue + X_DRIFT_PK * MAG, yD, Z_CORE + 0.004],
     { color: PAL.rd, width: 1.6, head: 0.00003 });
   preFade(dimTrue, 0.95); g.add(dimTrue);
 
-  const xShown = 0.380;
+  const xShown = 0.330;
   const dimShown = DIAG.dimension([xShown, yD, Z_CORE + 0.004], [xShown + X_DRIFT_PK * MAG_DRIFT, yD, Z_CORE + 0.004],
-    { color: PAL.cy, width: 1.7, head: 0.0090 });
+    { color: PAL.cy, width: 1.7, head: 0.0085 });
   preFade(dimShown, 0.95); g.add(dimShown);
-  g.add(tick(xShown, 0.013, PAL.cy, 1.2));
-  g.add(tick(xShown + X_DRIFT_PK * MAG_DRIFT, 0.013, PAL.cy, 1.2));
-  // ×800 blow-up bracket, red tick → cyan bar
-  g.add(poly([[xTrue + 0.0015, yD - 0.017, Z_CORE + 0.004], [xShown, yD - 0.030, Z_CORE + 0.004],
-    [xShown + X_DRIFT_PK * MAG_DRIFT, yD - 0.030, Z_CORE + 0.004], [xTrue + 0.0015, yD - 0.017, Z_CORE + 0.004]],
-  PAL.ink3, 0.8, { opacity: 0.32, renderOrder: 11, dashed: true, dashSize: 0.007, gapSize: 0.006 }));
+  g.add(tick(xShown, 0.011, PAL.cy, 1.2));
+  g.add(tick(xShown + X_DRIFT_PK * MAG_DRIFT, 0.011, PAL.cy, 1.2));
+  // blow-up bracket: red tick → cyan bar
+  g.add(poly([[xTrue + 0.0012, yD - 0.014, Z_CORE + 0.004], [xShown, yD - 0.026, Z_CORE + 0.004],
+    [xShown + X_DRIFT_PK * MAG_DRIFT, yD - 0.026, Z_CORE + 0.004], [xTrue + 0.0012, yD - 0.014, Z_CORE + 0.004]],
+  PAL.ink3, 0.8, { opacity: 0.30, renderOrder: 11, dashed: true, dashSize: 0.006, gapSize: 0.005 }));
 
-  // ---- lattice inset -------------------------------------------------------
-  const insetC = [0.108, 0.170], insetR = 0.092;
-  const bg = new THREE.Mesh(new THREE.CircleGeometry(insetR, 44), new THREE.MeshBasicMaterial({
-    color: 0x0a0e13, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false,
-  }));
-  bg.position.set(insetC[0], insetC[1], Z_CORE - 0.002);
-  bg.renderOrder = 9; bg.userData._baseOp = 0.9;
-  g.add(bg);
-  g.add(ringTrace(insetC[0], insetC[1], insetR, 0x5a636e, 1.3, 64, { opacity: 0.85, renderOrder: 11, z: Z_CORE }));
-
-  const pitchL = D_NN * MAG_LATTICE;                 // 0.018 m
-  const ionMat = M.copper.clone();
-  ionMat.color.setHex(0x93552f); ionMat.roughness = 0.42;
-  const cells = [];
-  for (let ix = -5; ix <= 5; ix++) {
-    for (let iy = -5; iy <= 5; iy++) {
-      const px = ix * pitchL, py = iy * pitchL;
-      if (Math.hypot(px, py) < insetR - 0.011) cells.push([px, py]);
-    }
-  }
-  const ions = new THREE.InstancedMesh(new THREE.SphereGeometry(0.0058, 10, 8), ionMat, cells.length);
-  const im = new THREE.Matrix4();
-  cells.forEach(([px, py], i) => { im.makeTranslation(insetC[0] + px, insetC[1] + py, Z_CORE); ions.setMatrixAt(i, im); });
-  ions.castShadow = false;
-  g.add(ions);
-
-  const eSwarm = new DIAG.Swarm(18, { color: PAL.cy, size: 0.0046, additive: true });
-  g.add(eSwarm);
-  const eSeeds = [];
-  for (let i = 0; i < 18; i++) {
-    const k = i * 13 + 5;
-    eSeeds.push({
-      x: (rnd(k) - 0.5) * insetR * 1.4, y: (rnd(k * 3) - 0.5) * insetR * 1.4,
-      f: [1.1 + rnd(k * 7) * 2.2, 1.3 + rnd(k * 11) * 2.4], p: [rnd(k * 17) * 100, rnd(k * 19) * 100],
-    });
-  }
-  g.add(poly([[insetC[0] + insetR * 0.72, insetC[1] + insetR * 0.69, Z_CORE + 0.002],
-    [0.246, Y_E - R_INS - 0.024, Z_CORE + 0.002], [0.246, Y_E - 0.006, Z_CORE + 0.002]],
-  0x5a636e, 0.9, { opacity: 0.5, renderOrder: 11, dashed: true, dashSize: 0.007, gapSize: 0.006 }));
-  g.add(disc(0.246, Y_E - 0.006, Z_CORE + 0.020, 0.0024, 0x9aa3ae, 0.85));
-
-  // ---- true-ratio speed strip ---------------------------------------------
-  const sp = new DIAG.Graph({
-    w: 0.700, h: 0.064, xLog: true, xRange: [1e-5, 1e9], yRange: [0, 1],
-    xTicks: [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9],
-    yTicks: [0, 1],
-  });
-  sp.position.set(0.252, 0.144, Z_CORE - 0.001);
-  g.add(sp);
-  for (const [v, col, w, dashed] of [
-    [V_DRIFT_PK, PAL.cy, 3.2, false], [V_FERMI, 0x9aa3ae, 3.0, false],
-    [V_FIELD, PAL.am, 3.4, false], [DSP.C_LIGHT, 0xeef0f4, 1.4, true],
-  ]) sp.addMarker(v, { color: col, width: w, dashed, opacity: 1.0 });
-  for (const [v, col] of [[V_DRIFT_PK, PAL.cy], [V_FERMI, 0x9aa3ae], [V_FIELD, PAL.am]]) {
-    sp.add(disc(sp.x(v), 0.064, 0.003, 0.0042, col, 0.95, 12));
-  }
-
-  root.userData = { swarm, carriers, eSwarm, eSeeds, insetC, insetR, arrows, eLines, eHeads, sHeads, bGlyphs, frontGrp, len };
-  return root;
-}
-
-// ===========================================================================
-// OVERLAY — card B: mains to DC rail
-// ===========================================================================
-
-const B_W = 0.92, B_H = 1.14;
-const GW = 0.720, GX = 0.100;
-
-function psuChain(y) {
-  const M = mats();
-  const g = new THREE.Group();
-  const cu = M.copper.clone(); cu.color.setHex(0xb2683a); cu.envMapIntensity = 1.0;
-  const mw = M.magnetWire.clone(); mw.color.setHex(0x9a5730); mw.envMapIntensity = 0.85;
-  const alu = M.alu.clone(); alu.color.setHex(0xcfd3d8); alu.envMapIntensity = 1.35;
-  const blk = M.plastic.clone(); blk.color.setHex(0x1b1e23);
-  const chr = M.chrome.clone();
-
-  // a slightly denser plate behind the chain, so dark metal reads against the rack
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(GW + 0.03, 0.098), new THREE.MeshBasicMaterial({
-    color: 0x07090c, transparent: true, opacity: 0.88, depthWrite: false, toneMapped: false,
-  }));
-  back.position.set(GX + GW / 2 - 0.015, y, 0.008);
-  back.renderOrder = 6;
-  back.userData._baseOp = 0.88;
-  g.add(back);
-
-  const tor = new THREE.Group();
-  tor.position.set(GX + 0.050, y, 0.030);
-  tor.add(new THREE.Mesh(new THREE.TorusGeometry(0.029, 0.0112, 12, 48), mw));
-  const t2 = new THREE.Mesh(new THREE.TorusGeometry(0.029, 0.0119, 8, 40), cu);
-  t2.scale.set(1, 1, 0.4);
-  tor.add(t2);
-  GEO.shadowed(tor);
-  g.add(tor);
-
-  const br = new THREE.Group();
-  br.position.set(GX + 0.230, y, 0.030);
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * TAU + Math.PI / 4;
-    const d = new THREE.Group();
-    d.add(new THREE.Mesh(GEO.bevelCyl(0.0055, 0.0055, 0.020, 16, 0.0008), blk));
-    const band = new THREE.Mesh(GEO.bevelCyl(0.0058, 0.0058, 0.003, 16, 0.0004), chr);
-    band.position.y = 0.0068;
-    d.add(band);
-    d.position.set(Math.cos(a) * 0.029, Math.sin(a) * 0.029, 0);
-    d.rotation.z = -a + Math.PI / 2;
-    GEO.shadowed(d);
-    br.add(d);
-  }
-  g.add(br);
-
-  for (let i = 0; i < 2; i++) {
-    const can = new THREE.Mesh(GEO.bevelCyl(0.0165, 0.0170, 0.060, 28, 0.0012), alu);
-    can.position.set(GX + 0.408 + i * 0.044, y, 0.030);
-    can.castShadow = true;
-    g.add(can);
-    const cap = new THREE.Mesh(GEO.bevelCyl(0.0150, 0.0150, 0.0018, 20, 0.0004), blk);
-    cap.position.set(can.position.x, y + 0.0308, 0.030);
-    g.add(cap);
-    for (const rot of [0, Math.PI / 2]) {
-      const sc = new THREE.Mesh(GEO.bevelBox(0.023, 0.0006, 0.0014, 0.0002, 2), chr);
-      sc.position.set(can.position.x, y + 0.0318, 0.030);
-      sc.rotation.y = rot;
-      g.add(sc);
-    }
-  }
-
-  for (const dy of [0.030, -0.030]) {
-    const bar = new THREE.Mesh(GEO.bevelBox(0.130, 0.0035, 0.0035, 0.0008, 2), cu);
-    bar.position.set(GX + 0.600, y + dy, 0.030);
-    bar.castShadow = true;
-    g.add(bar);
-  }
-
-  const wire = (pts) => poly(pts.map((p) => [p[0], p[1], 0.030]), 0x6f757e, 1.3, { opacity: 0.55, renderOrder: 12 });
-  g.add(wire([[GX + 0.084, y + 0.012], [GX + 0.168, y + 0.012], [GX + 0.196, y + 0.030]]));
-  g.add(wire([[GX + 0.084, y - 0.012], [GX + 0.168, y - 0.012], [GX + 0.196, y - 0.030]]));
-  g.add(wire([[GX + 0.264, y + 0.030], [GX + 0.336, y + 0.030], [GX + 0.336, y + 0.036], [GX + 0.408, y + 0.036]]));
-  g.add(wire([[GX + 0.264, y - 0.030], [GX + 0.336, y - 0.030], [GX + 0.336, y - 0.036], [GX + 0.452, y - 0.036]]));
-  g.add(wire([[GX + 0.408, y + 0.036], [GX + 0.535, y + 0.036], [GX + 0.535, y + 0.030]]));
-  g.add(wire([[GX + 0.452, y - 0.036], [GX + 0.535, y - 0.036], [GX + 0.535, y - 0.030]]));
-  return g;
-}
-
-function buildPsuCard() {
-  const root = new THREE.Group();
-  root.position.set(0.260 + B_W / 2, 0.100 + B_H / 2, -2.55);
-  const g = new THREE.Group();
-  g.position.set(-B_W / 2, -B_H / 2, 0);
-  root.add(g);
-  g.add(card(B_W, B_H, 0.93));
-
+  // ---- phase plot: current and carrier position, one cycle ----------------
   const T = 1 / F_MAINS;
-
-  const gv = new DIAG.Graph({
-    w: GW, h: 0.120, xRange: [0, T], yRange: [-360, 360],
-    xTicks: DSP.linSpace(0, T, 5), yTicks: [-360, -180, 0, 180, 360], zeroLine: 0,
+  const ph = new DIAG.Graph({
+    w: 0.415, h: 0.086, xRange: [0, T], yRange: [-1.18, 1.18],
+    xTicks: DSP.linSpace(0, T, 5), yTicks: [-1, 0, 1], zeroLine: 0,
   });
-  gv.position.set(GX, 0.815, 0.002);
-  g.add(gv);
-  gv.addTrace((t) => V_PK * Math.sin(TAU * F_MAINS * t), { color: PAL.cy, width: 2.4, n: 260 });
-  const dotV = gv.addDot(PAL.cy, 0.0062);
+  ph.position.set(0.085, 0.022, Z_CORE - 0.002);
+  g.add(ph);
+  ph.addTrace((t) => Math.sin(TAU * F_MAINS * t), { color: PAL.am, width: 2.2, n: 200 });
+  ph.addTrace((t) => -Math.cos(TAU * F_MAINS * t), { color: PAL.cy, width: 2.2, n: 200 });
+  const dotI = ph.addDot(PAL.am, 0.0052);
+  const dotX = ph.addDot(PAL.cy, 0.0052);
 
-  const gi = new DIAG.Graph({
-    w: GW, h: 0.110, xRange: [0, T], yRange: [-9, 9],
-    xTicks: DSP.linSpace(0, T, 5), yTicks: [-9, -4.5, 0, 4.5, 9],
-  });
-  gi.position.set(GX, 0.605, 0.002);
-  g.add(gi);
-  gi.addTrace((t) => I_PK * Math.sin(TAU * F_MAINS * t), { color: PAL.am, width: 2.4, n: 260 });
-  gi.addTrace((t) => -I_PK * Math.sin(TAU * F_MAINS * t), { color: PAL.am, width: 1.6, n: 260, dashed: true, opacity: 0.85 });
-  gi.addTrace(() => 0, { color: PAL.gr, width: 2.2, n: 2, opacity: 0.95 });
-  const dotIL = gi.addDot(PAL.am, 0.0058);
-  const dotIN = gi.addDot(PAL.am, 0.0042);
-
-  const gd = new DIAG.Graph({
-    w: GW, h: 0.130, xRange: [0, T], yRange: [-62, 62],
-    xTicks: DSP.linSpace(0, T, 5), yTicks: [-62, -31, 0, 31, 62], zeroLine: 0,
-  });
-  gd.position.set(GX, 0.365, 0.002);
-  g.add(gd);
-  gd.addTrace((t) => V_SEC_PK * Math.sin(TAU * F_MAINS * t), { color: 0x8f98a4, width: 1.3, n: 300, dashed: true, opacity: 0.45 });
-  gd.addTrace((t) => Math.max(0, V_SEC_PK * Math.abs(Math.sin(TAU * F_MAINS * t)) - 2 * V_DIODE), { color: PAL.cy, width: 2.2, n: 400 });
-  gd.addTrace((t, i) => RAIL.v[Math.min(RAIL_N - 1, i)], { color: PAL.am, width: 2.4, n: RAIL_N });
-
-  const yLo = RAIL.min - 0.17, yHi = RAIL.max + 0.17;
-  const VMAG = Math.round(((124) / 0.130) / ((yHi - yLo) / 0.110));
-  const gr = new DIAG.Graph({
-    w: GW, h: 0.110, xRange: [0, T], yRange: [yLo, yHi],
-    xTicks: DSP.linSpace(0, T, 5), yTicks: [yLo, RAIL.min, RAIL.mean, RAIL.max, yHi],
-  });
-  gr.position.set(GX, 0.150, 0.002);
-  g.add(gr);
-  gr.addTrace((t) => Math.max(yLo, V_SEC_PK * Math.abs(Math.sin(TAU * F_MAINS * t)) - 2 * V_DIODE), { color: PAL.cy, width: 1.7, n: 400, opacity: 0.55 });
-  gr.addTrace((t, i) => RAIL.v[Math.min(RAIL_N - 1, i)], { color: PAL.am, width: 2.6, n: RAIL_N });
-  const xr = gr.x(0.0136);
-  const dimR = DIAG.dimension([xr, gr.y(RAIL.min), 0.006], [xr, gr.y(RAIL.max), 0.006], { color: PAL.ink3, width: 1.3, head: 0.0075 });
-  preFade(dimR, 0.9);
-  gr.add(dimR);
-  for (const v of [RAIL.min, RAIL.max]) {
-    gr.add(poly([[0, gr.y(v), 0.004], [GW, gr.y(v), 0.004]], PAL.ink3, 0.9,
-      { opacity: 0.42, renderOrder: 11, dashed: true, dashSize: 0.007, gapSize: 0.006 }));
-  }
-
-  g.add(psuChain(1.075));
-
-  root.userData = { dotV, dotIL, dotIN, VMAG };
+  root.userData = { swarm, carriers, arrows, eLines, eHeads, sHeads, frontGrp, len, ph, dotI, dotX };
   return root;
 }
 
@@ -981,7 +733,7 @@ function buildPsuCard() {
 // STAGE
 // ===========================================================================
 
-const S = { v: 0, i: 0, vd: 0, xd: 0 };
+const S = { v: 0, i: 0, vd: 0, xd: 0, p: 0 };
 
 export default {
   id: 'power',
@@ -989,7 +741,7 @@ export default {
   nav: 'Mains',
   kicker: 'Mains',
   standfirst: 'Nothing travels from the wall but a change in the field',
-  shot: { position: [2.02, 1.44, 2.65], target: [0.33, 0.67, -2.55], fov: 27.5 },
+  shot: frameShot([0.02, 0.40, -3.16], 0.30, { fill: 0.63, az: 0.44, el: 0.13, fov: 31 }),
   timeScale: TIME_SCALE,
   alwaysUpdate: false,
 
@@ -1001,78 +753,52 @@ export default {
 
     const overlay = new THREE.Group();
     this._cA = buildCableCard();
-    this._cB = buildPsuCard();
-    overlay.add(this._cA, this._cB);
+    overlay.add(this._cA);
 
-    // detail bracket on the real lead → the cutaway card
-    const p = this._lead.userData.curve.getPointAt(0.845);
-    const brk = new THREE.Group();
-    brk.add(poly([
-      [p.x - 0.052, p.y + 0.011, p.z], [p.x - 0.052, p.y + 0.030, p.z],
-      [p.x + 0.052, p.y + 0.030, p.z], [p.x + 0.052, p.y + 0.011, p.z],
-    ], 0x8b939d, 1.2, { opacity: 0.7, renderOrder: 11 }));
-    for (const [x2, y2, z2] of [[-1.320, 0.140, -2.500], [-0.420, 0.140, -2.500]]) {
-      brk.add(poly([[p.x + (x2 < p.x ? -0.052 : 0.052), p.y + 0.030, p.z], [x2, y2, z2]], 0x8b939d, 0.9,
-        { opacity: 0.26, renderOrder: 11, dashed: true, dashSize: 0.013, gapSize: 0.011 }));
-    }
-    overlay.add(brk);
-
-    // ---- labels ---------------------------------------------------------------
+    // ---- labels ------------------------------------------------------------
     const L = ctx.labels;
-    const A = this._cA.children[0], B = this._cB.children[0];
+    const A = this._cA.children[0];
     const anch = (parent, x, y, z = Z_CORE) => {
       const o = new THREE.Object3D(); o.position.set(x, y, z); parent.add(o); return o;
     };
+    const CARD = { occlude: false };
 
-    this._lLive = L.add(anch(A, 0.176, Y_L + R_INS, Z_CORE + 0.02), {
-      kicker: 'Live', value: `+${I_PK.toFixed(2)} A`, cls: 'am', offset: [0, -17],
+    this._lLive = L.add(anch(A, XA1 + 0.030, Y_L, Z_CORE + 0.02), {
+      ...CARD, kicker: 'Live · out', value: `+${I_PK.toFixed(2)} A`, cls: 'am', offset: [58, 0], priority: 3,
     });
-    this._lNeut = L.add(anch(A, 0.192, Y_N + R_INS, Z_CORE + 0.02), {
-      kicker: 'Neutral · back', value: `−${I_PK.toFixed(2)} A`, cls: 'am', offset: [0, -17],
+    this._lNeut = L.add(anch(A, XA1 + 0.030, Y_N, Z_CORE + 0.02), {
+      ...CARD, kicker: 'Neutral · the same back', value: `−${I_PK.toFixed(2)} A`, cls: 'am', offset: [58, 0], priority: 3,
     });
-    L.add(anch(A, 0.192, Y_E + R_INS, Z_CORE + 0.02), {
-      kicker: 'Protective earth', value: '0.00 A', offset: [0, -17],
+    L.add(anch(A, XA1 + 0.030, Y_E, Z_CORE + 0.02), {
+      ...CARD, kicker: 'Earth · no return current', value: 'a few mA of leakage', cls: '', offset: [58, 0], priority: 2,
     });
-    L.add(anch(A, 0.740, Y_L + R_INS, Z_CORE + 0.02), {
-      kicker: 'Energy front  S = E × H',
-      text: `${sci(V_FIELD, 3)} m/s, in the dielectric · 1 : ${sci(FIELD_TOTAL_SLOW, 0)}`,
-      cls: 'am', offset: [0, -20],
+    L.add(anch(A, 0.300, Y_DIM, Z_CORE + 0.02), {
+      ...CARD,
+      kicker: `The first two at true ×${MAG} · the third that same swing ×${MAG_EXTRA} more`,
+      text: `<span style="color:${GYS}">⌀ ${(D_COND * 1e3).toFixed(3)} mm</span> · <span style="color:${RDS}">true swing ±${(X_DRIFT_PK * 1e6).toFixed(2)} µm</span> · <span style="color:${CYS}">the same swing, blown up</span>`,
+      offset: [0, -22], priority: 4,
     });
-    L.add(anch(A, 0.330, Y_DIM, Z_CORE + 0.02), {
-      kicker: 'All three at the same ×25',
-      text: `<span style="color:${GYS}">⌀ 1.784 mm</span> · <span style="color:${RDS}">true swing ±0.662 µm</span> · <span style="color:${CYS}">the same swing ×${MAG_DRIFT / 1000}k</span>`,
-      offset: [0, -26],
+    L.add(anch(A, 0.470, Y_L + R_INS, Z_CORE + 0.02), {
+      ...CARD, kicker: 'Energy front  S = E × H',
+      text: `${sci(V_FIELD, 3)} m/s · clock 1 : ${sci(FIELD_TOTAL_SLOW, 2)} · as drawn only ×${SEEN_RATIO.toFixed(0)} faster than the carriers, truly ×${sci(SPEED_RATIO, 1)}`,
+      cls: 'am', offset: [0, -18], priority: 4,
     });
-    L.add(anch(A, 0.108, 0.078, Z_CORE + 0.02), {
-      kicker: 'Copper lattice ×7.0×10⁷',
-      text: `fcc {100}, ${(D_NN * 1e9).toFixed(3)} nm · jitter indicative`, offset: [0, 22],
+    L.add(anch(A, 0.052, (Y_L + Y_N) / 2 + PITCH * 0.62, Z_CORE + 0.02), {
+      ...CARD, kicker: 'Supply', cls: 'plain', offset: [0, -14], priority: 1,
     });
-    L.add(anch(A, 0.640, 0.208, Z_CORE + 0.02), {
-      kicker: `True ratio · m/s, 10⁻⁵ → 10⁹ · field ÷ drift ${sci(SPEED_RATIO, 1)}`,
-      text: `<span style="color:${CYS}">drift 2.08×10⁻⁴</span> · <span style="color:${GYS}">thermal 1.57×10⁶</span> · <span style="color:${AMS}">field 1.98×10⁸</span> · c`,
-      offset: [0, -16],
+    L.add(anch(A, 0.760, (Y_L + Y_N) / 2 + PITCH * 0.62, Z_CORE + 0.02), {
+      ...CARD, kicker: 'Load', cls: 'plain', offset: [0, -14], priority: 1,
     });
-    L.add(anch(A, 0.079, (Y_L + Y_N) / 2, Z_CORE + 0.02), { kicker: 'Supply', offset: [0, 0] });
-    L.add(anch(A, 0.941, (Y_L + Y_N) / 2, Z_CORE + 0.02), { kicker: 'Load', offset: [0, 0] });
+    L.add(anch(A, 0.560, 0.062, Z_CORE + 0.02), {
+      ...CARD, kicker: 'One cycle · 20 ms',
+      text: `<span style="color:${AMS}">current ∝ sin ωt</span> · <span style="color:${CYS}">carrier position ∝ −cos ωt</span> — a quarter cycle apart`,
+      offset: [96, 0], priority: 3,
+    });
 
-    L.add(anch(B, GX + GW * 0.5, 1.118, 0.03), {
-      kicker: 'Inside the box it feeds',
-      text: `toroid → bridge → ${(C_RES * 1e3).toFixed(0)} mF → ± rail`, offset: [0, -14],
-    });
-    L.add(anch(B, GX + GW * 0.5, 0.775, 0.006), {
-      kicker: 'One mains cycle · 20 ms',
-      text: `V̂ ${V_PK.toFixed(1)} V from ${V_RMS} rms · Î ${I_PK.toFixed(2)} A`, offset: [0, 0],
-    });
-    L.add(anch(B, GX + GW * 0.5, 0.560, 0.006), {
-      kicker: `Live and neutral, always equal and opposite · <span style="color:${GRS}">earth 0 A</span>`,
-      text: `${V_SEC} V rms secondary → V̂ ${V_SEC_PK.toFixed(1)} − 2 Vf = ${V_RECT_PK.toFixed(1)} V`, offset: [0, 0],
-    });
-    this._lR = L.add(anch(B, GX + GW * 0.5, 0.320, 0.006), {
-      kicker: `Reservoir ripple · vertical ×${this._cB.userData.VMAG}`,
-      text: `I/(f·C) = ${V_RIPPLE_EST.toFixed(2)} V bound · simulated <b>${V_RIPPLE_SIM.toFixed(2)} V pk-pk</b>`, offset: [0, 0],
-    });
-    L.add(anch(this._lead, p.x, p.y + 0.034, p.z), {
-      kicker: 'Mains lead', text: `3 × 2.5 mm² · ⌀${(LEAD_OD * 1e3).toFixed(1)} mm · ${L_LEAD.toFixed(1)} m`, offset: [60, 34],
+    const pL = LEAD_CURVE.getPointAt(0.30);
+    L.add(anch(this._lead, pL.x + 0.02, pL.y + 0.030, pL.z), {
+      kicker: 'Mains lead', text: `3 × 2.5 mm² · ⌀${(LEAD_OD * 1e3).toFixed(1)} mm · ${L_LEAD.toFixed(2)} m to the socket`,
+      offset: [70, 26], priority: 2,
     });
 
     return { hardware, overlay };
@@ -1081,42 +807,36 @@ export default {
   update(dt, t, ctx) {
     const th = TAU * F_MAINS * t;
     const sn = Math.sin(th);
+    const cs = Math.cos(th);
     S.v = V_PK * sn;
     S.i = I_PK * sn;
     S.vd = V_DRIFT_PK * sn;
-    S.xd = -X_DRIFT_PK * Math.cos(th);
+    S.xd = -X_DRIFT_PK * cs;
+    S.p = 2 * VA * sn * sn;                          // p(t) = V̂Î sin²ωt
 
     const nd = this._cond.userData.needles;
-    nd[0].rotation.z = -sn * 0.60;                   // volts, ±325 V f.s.d.
-    nd[1].rotation.z = -sn * (I_PK / 10) * 0.60;     // amps, ±10 A f.s.d.
-    const pNorm = 0.5 * (1 - Math.cos(2 * th));      // p(t)/(2·V·I)
-    this._lead.userData.sheath.opacity = 0.04 + 0.15 * pNorm;
+    nd[0].rotation.z = -sn * (V_PK / 400) * 0.62;    // volts, ±400 V f.s.d.
+    nd[1].rotation.z = -sn * (I_PK / 20) * 0.62;     // amps, ±20 A f.s.d.
+    this._lead.userData.sheath.opacity = 0.030 + 0.085 * (S.p / (2 * VA));
 
     this._cA.lookAt(ctx.camera.position);
-    this._cB.lookAt(ctx.camera.position);
 
     const U = this._cA.userData;
-    const drift = X_DRIFT_PK * MAG_DRIFT * sn;
+    // Displacement is the integral of velocity: x(t) = −x̂ cos ωt. The carriers
+    // are therefore furthest from home when the current is zero, and back at
+    // home when it peaks — a quarter cycle behind the arrows, which is the point.
+    const drift = -X_DRIFT_PK * MAG_DRIFT * cs;
     const Tj = t * 3200;
     U.swarm.update((i) => {
       const c = U.carriers[i];
-      const jx = Math.sin(Tj * c.f[0] + c.p[0]) * 0.0034 + Math.sin(Tj * c.f[2] * 1.7 + c.p[2]) * 0.0016;
-      const jy = Math.sin(Tj * c.f[1] + c.p[1]) * 0.0030 + Math.cos(Tj * c.f[0] * 1.4 + c.p[1]) * 0.0013;
-      const jz = Math.sin(Tj * c.f[2] + c.p[2]) * 0.0020;
+      const jx = Math.sin(Tj * c.f[0] + c.p[0]) * 0.0030 + Math.sin(Tj * c.f[2] * 1.7 + c.p[2]) * 0.0014;
+      const jy = Math.sin(Tj * c.f[1] + c.p[1]) * 0.0026 + Math.cos(Tj * c.f[0] * 1.4 + c.p[1]) * 0.0011;
+      const jz = Math.sin(Tj * c.f[2] + c.p[2]) * 0.0018;
       return {
         p: [c.x + jx + c.s * drift, c.y + jy, c.z + jz],
         s: c.g * (c.s === 0 ? 0.75 : 1.0),
-        c: c.s === 0 ? 0x7fd6a2 : PAL.cy,
+        c: c.s === 0 ? PAL.gr : PAL.cy,
       };
-    });
-    U.eSwarm.update((i) => {
-      const s = U.eSeeds[i];
-      const jx = Math.sin(Tj * s.f[0] + s.p[0]) * 0.020 + Math.sin(Tj * s.f[1] * 2.1 + s.p[1]) * 0.010;
-      const jy = Math.cos(Tj * s.f[1] + s.p[1]) * 0.020 + Math.sin(Tj * s.f[0] * 1.8 + s.p[0]) * 0.010;
-      let px = s.x + jx, py = s.y + jy;
-      const r = Math.hypot(px, py), lim = U.insetR - 0.010;
-      if (r > lim) { px *= lim / r; py *= lim / r; }
-      return { p: [U.insetC[0] + px, U.insetC[1] + py, Z_CORE + 0.010], s: 1, c: PAL.cy };
     });
 
     const pos = sn >= 0;
@@ -1131,13 +851,6 @@ export default {
     }
     for (const h of U.sHeads) h.userData._baseOp = 0.20 + 0.45 * amp;   // S never reverses
     for (const l of U.eLines) l._baseOpacity = 0.10 + 0.50 * amp;
-    for (const b of U.bGlyphs) {
-      const out = (b.base > 0) === pos;
-      b.out.visible = out;
-      b.cross.visible = !out;
-      b.out.userData._baseOp = 0.22 + 0.72 * amp;
-      b.cross.traverse((c) => { if (c.isLine2) c._baseOpacity = 0.22 + 0.62 * amp; });
-    }
 
     // the energy front runs on its own, stated clock
     const cutLen = (XA1 - XA0) / MAG;
@@ -1147,10 +860,8 @@ export default {
     for (const b of U.frontGrp.children) if (b.userData.wgt) b.userData._baseOp = b.userData.wgt * (0.28 + 0.72 * fade);
 
     const tc = ((t % (1 / F_MAINS)) + 1 / F_MAINS) % (1 / F_MAINS);
-    const V = this._cB.userData;
-    V.dotV.userData.setData(tc, V_PK * Math.sin(TAU * F_MAINS * tc));
-    V.dotIL.userData.setData(tc, I_PK * Math.sin(TAU * F_MAINS * tc));
-    V.dotIN.userData.setData(tc, -I_PK * Math.sin(TAU * F_MAINS * tc));
+    U.dotI.userData.setData(tc, Math.sin(TAU * F_MAINS * tc));
+    U.dotX.userData.setData(tc, -Math.cos(TAU * F_MAINS * tc));
 
     this._lLive.setValue(`${S.i >= 0 ? '+' : ''}${S.i.toFixed(2)} A`);
     this._lNeut.setValue(`${-S.i >= 0 ? '+' : ''}${(-S.i).toFixed(2)} A`);
@@ -1160,88 +871,72 @@ export default {
     return `
 <h3>The circuit, both halves of it</h3>
 <p>Two conductors leave the wall. <b>Live</b> carries current out to the load;
-<b>neutral</b> carries the identical current back, at every instant, to the last
-milliampere. At <span class="num">50 Hz</span> the pair exchange roles
-<span class="num">100</span> times a second. A third conductor, <b>protective
-earth</b>, is bonded to every chassis and carries no current at all unless
-something has failed. There is no such thing as one-way current.</p>
-
-<h3>What the electrons do</h3>
-<p>Drift velocity follows straight from the definition of current:</p>
-<div class="eq">v̂ = Î / (n·A·e)
-  = ${I_PK.toFixed(3)} / (${sci(DSP.N_CU, 3)} · ${A_MM2}×10⁻⁶ · ${sci(DSP.E_CHARGE, 3)})
-  = <span class="hl">${sci(V_DRIFT_PK, 2)} m/s</span>
-x̂ = v̂ / ω = ${sci(V_DRIFT_PK, 2)} / ${(TAU * F_MAINS).toFixed(2)}
-  = <span class="hl">${(X_DRIFT_PK * 1e6).toFixed(3)} µm</span>   <span class="c">peak, either side of home</span></div>
-<p>A carrier shuffles two-thirds of a micrometre one way, then two-thirds of a
-micrometre back, and stays there. That is already a minute bias on enormous
-chaos: the electron gas in copper is degenerate, so carriers travel at the Fermi
-velocity <span class="num">${sci(V_FERMI, 2)} m/s</span> — not the classical
-<span class="num">√(3kT/m) = ${sci(V_CLASSICAL, 1)} m/s</span> most textbooks quote —
-scattering every <span class="num">${(TAU_COLL * 1e15).toFixed(1)} fs</span> after
-<span class="num">${(MFP * 1e9).toFixed(0)} nm</span>. That is
-<span class="num">${sci(N_COLL, 1)}</span> collisions per mains cycle and a random
-walk of <span class="num">√(2Dt) = ${(X_THERMAL * 1e3).toFixed(0)} mm</span>, about
-<span class="num">${sci(X_THERMAL / X_DRIFT_PK, 1)}</span> times further than the drift
-— in no particular direction.</p>
+<b>neutral</b> carries the identical current back at every instant. The current in
+them reverses <span class="num">100</span> times a second, but the conductors are
+not interchangeable: neutral is bonded to earth at the supply transformer, so it
+sits within a volt or two of earth all cycle while live swings
+<span class="num">±${V_PK.toFixed(0)} V</span> about it. <b>Protective earth</b>
+carries no signal or return current — only the filter's earth-leakage current, a
+few milliamps, and whatever a fault sends it.</p>
 
 <div class="myth"><span class="lab">Commonly got wrong</span><p>Dots racing along the
-wire from wall to amplifier. Nothing races. The energy travels in the field
-<em>between and around</em> the conductors at
-<span class="num">${sci(V_FIELD, 2)} m/s</span> — 0.66 c in PVC flex, about
-<span class="num">${sci(SPEED_RATIO, 1)}</span> times the drift speed. That ratio is
-why the two are drawn here at wildly different exaggerations, and both are stated on the
-drawing: the copper at <span class="num">×${MAG}</span>, the carrier swing at
-<span class="num">×${MAG_DRIFT.toLocaleString('en-GB')}</span> — a further
-<span class="num">×${MAG_EXTRA}</span> on top of the copper's own scale — and the
-field front on a clock <span class="num">${sci(FIELD_TOTAL_SLOW, 0)}</span> times
-slower than real time.</p></div>
+wire. Nothing races. Energy travels in the field between the conductors at
+<span class="num">${sci(V_FIELD, 2)} m/s</span> — 0.66 c in PVC flex, and
+<span class="num">${sci(SPEED_RATIO, 1)}</span> times the drift speed. The drawing
+states its exaggerations: copper <span class="num">×${MAG}</span>, carrier swing
+<span class="num">×${MAG_DRIFT.toLocaleString('en-GB')}</span>, field front on a clock
+<span class="num">${sci(FIELD_TOTAL_SLOW, 2)}</span> slower than real time — which
+leaves the front only <span class="num">×${SEEN_RATIO.toFixed(0)}</span> faster than
+the carriers on screen.</p></div>
+
+<h3>What the electrons do</h3>
+<p>Two <span class="num">${P_AMP} W</span> monoblocks at
+<span class="num">${(ETA_AB * 100).toFixed(0)} %</span> plus
+<span class="num">${P_FRONT} W</span> of front end draw
+<span class="num">${P_SYS.toFixed(0)} W</span>:
+<span class="num">${I_RMS.toFixed(2)} A</span> rms,
+<span class="num">${I_PK.toFixed(2)} A</span> peak.</p>
+<div class="eq">v̂ = Î / (n·A·e)
+  = ${I_PK.toFixed(2)} / (${sci(DSP.N_CU, 2)} · ${A_MM2}×10⁻⁶ · e)
+  = <span class="hl">${sci(V_DRIFT_PK, 2)} m/s</span>
+x̂ = v̂ / ω = ${sci(V_DRIFT_PK, 2)} / ${(TAU * F_MAINS).toFixed(2)}
+  = <span class="hl">${(X_DRIFT_PK * 1e6).toFixed(2)} µm</span>  <span class="c">either side of home</span></div>
+<p>A carrier shuffles ${(X_DRIFT_PK * 1e6).toFixed(2)} µm one way and back, and stays
+there. That bias rides on chaos: copper's electron gas is degenerate, so carriers
+move at the Fermi velocity <span class="num">${sci(V_FERMI, 2)} m/s</span>, not the
+classical <span class="num">√(3kT/m) = ${sci(V_CLASSICAL, 1)} m/s</span>, scattering
+every <span class="num">${(TAU_COLL * 1e15).toFixed(1)} fs</span> after
+<span class="num">${(MFP * 1e9).toFixed(0)} nm</span> —
+<span class="num">${sci(N_COLL, 1)}</span> collisions per cycle and a random walk of
+<span class="num">√(2Dt) = ${(X_THERMAL * 1e3).toFixed(0)} mm</span>, in no particular
+direction.</p>
 
 <h3>Field, not flow</h3>
-<p>Between the conductors <b>E</b> points from live to neutral and <b>H</b> encircles
-each core; the two H fields reinforce in the gap and oppose outside it. Poynting's
-vector <span class="num">S = E × H</span> therefore points along the cable into the
-load — and because <em>both</em> E and H reverse each half cycle, S does not. Energy
-flows one way down an alternating cable, and the flux integrated over that space is
-the whole <span class="num">V·I = ${VA} W</span> the system draws. The 50 Hz wave in this lead is
-<span class="num">${(LAMBDA_MAINS / 1e3).toFixed(0)} km</span> long, so its
-<span class="num">${L_LEAD.toFixed(1)} m</span> is
-<span class="num">${sci(L_LEAD / LAMBDA_MAINS, 1)}</span> of a wavelength: every part
-of it is in phase. The copper only guides that field and wastes
+<p><b>E</b> points from live to neutral and <b>H</b> encircles each core; both reverse
+each half cycle, so <span class="num">S = E × H</span> does not. Integrated over that
+space the flux is</p>
+<div class="eq">p(t) = V̂Î sin²ωt = ${VA.toFixed(0)}(1 − cos 2ωt) W</div>
+<p>— zero twice a cycle, <span class="num">${(2 * VA).toFixed(0)} W</span> at the peaks,
+<span class="num">${VA.toFixed(0)} W</span> mean. That mean is
+<span class="num">${VA.toFixed(0)} VA</span>, and is watts only because this load is
+treated as unity power factor; a real capacitor-input supply draws harmonic-rich
+bursts at a crest factor near 3, which changes the shape of the current and not the
+argument. The copper only guides the field, and wastes
 <span class="num">I²R = ${P_LOSS.toFixed(2)} W</span> in
 <span class="num">${(R_LOOP * 1e3).toFixed(1)} mΩ</span> of out-and-back resistance,
-dropping <span class="num">${V_DROP.toFixed(2)} V</span> of the
-<span class="num">${V_RMS} V</span>.</p>
-
-<h3>Making it DC</h3>
-<p>A ${V_SEC} V rms secondary peaks at
-<span class="num">${V_SEC_PK.toFixed(1)} V</span>; a bridge costs two diode drops,
-leaving <span class="num">${V_RECT_PK.toFixed(1)} V</span>. The reservoir holds that
-peak and sags at I/C:</p>
-<div class="eq">V_ripple ≈ I / (f·C) = ${I_DC.toFixed(1)} / (${F_RIPPLE} · ${(C_RES * 1e3).toFixed(0)}×10⁻³)
-  = <span class="hl">${V_RIPPLE_EST.toFixed(2)} V pk-pk</span>  <span class="c">constant-current bound</span>
-peak-detect simulation      = <span class="hl">${V_RIPPLE_SIM.toFixed(2)} V pk-pk</span></div>
-<p>The simulated figure is lower because the diodes conduct for
-<span class="num">${COND_MS.toFixed(2)} ms</span> of each
-<span class="num">10 ms</span> half cycle rather than not at all. Every coulomb goes
-in during that window, so the mean current through the rectifier while it conducts
-is <span class="num">${I_CHARGE.toFixed(0)} A</span> — which is why a linear supply
-draws in violent, harmonic-rich bursts instead of a clean sine, and why what a
-conditioner faces is not a well-behaved load.</p>
-
-<div class="key"><span class="lab">The idea</span><p>The electrons in your speaker
-cable at the moment the music starts were already there. Nothing travels from the
-wall to the speaker except a change in the electromagnetic field.</p></div>`;
+dropping <span class="num">${V_DROP.toFixed(2)} V</span>. At
+<span class="num">${(LAMBDA_MAINS / 1e3).toFixed(0)} km</span> a wavelength, every part
+of the lead is in phase.</p>`;
   },
 
   readouts() {
     return [
       { k: 'MAINS', v: (S.v >= 0 ? '+' : '') + S.v.toFixed(1), u: `V · ${V_RMS} rms`, cls: 'acc' },
-      { k: 'CURRENT', v: (S.i >= 0 ? '+' : '') + S.i.toFixed(3), u: `A · ${I_RMS.toFixed(2)} rms`, cls: 'am' },
+      { k: 'CURRENT', v: (S.i >= 0 ? '+' : '') + S.i.toFixed(2), u: `A · ${I_RMS.toFixed(2)} rms`, cls: 'am' },
       { k: 'DRIFT v', v: (S.vd * 1e6).toFixed(1), u: 'µm/s', cls: 'am', bar: Math.abs(S.vd) / V_DRIFT_PK },
       { k: 'CARRIER x', v: (S.xd * 1e9).toFixed(0), u: 'nm', cls: 'acc', bar: (S.xd / X_DRIFT_PK + 1) / 2 },
-      { k: 'FIELD', v: sci(V_FIELD, 3), u: 'm/s · 0.66 c', cls: 'am' },
-      { k: 'RAIL RIPPLE', v: V_RIPPLE_SIM.toFixed(2), u: 'V pk-pk', cls: '' },
+      { k: 'POWER', v: S.p.toFixed(0), u: `W · ${VA.toFixed(0)} mean`, cls: 'am', bar: S.p / (2 * VA) },
+      { k: 'FIELD', v: sci(V_FIELD, 3), u: 'm/s · 0.66 c', cls: '' },
     ];
   },
 };

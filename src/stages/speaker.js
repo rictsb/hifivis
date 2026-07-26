@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { LAYOUT } from '../core/layout.js';
+import { LAYOUT, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
 
 /* ===========================================================================
-   MOTOR & CABINET  —  two floorstanders, one of them cut open.
+   MOTOR & CABINET  —  two floorstanders, one motor opened up beside them.
 
-   Every number below is derived from six measured primaries and the physical
+   Every number below is derived from eight measured primaries and the physical
    constants in dsp.js. Nothing is chosen to look good.
 
    PRIMARIES (a 210 mm-Sd long-throw bass driver, plausible measured set):
@@ -28,21 +28,20 @@ const TS = { fs: 28.0, Mms: 0.049, Re: 6.2, Bl: 12.0, Qms: 4.2, Sd: 0.0346, Le: 
 const ws = TAU * TS.fs;                                   // 175.929 rad/s
 const Cms = 1 / (ws * ws * TS.Mms);                       // 659 µm/N
 const Kms = 1 / Cms;                                      // 1516.6 N/m
-const Rms = (ws * TS.Mms) / TS.Qms;                        // 2.053 N·s/m
-const Qes = (ws * TS.Mms * TS.Re) / (TS.Bl * TS.Bl);       // 0.3712
-const Qts = (TS.Qms * Qes) / (TS.Qms + Qes);               // 0.3410
+const Rms = (ws * TS.Mms) / TS.Qms;                       // 2.053 N·s/m
+const Qes = (ws * TS.Mms * TS.Re) / (TS.Bl * TS.Bl);      // 0.3712
+const Qts = (TS.Qms * Qes) / (TS.Qms + Qes);              // 0.3410
 const RHOC2 = DSP.RHO_AIR * DSP.C_SOUND_20C * DSP.C_SOUND_20C;
-const Vas = RHOC2 * TS.Sd * TS.Sd * Cms;                   // 0.1120 m³ = 112 L
-const Vb = 0.030;                                          // 30 L sealed chamber, one per woofer
+const Vas = RHOC2 * TS.Sd * TS.Sd * Cms;                  // 0.1120 m³ = 112 L
+const Vb = 0.030;                                         // 30 L sealed chamber, one per woofer
 const AL = DSP.sealedAlignment({ fs: TS.fs, Qts, Vas }, Vb); // {alpha, fc, Qtc}
-const Kbox = Kms * (1 + AL.alpha);                         // box-stiffened suspension
-const Res = (TS.Bl * TS.Bl) / Rms;                         // motional resistance at resonance, Ω
-const Qmc = TS.Qms * Math.sqrt(AL.alpha + 1);              // mechanical Q in the box
+const Kbox = Kms * (1 + AL.alpha);                        // box-stiffened suspension
+const Res = (TS.Bl * TS.Bl) / Rms;                        // motional resistance at resonance, Ω
+const ZMAX = TS.Re + Res;                                 // 76.3 Ω at the impedance peak
 
 /**
  * −3 dB corner of the sealed 2nd-order high-pass, in closed form.
  * |H|² = u²/((1−u)² + u/Qtc²) = ½ with u = (f/fc)²  ⇒  u² + (2 − 1/Qtc²)·u − 1 = 0.
- * Qtc > 1/√2 puts f₃ below fc; Qtc = 1/√2 (Butterworth) puts it exactly at fc.
  */
 const F3 = (() => {
   const b = 2 - 1 / (AL.Qtc * AL.Qtc);
@@ -54,27 +53,32 @@ const F3 = (() => {
 const ETA0 = ((4 * Math.PI * Math.PI) / Math.pow(DSP.C_SOUND_20C, 3)) * Math.pow(TS.fs, 3) * Vas / Qes;
 /** 1 acoustic watt into half space, measured at 1 m. */
 const SPL_1W = DSP.splFromPa(Math.sqrt((1 / (2 * Math.PI)) * DSP.RHO_AIR * DSP.C_SOUND_20C));
-const P_283 = (2.83 * 2.83) / TS.Re;                       // 1.292 W into 6.2 Ω
+const P_283 = (2.83 * 2.83) / TS.Re;                      // 1.292 W into 6.2 Ω
 const SENS = SPL_1W + 10 * Math.log10(ETA0) + 10 * Math.log10(P_283);
-const P_AC_283 = ETA0 * P_283;                             // acoustic watts out of 2.83 V
+const P_AC_283 = ETA0 * P_283;                            // acoustic watts out of 2.83 V
 
 /** Voice coil: 0.32 mm Ø enamelled copper, overhung in an 8.5 mm gap. */
-const WIRE_MM2 = Math.PI * Math.pow(0.32 / 2, 2);          // 0.08042 mm²
-const WIRE_LEN = (TS.Re * WIRE_MM2 * 1e-6) / 1.72e-8;      // ρ_Cu = 1.72e-8 Ω·m → 29.0 m
-const H_GAP = 0.0085, H_COIL = 0.0245;                     // gap and winding heights
-const XMAX_CHK = (H_COIL - H_GAP) / 2;                      // = 8.0 mm — matches TS.Xmax
-const L_IN_GAP = WIRE_LEN * (H_GAP / H_COIL);              // 10.06 m of wire is in the field
-const B_GAP = TS.Bl / L_IN_GAP;                            // 1.19 T — a good ferrite gap
-const N_TURNS = WIRE_LEN / (TAU * 0.0254);                 // 25.4 mm coil radius → 182 turns
-const V_SIG = DSP.signalSpeed(0.66);                       // field/energy speed in the winding
-const T_FILL = WIRE_LEN / V_SIG;                           // ~147 ns to energise the whole coil
+const WIRE_MM2 = Math.PI * Math.pow(0.32 / 2, 2);         // 0.08042 mm²
+const WIRE_LEN = (TS.Re * WIRE_MM2 * 1e-6) / 1.72e-8;     // ρ_Cu = 1.72e-8 Ω·m → 29.0 m
+const H_GAP = 0.0085, H_COIL = 0.0245;                    // gap and winding heights
+const XMAX_CHK = (H_COIL - H_GAP) / 2;                    // = 8.0 mm — matches TS.Xmax
+const L_IN_GAP = WIRE_LEN * (H_GAP / H_COIL);             // 10.06 m of wire is in the field
+const B_GAP = TS.Bl / L_IN_GAP;                           // 1.19 T — a good ferrite gap
+const N_TURNS = WIRE_LEN / (TAU * 0.0254);                // 25.4 mm coil radius → 182 turns
+const V_SIG = DSP.signalSpeed(0.66);                      // field/energy speed in the winding
+const T_FILL = WIRE_LEN / V_SIG;                          // ~147 ns to energise the whole coil
 
-/** Reference drive level for the whole overlay. */
-const SPL_REF = 96;                                        // dB at 1 m, half space, ONE driver
-const F_LO = 30, F_HI = 100;                               // the two mandated comparison points
-const X30 = DSP.excursionForSpl(SPL_REF, F_LO, TS.Sd);     // 7.574 mm peak
-const X100 = DSP.excursionForSpl(SPL_REF, F_HI, TS.Sd);    // 0.682 mm peak
-/** Lowest frequency this driver can reach SPL_REF before hitting Xmax. */
+/**
+ * Reference drive level for the whole overlay: 96 dB SPL at 1 m into half
+ * space, from ONE driver. Four woofers are animated (two per cabinet, both
+ * cabinets) and every figure on screen is per driver — hence the qualifier on
+ * the readout, the graph label and in the prose.
+ */
+const SPL_REF = 96;
+const F_LO = 30, F_HI = 100;                              // the two mandated comparison points
+const X30 = DSP.excursionForSpl(SPL_REF, F_LO, TS.Sd);    // 7.575 mm peak
+const X100 = DSP.excursionForSpl(SPL_REF, F_HI, TS.Sd);   // 0.682 mm peak
+/** Lowest frequency this driver reaches SPL_REF at before hitting Xmax. */
 const F_XMAX = F_LO * Math.sqrt(X30 / TS.Xmax);
 
 /** Electron drift in the coil at a stated peak current. */
@@ -83,18 +87,15 @@ const drift = (i) => DSP.driftVelocity(i, WIRE_MM2);
 /** Magnitude of the mechanical driving-point force for a peak displacement. */
 function forceFor(f, xp) {
   const w = TAU * f;
-  const A = (Kbox - w * w * TS.Mms) * xp;                  // stiffness − inertia, in phase with x
-  const B = Rms * w * xp;                                  // damping, in quadrature
+  const A = (Kbox - w * w * TS.Mms) * xp;                 // stiffness − inertia, in phase with x
+  const B = Rms * w * xp;                                 // damping, in quadrature
   return { A, B, peak: Math.hypot(A, B) };
 }
 
-/** |Z| of the driver: Re + jωLe in series with the parallel motional RLC. */
-function impedance(f, f0, Qm) {
-  const w = TAU * f;
-  const zm = DSP.cDiv([Res, 0], [1, Qm * (f / f0 - f0 / f)]);
-  return DSP.cAbs(DSP.cAdd([TS.Re, w * TS.Le], zm));
-}
-
+/** The stage's own operating point at 30 Hz — the worked example in content(). */
+const F30 = forceFor(F_LO, X30).peak;                     // 41.3 N
+const I30 = F30 / TS.Bl;                                  // 3.44 A
+const DR30 = DSP.driftDisplacement(drift(I30), F_LO);     // 16.7 µm
 
 /**
  * Private clones of the shared material library.
@@ -200,11 +201,10 @@ function ring(rIn, rOut, h, mat, b = 0.0006, radial = 72) {
  */
 function makeDriver(o) {
   const {
-    rEff, surroundW, flangeR, depth, bolts = 8, dust = 0, plug = 0,
+    rEff, surroundW, flangeR, depth, bolts = 8, dust = 0, plug = 0, boltR: boltRr = 0.0038,
     coneMat = hw().cone, motorR = 0.075, motorMat = hw().anodBlack, coilR = 0.025,
   } = o;
   const rOuter = rEff + surroundW / 2;
-  const rc = rOuter - surroundW;
   const g = new THREE.Group();
   const inner = new THREE.Group();
   inner.rotation.x = Math.PI / 2;          // +Y-up parts → +Z-facing
@@ -225,16 +225,24 @@ function makeDriver(o) {
   const fl = ring(rOuter * 0.985, flangeR, 0.0075, cast, 0.0007);
   fl.position.y = -0.0018;
   inner.add(fl);
-  const trimM = hw().anodGrey.clone(); trimM.roughness = 0.55; trimM.envMapIntensity = 0.8;
+  const trimM = hw().anodGrey.clone();
+  trimM.color.setHex(0x33383e); trimM.roughness = 0.52; trimM.envMapIntensity = 0.55;
   const trim = ring(flangeR - 0.0035, flangeR, 0.0022, trimM, 0.0005);
   trim.position.y = 0.0018;
   inner.add(trim);
+  // Machined countersinks with a real fastener in each: at 210 mm the head is
+  // ~9 mm across, which is what gives the driver its sense of size.
   const boltR = (rOuter + flangeR) / 2;
+  const boltM = hw().steel.clone(); boltM.color.setHex(0x7c828a); boltM.roughness = 0.34;
+  boltM.envMapIntensity = 0.8;
   for (let i = 0; i < bolts; i++) {
     const a = (i / bolts) * TAU + Math.PI / bolts;
-    const s = GEO.screw(0.0026, { mat: hw().steel });
+    const sink = ring(boltRr * 1.05, boltRr * 1.55, 0.0016, cast, 0.0004, 20);
+    sink.position.set(Math.sin(a) * boltR, 0.0012, Math.cos(a) * boltR);
+    inner.add(sink);
+    const s = GEO.screw(boltRr, { mat: boltM });
     s.rotation.x = 0;
-    s.position.set(Math.sin(a) * boltR, 0.0022, Math.cos(a) * boltR);
+    s.position.set(Math.sin(a) * boltR, 0.0026, Math.cos(a) * boltR);
     inner.add(s);
   }
 
@@ -245,13 +253,14 @@ function makeDriver(o) {
   const baseY = -surroundW * 0.46;
   moving.position.y = baseY;
   const surrMat = hw().rubber.clone();
-  surrMat.color.setHex(0x1a1d21);
-  surrMat.roughness = 0.84; surrMat.sheen = 0.42; surrMat.sheenRoughness = 0.72;
-  surrMat.sheenColor = new THREE.Color(0x424a54); surrMat.envMapIntensity = 0.40;
-  surrMat.specularIntensity = 0.35;
+  surrMat.color.setHex(0x131619);
+  surrMat.roughness = 0.86; surrMat.sheen = 0.50; surrMat.sheenRoughness = 0.74;
+  surrMat.sheenColor = new THREE.Color(0x353b44); surrMat.envMapIntensity = 0.30;
+  surrMat.specularIntensity = 0.20;
   const dustMat = hw().cone.clone();
-  dustMat.color.setHex(0x33373d); dustMat.roughness = 0.96; dustMat.sheen = 0.0;
-  dustMat.envMapIntensity = 0.10; dustMat.specularIntensity = 0.04;
+  dustMat.color.setHex(0x24282d); dustMat.roughness = 0.84;
+  dustMat.sheen = 0.45; dustMat.sheenColor = new THREE.Color(0x3a4048);
+  dustMat.envMapIntensity = 0.22; dustMat.specularIntensity = 0.08;
   const cone = GEO.driverCone(rOuter, depth, { surroundW, dustR: dust, coneMat, surrMat, dustMat });
   moving.add(cone);
   // coil former, visible through the cutaway
@@ -265,7 +274,6 @@ function makeDriver(o) {
   inner.add(moving);
   g.userData.moving = moving;
   g.userData.baseY = baseY;
-  g.userData.coilY = -depth - 0.009;
 
   // --- static phase plug ------------------------------------------------------
   if (plug > 0) {
@@ -293,13 +301,7 @@ function makeDriver(o) {
   const top = ring(coilR + 0.0028, motorR * 0.96, 0.0085, hw().steel, 0.0008, 56);
   top.position.y = -depth - 0.0193;
   motor.add(top);
-  motor.userData.topPlate = top;
-  motor.userData.pole = pole;
   inner.add(motor);
-  g.userData.motor = motor;
-  g.userData.motorR = motorR;
-  g.userData.rEff = rEff;
-  g.userData.depth = depth;
 
   GEO.shadowed(g);
   // The basket sits directly behind the cone; letting it cast into the cone
@@ -358,9 +360,9 @@ function makeTweeter(faceR = 0.052, domeR = 0.0125) {
 
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * TAU + Math.PI / 4;
-    const s = GEO.screw(0.0022, { mat: hw().steel });
+    const s = GEO.screw(0.0028, { mat: hw().steel });
     s.rotation.x = 0;
-    s.position.set(Math.sin(a) * (faceR - 0.0042), 0.0018, Math.cos(a) * (faceR - 0.0042));
+    s.position.set(Math.sin(a) * (faceR - 0.0048), 0.0018, Math.cos(a) * (faceR - 0.0048));
     inner.add(s);
   }
   GEO.shadowed(g);
@@ -410,11 +412,8 @@ const zHead = (y) => 0.155 - (y - HEAD_Y0) * Math.tan(RAKE_HEAD);
 
 const W_LO_Y = 0.285, W_HI_Y = 0.565, MID_Y = 0.985, TW_Y = 1.145;
 
-function makeCabinet(ghostable) {
+function makeCabinet() {
   const g = new THREE.Group();
-  const shells = [];
-  const shellMat = ghostable ? hw().pianoBlack.clone() : hw().pianoBlack;
-  const baffleMat = ghostable ? hw().pianoBlack.clone() : hw().pianoBlack;
 
   // --- spikes and machined plinth --------------------------------------------
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
@@ -431,28 +430,44 @@ function makeCabinet(ghostable) {
   g.add(plinth);
 
   // --- gloss modules ----------------------------------------------------------
-  const bass = prism(PLAN_BASS, BASS_H, { y0: BASS_Y0, rake: RAKE_BASS, mat: shellMat });
+  const bass = prism(PLAN_BASS, BASS_H, { y0: BASS_Y0, rake: RAKE_BASS, mat: hw().pianoBlack });
   const head = prism(PLAN_HEAD, HEAD_H, { y0: HEAD_Y0, rake: RAKE_HEAD, mat: hw().pianoBlack });
   g.add(bass, head);
-  shells.push(bass);
-  const gant = prism(PLAN_GANT, GANT_H, { y0: GANT_Y0, corner: 0.009, bevel: 0.0016, mat: hw().alu });
+  const gantM = hw().alu.clone(); gantM.envMapIntensity = 0.70; gantM.roughness = 0.33;
+  const gant = prism(PLAN_GANT, GANT_H, { y0: GANT_Y0, corner: 0.009, bevel: 0.0016, mat: gantM });
   g.add(gant);
+  const capM = hw().anodGrey.clone(); capM.color.setHex(0x2b2f34); capM.roughness = 0.56;
+  capM.envMapIntensity = 0.65;
   const cap = prism(PLAN_HEAD.map(([x, z]) => [x * 0.965, z * 0.965]), 0.008,
-    { y0: HEAD_Y0 + HEAD_H - 0.0035, rake: RAKE_HEAD, corner: 0.006, bevel: 0.0014, mat: hw().anodGrey });
+    { y0: HEAD_Y0 + HEAD_H - 0.0035, rake: RAKE_HEAD, corner: 0.006, bevel: 0.0014, mat: capM });
   cap.position.z = -HEAD_H * Math.tan(RAKE_HEAD);
   g.add(cap);
 
   // --- baffles + drivers, in the raked baffle plane ---------------------------
+  /*
+   * The baffle is NOT the gloss lacquer. A mirror-finish panel normal to the
+   * camera reflects the studio's front softbox straight down the lens and goes
+   * to paper white, which is what buried the drivers. Real cabinets of this
+   * idiom use a dense mineral-loaded composite for the baffle — matte, slightly
+   * waxy — so the gloss reads only on the curved flanks where it belongs.
+   */
+  const baffleMat = hw().plastic.clone();
+  baffleMat.color.setHex(0x0d0f12); baffleMat.roughness = 0.63;
+  baffleMat.clearcoat = 0.22; baffleMat.clearcoatRoughness = 0.48;
+  baffleMat.envMapIntensity = 0.45;
   // The weave map on coneWeave multiplies down to near-black at this size; drop
-  // it and let the sheen carry the pulp-cone read instead.
+  // it and let the sheen carry the rim-to-apex value change on the cone wall.
   const bassCone = hw().coneWeave.clone();
   bassCone.map = null;
-  bassCone.color.setHex(0x3a3f47);
-  bassCone.roughness = 0.62; bassCone.clearcoat = 0.0; bassCone.envMapIntensity = 0.45;
-  bassCone.specularIntensity = 0.10; bassCone.sheen = 0.0;
+  bassCone.color.setHex(0x353a41);
+  bassCone.roughness = 0.72; bassCone.clearcoat = 0.10; bassCone.clearcoatRoughness = 0.5;
+  bassCone.envMapIntensity = 0.50; bassCone.specularIntensity = 0.16;
+  bassCone.sheen = 0.60; bassCone.sheenRoughness = 0.72;
+  bassCone.sheenColor = new THREE.Color(0x4b525c);
   const midCone = hw().cone.clone();
-  midCone.color.setHex(0x30343a); midCone.envMapIntensity = 0.5;
-  midCone.roughness = 0.90; midCone.specularIntensity = 0.25;
+  midCone.color.setHex(0x2c3036); midCone.envMapIntensity = 0.5;
+  midCone.roughness = 0.80; midCone.specularIntensity = 0.22;
+  midCone.sheen = 0.60; midCone.sheenColor = new THREE.Color(0x454b55);
 
   const ycB = BASS_Y0 + BASS_H / 2;
   const bg = new THREE.Group();
@@ -469,18 +484,14 @@ function makeCabinet(ghostable) {
   hg.rotation.x = -RAKE_HEAD;
   g.add(hg);
   hg.add(bafflePlate(W_HB, HEAD_H - 0.007, T_HB,
-    [[0, MID_Y - ycH, 0.0724], [0, TW_Y - ycH, 0.0405]], hw().pianoBlack));
+    [[0, MID_Y - ycH, 0.0724], [0, TW_Y - ycH, 0.0405]], baffleMat));
 
   const wOpt = { rEff: 0.105, surroundW: 0.020, flangeR: 0.122, depth: 0.045, bolts: 8, dust: 0.041, coneMat: bassCone };
   const wLo = makeDriver(wOpt); wLo.position.set(0, W_LO_Y - ycB, 0.0012); bg.add(wLo);
   const wHi = makeDriver(wOpt); wHi.position.set(0, W_HI_Y - ycB, 0.0012); bg.add(wHi);
-  const mid = makeDriver({ rEff: 0.068, surroundW: 0.013, flangeR: 0.089, depth: 0.038, bolts: 6, plug: 0.017, motorR: 0.050, coilR: 0.019, coneMat: midCone });
+  const mid = makeDriver({ rEff: 0.068, surroundW: 0.013, flangeR: 0.089, depth: 0.038, bolts: 6, plug: 0.017, motorR: 0.050, coilR: 0.019, boltR: 0.0030, coneMat: midCone });
   mid.position.set(0, MID_Y - ycH, 0.0010); hg.add(mid);
   const tw = makeTweeter(); tw.position.set(0, TW_Y - ycH, 0.0008); hg.add(tw);
-
-  // Internal bracing is drawn as a hairline in the overlay instead of solid
-  // geometry: a real brace inside the ghosted box mirrors the studio
-  // environment and blows out through the semi-transparent baffle.
 
   // --- rear alloy terminal / resistor panel -----------------------------------
   const rear = new THREE.Group();
@@ -520,7 +531,7 @@ function makeCabinet(ghostable) {
   g.add(badge);
 
   g.add(GEO.contactShadow(0.92, 1.05, 0.80));
-  g.userData = { shells, shellMat, baffleMat, wLo, wHi, mid, tw };
+  g.userData = { wLo, wHi, mid, tw };
   return g;
 }
 
@@ -532,8 +543,8 @@ function makeCabinet(ghostable) {
 function slab(ax0, ax1, ay0, ay1, mat, d = 0.006) {
   const x0 = Math.min(ax0, ax1), x1 = Math.max(ax0, ax1);
   const y0 = Math.min(ay0, ay1), y1 = Math.max(ay0, ay1);
-  const g = new THREE.ExtrudeGeometry(roundedShape([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], 0.0011), {
-    depth: d, bevelEnabled: true, bevelSize: 0.0007, bevelThickness: 0.0007, bevelSegments: 2, curveSegments: 3, steps: 1,
+  const g = new THREE.ExtrudeGeometry(roundedShape([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], 0.0013), {
+    depth: d, bevelEnabled: true, bevelSize: 0.0010, bevelThickness: 0.0009, bevelSegments: 3, curveSegments: 4, steps: 1,
   });
   g.translate(0, 0, -d / 2);
   const m = new THREE.Mesh(g, mat);
@@ -581,7 +592,6 @@ function polarityMark(r = 0.0058, color = PAL.am) {
   return g;
 }
 
-
 // ===========================================================================
 // Motor section — an engineering cut in a plane that faces the stage camera.
 // Local frame: +x = the driver axis (front to the right), +y = radial.
@@ -596,15 +606,27 @@ const R_COIL = (R_FOUT + R_WIND) / 2;
 function buildSection() {
   const g = new THREE.Group();
 
-  // Section materials: library clones lifted so a cut face reads as a drawing.
-  const st = hw().steel.clone();
-  st.color.setHex(0xc2c7ce); st.roughness = 0.26; st.envMapIntensity = 2.0;
-  const mg = hw().lamination.clone();
-  mg.color.setHex(0x565e68); mg.roughness = 0.55; mg.envMapIntensity = 1.6;
+  /*
+   * Section materials.
+   *
+   * `steel` and `lamination` both carry roughnessMap = anodisedRough(512), and
+   * slab() is an ExtrudeGeometry whose WorldUVGenerator emits UVs in METRES —
+   * so a 21 mm magnet block samples ~2 % of the noise texture and magnifies a
+   * single blotch across the whole part. Null the map and let the geometry's
+   * broken edges and the section lamp do the work instead.
+   */
+  const st = hw().steel.clone();                            // machined low-carbon steel
+  st.roughnessMap = null; st.normalMap = null;
+  st.color.setHex(0x6e757e); st.roughness = 0.34; st.metalness = 1.0; st.envMapIntensity = 0.80;
+  const mg = hw().lamination.clone();                       // sintered ferrite ring
+  mg.roughnessMap = null; mg.normalMap = null;
+  mg.color.setHex(0x23272c); mg.roughness = 0.74; mg.metalness = 0.30; mg.envMapIntensity = 0.55;
   const cw = hw().magnetWire.clone();
-  cw.color.setHex(0xcb7539); cw.roughness = 0.18; cw.envMapIntensity = 1.8;
-  const pl = hw().plastic.clone(); pl.color.setHex(0x2b2f36);
-  const cn = hw().coneWeave.clone(); cn.color.setHex(0x373b42);
+  cw.color.setHex(0xb2632f); cw.roughness = 0.24; cw.envMapIntensity = 1.0;
+  const pl = hw().plastic.clone(); pl.color.setHex(0x24282e); pl.envMapIntensity = 0.4;
+  const cn = hw().coneWeave.clone();
+  cn.map = null; cn.color.setHex(0x272b31); cn.metalness = 0.0; cn.roughness = 0.70;
+  cn.clearcoat = 0.10; cn.clearcoatRoughness = 0.5; cn.envMapIntensity = 0.40;
 
   const card = DIAG.diagramCard(0.140, 0.208, { opacity: 0.90, pad: 0.007 });
   card.position.set(-0.0655, -0.104, -0.018);
@@ -650,29 +672,25 @@ function buildSection() {
     mov.add(nm);
   }
   // bright outline on the two coil sections, so the coil is unmistakable
-  const coilLine = [];
   for (const s of [1, -1]) {
     const t = new DIAG.Trace(5, PAL.am, 1.8, { opacity: 0.95, renderOrder: 15 });
     const P = [[X_GAPC - H_COIL / 2, s * R_FOUT], [X_GAPC + H_COIL / 2, s * R_FOUT],
       [X_GAPC + H_COIL / 2, s * R_WIND], [X_GAPC - H_COIL / 2, s * R_WIND], [X_GAPC - H_COIL / 2, s * R_FOUT]];
     t.write((i) => [P[i][0], P[i][1], 0.0090]);
     mov.add(t);
-    coilLine.push(t);
   }
   g.add(mov);
 
   // --- the magnetic circuit is a closed loop too -------------------------------
-  const field = [];
   for (const s of [1, -1]) {
     const K = [[-0.0535, s * 0.0110], [-0.0535, s * 0.0520], [-0.0400, s * 0.0560],
       [-0.0243, s * 0.0520], [-0.0243, s * 0.0295], [-0.0243, s * 0.0180],
       [-0.0330, s * 0.0110], [-0.0450, s * 0.0100], [-0.0535, s * 0.0110]];
-    const t = new DIAG.Trace(K.length, PAL.cy, 1.4, { opacity: 0.45, renderOrder: 11 });
+    const t = new DIAG.Trace(K.length, PAL.cy, 1.4, { opacity: 0.42, renderOrder: 11 });
     t.write((i) => [K[i][0], K[i][1], 0.0082]);
     g.add(t);
-    field.push(t);
     const head = new THREE.Mesh(new THREE.ConeGeometry(0.0026, 0.0068, 10),
-      new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true, opacity: 0.75 }));
+      new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true, opacity: 0.70 }));
     head.position.set(-0.0243, s * 0.0255, 0.0082);
     head.rotation.z = s > 0 ? Math.PI : 0;          // flux crosses the gap radially inward
     g.add(head);
@@ -723,40 +741,85 @@ function buildSection() {
   markB.position.set(-0.024, -R_COIL - 0.0132, 0.011);
   g.add(markT, markB);
 
-  // --- force vector and excursion callout --------------------------------------
-  const ARR = 0xb9c1cb;
-  const fArrow = new DIAG.Trace(2, ARR, 3.0, { opacity: 0.95, renderOrder: 16 });
-  const fHead = new THREE.Mesh(new THREE.ConeGeometry(0.0042, 0.0110, 14),
+  /*
+   * Force vector. It is drawn FROM the coil — origin at X_GAPC + x(t), just
+   * clear of the winding — so it reads as F = Bl·i acting on the moving
+   * assembly, not as free-floating interface chrome. Its caption label is
+   * anchored directly above it.
+   */
+  const ARR = 0xc6cdd6;
+  const fArrow = new DIAG.Trace(2, ARR, 2.6, { opacity: 0.95, renderOrder: 16 });
+  const fHead = new THREE.Mesh(new THREE.ConeGeometry(0.0038, 0.0098, 14),
     new THREE.MeshBasicMaterial({ color: ARR, toneMapped: false, transparent: true }));
   fHead.renderOrder = 16;
   g.add(fArrow, fHead);
 
   const dim = DIAG.dimension([-X30, -0.094, 0.006], [X30, -0.094, 0.006], { color: PAL.cy, head: 0.010 });
   g.add(dim);
-  // Xmax gate: two hairlines at the coil's linear limit, so the live travel has a ruler
+  // Xmax gate: two hairlines at the coil's linear limit, so live travel has a ruler
   for (const s of [1, -1]) {
-    const t = new DIAG.Trace(2, PAL.rd, 1.2, { opacity: 0.6, renderOrder: 13 });
+    const t = new DIAG.Trace(2, PAL.amDim, 1.2, { opacity: 0.75, renderOrder: 13 });
     t.write((i) => [X_GAPC + s * TS.Xmax, -0.088 - i * 0.014, 0.006]);
     g.add(t);
   }
-  const rule = new DIAG.Trace(2, PAL.rd, 1.0, { opacity: 0.35, renderOrder: 13 });
+  const rule = new DIAG.Trace(2, PAL.amDim, 1.0, { opacity: 0.5, renderOrder: 13 });
   rule.write((i) => [X_GAPC + (i ? 1 : -1) * TS.Xmax, -0.1015, 0.006]);
   g.add(rule);
 
-  g.userData = { mov, carriers, path, markT, markB, fArrow, fHead, dim, spider, spider2, field, wire, coilLine, flow };
+  g.userData = { mov, carriers, path, markT, markB, fArrow, fHead, dim, spider, spider2, wire, flow };
   return g;
 }
 
 // ===========================================================================
-// Stage
+// Framing
+//
+// The clear stage is 960 x 840 px inside a 1600 x 1000 canvas. The cabinet is
+// the hero: it is framed to 63 % of the safe-box height and pushed left of the
+// optical centre, leaving a clean column on its right for exactly two overlay
+// cards. Nothing else is allowed into the frame.
 // ===========================================================================
 
-const SHOT = { position: [1.35, 1.16, 0.74], target: [-0.32, 0.70, -2.49], fov: 36 };
-const SEC_POS = [-0.16, 0.86, -1.45], SEC_S = 4.0;
-const PANEL_POS = [0.175, 0.88, -2.24];
+const CAB = [LAYOUT.speakerL.x, 0.655, LAYOUT.speakerL.z];
+const AZ = 0.40, EL = 0.045, FOV = 35;
+const RGT = [Math.cos(AZ), 0, -Math.sin(AZ)];       // screen-right, in world
+// NB: the Director already offsets the principal point for the safe box; this is
+// only the small extra truck that opens a card column, NOT the whole safe-box
+// correction. Compounding the two put the cabinet off-frame.
+const SHIFT = 0.145;                                // metres of lateral look-at offset
+const _fs = frameShot(CAB, 0.66, { fill: 0.60, az: AZ, el: EL, fov: FOV });
+const SHOT = {
+  position: _fs.position.map((v, i) => v + SHIFT * RGT[i]),
+  target: _fs.target.map((v, i) => v + SHIFT * RGT[i]),
+  fov: FOV,
+};
 
-/** Orient a flat XY group so it squarely faces a world point. */
+const CAMV = new THREE.Vector3(...SHOT.position);
+const TGTV = new THREE.Vector3(...SHOT.target);
+const FWD = TGTV.clone().sub(CAMV).normalize();
+const RIGHTV = new THREE.Vector3(RGT[0], 0, RGT[2]);
+const UPV = new THREE.Vector3().crossVectors(RIGHTV, FWD).normalize();
+/** Metres per device pixel at a given distance, for a 1000 px-high canvas. */
+const mPerPx = (d) => (d * Math.tan((FOV * Math.PI) / 360)) / 500;
+/** World point that lands dx px right and dy px below the safe-box centre. */
+function screenPt(dx, dy, dist) {
+  const k = mPerPx(dist);
+  return CAMV.clone().addScaledVector(FWD, dist)
+    .addScaledVector(RIGHTV, dx * k)
+    .addScaledVector(UPV, -dy * k);
+}
+
+const SEC_D = 2.70, GRA_D = 2.10;
+const SEC_C = screenPt(205, -190, SEC_D);        // motor cutaway card, screen ~(845, 310)
+const GRA_C = screenPt(205, 210, GRA_D);         // graph card,          screen ~(845, 710)
+const SEC_S = (400 * mPerPx(SEC_D)) / 0.222;     // card 400 px tall
+const GRA_S = (372 * mPerPx(GRA_D)) / 0.640;     // card 372 px wide
+
+/** Orient a flat XY group so it squarely faces the stage camera. */
 const _mLook = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0);
+function faceCamera(obj) {
+  _mLook.lookAt(CAMV, obj.position, _up);
+  obj.quaternion.setFromRotationMatrix(_mLook);
+}
 
 /**
  * DIAG.fadeTree records a per-mesh base opacity by reading material.opacity the
@@ -772,11 +835,8 @@ function seedOpacity(root) {
   });
   return root;
 }
-function faceCamera(obj, camPos) {
-  _mLook.lookAt(camPos, obj.position, _up);
-  obj.quaternion.setFromRotationMatrix(_mLook);
-}
-const EXAG = 200;                        // carrier-motion magnification, stated on screen
+
+const EXAG = 300;                        // carrier-motion magnification, stated on screen
 const SWEEP_T = 0.14;                    // simulated seconds per 30↔100 Hz traverse
 
 let S = null;
@@ -794,136 +854,127 @@ export default {
   build(ctx) {
     const { THREE: T3 } = ctx;
     // ---------------- hardware ------------------------------------------------
-    const hw = new T3.Group();
-    const near = makeCabinet(true);
+    const hwg = new T3.Group();
+    const near = makeCabinet();
     near.position.set(LAYOUT.speakerL.x, LAYOUT.speakerL.y, LAYOUT.speakerL.z);
     near.rotation.y = LAYOUT.speakerL.ry;
-    const far = makeCabinet(false);
+    const far = makeCabinet();
     far.position.set(LAYOUT.speakerR.x, LAYOUT.speakerR.y, LAYOUT.speakerR.z);
     far.rotation.y = LAYOUT.speakerR.ry;
-    hw.add(near, far);
+    hwg.add(near, far);
 
     // ---------------- overlay -------------------------------------------------
     const ov = new T3.Group();
-    const camPos = new T3.Vector3(...SHOT.position);
 
-    // (a) the 30 L sealed chamber, drawn inside the lower bass module
-    const loc = new T3.Group();
-    loc.position.copy(near.position);
-    loc.rotation.y = near.rotation.y;
-    ov.add(loc);
-    // The sealed volume is shown as a wireframe only: a translucent solid inside
-    // a semi-transparent cabinet composites into a blown highlight.
-    const boxPos = new T3.Vector3(0, 0.293, -0.015);
-    const boxEdge = new T3.LineSegments(new T3.EdgesGeometry(new T3.BoxGeometry(0.265, 0.3145, 0.360)),
-      new T3.LineBasicMaterial({ color: PAL.cy, transparent: true, opacity: 0.55, depthWrite: false, toneMapped: false }));
-    boxEdge.position.copy(boxPos);
-    boxEdge.renderOrder = 6;
-    loc.add(boxEdge);
-    // wireframe silhouette so the ghosted box still reads as a cabinet
-    const yb = BASS_Y0 + 0.002, yt = BASS_Y0 + BASS_H - 0.002;
-    const dz = BASS_H * Math.tan(RAKE_BASS);
-    const P4 = PLAN_BASS;
-    const edge = (n, fn) => { const t = new DIAG.Trace(n, PAL.ink3, 1.2, { opacity: 0.5 }); t.write(fn); loc.add(t); };
-    edge(P4.length + 1, (i) => { const q = P4[i % P4.length]; return [q[0], yb, q[1]]; });
-    edge(P4.length + 1, (i) => { const q = P4[i % P4.length]; return [q[0], yt, q[1] - dz]; });
-    for (const q of P4) edge(2, (i) => (i === 0 ? [q[0], yb, q[1]] : [q[0], yt, q[1] - dz]));
-
-    const boxAnchor = new T3.Object3D(); boxAnchor.position.set(-0.140, 0.36, 0.10); loc.add(boxAnchor);
-    const effAnchor = new T3.Object3D(); effAnchor.position.set(-0.13, 1.06, 0.10); loc.add(effAnchor);
-
-    // (b) motor section
+    // (a) the motor, opened up beside the cabinet
     const sec = buildSection();
-    sec.position.set(...SEC_POS);
+    sec.position.copy(SEC_C).addScaledVector(RIGHTV, -0.0045 * SEC_S);
     sec.scale.setScalar(SEC_S);
-    faceCamera(sec, camPos);
+    faceCamera(sec);
     ov.add(sec);
-    const secLamp = new T3.PointLight(0xfff2e2, 1.8, 0.92, 2);
-    secLamp.position.set(SEC_POS[0] - 0.16, SEC_POS[1] + 0.22, SEC_POS[2] + 0.30);
+    const secLamp = new T3.PointLight(0xfff2e2, 2.4, 1.5, 2);
+    secLamp.position.copy(SEC_C).addScaledVector(RIGHTV, -0.34).addScaledVector(UPV, 0.30)
+      .addScaledVector(FWD, -0.40);
     ov.add(secLamp);
     const U = sec.userData;
 
-    // leader line from the section back to the real upper woofer
-    const wp = new T3.Vector3(0, W_HI_Y, zBass(W_HI_Y) + 0.02);
+    // dashed leader from the cutaway back to the driver it is a cut of
+    const wp = new T3.Vector3(0, W_HI_Y, zBass(W_HI_Y) + 0.115);
     wp.applyAxisAngle(new T3.Vector3(0, 1, 0), near.rotation.y).add(near.position);
-    const leader = new DIAG.Trace(2, PAL.cy, 1.1, { opacity: 0.30, dashed: true, dashSize: 0.018, gapSize: 0.014 });
-    leader.write((i) => (i === 0
-      ? [SEC_POS[0] + 0.20, SEC_POS[1] + 0.30, SEC_POS[2]]
-      : [wp.x, wp.y, wp.z]));
+    const lead0 = SEC_C.clone().addScaledVector(RIGHTV, -0.150 * SEC_S / 3);
+    const leader = new DIAG.Trace(2, PAL.cy, 1.1, { opacity: 0.26, dashed: true, dashSize: 0.020, gapSize: 0.016 });
+    leader.write((i) => (i === 0 ? [lead0.x, lead0.y, lead0.z] : [wp.x, wp.y, wp.z]));
     ov.add(leader);
 
-    // (c) diagram stack
-    const panel = new T3.Group();
-    panel.position.set(...PANEL_POS);
-    faceCamera(panel, camPos);
-    ov.add(panel);
+    // (b) two plots on one card: what the box does, and what it costs in travel
+    const gwrap = new T3.Group();
+    gwrap.position.copy(GRA_C);
+    faceCamera(gwrap);
+    gwrap.scale.setScalar(GRA_S);
+    ov.add(gwrap);
     const inner = new T3.Group();
-    inner.position.set(-0.300, -0.475, 0);
-    panel.add(inner);
-    inner.add(DIAG.diagramCard(0.60, 0.950, { opacity: 0.90, pad: 0.018 }));
+    inner.position.set(-0.300, -0.2525, 0);
+    gwrap.add(inner);
+    inner.add(DIAG.diagramCard(0.60, 0.505, { opacity: 0.90, pad: 0.020 }));
 
-    const GW = 0.545, GH = 0.215;
-    const mkG = (opts, y) => { const g = new DIAG.Graph(Object.assign({ w: GW, h: GH, xLog: true }, opts)); g.position.set(0.028, y, 0.001); inner.add(g); return g; };
-
-    // impedance
-    const gZ = mkG({ xRange: [10, 2000], yRange: [0, 80], yTicks: [0, 20, 40, 60, 80] }, 0.680);
-    gZ.addTrace((f) => impedance(f, TS.fs, TS.Qms), { color: PAL.cyDim, width: 1.6, dashed: true });
-    gZ.addTrace((f) => impedance(f, AL.fc, Qmc), { color: PAL.cy, width: 2.4 });
-    gZ.addTrace(() => TS.Re, { color: PAL.ink3, width: 1.0, dashed: true, n: 2 });
-    gZ.addMarker(TS.fs, { color: PAL.ink3 });
-    gZ.addMarker(AL.fc, { color: PAL.am });
-    const dotZ = gZ.addDot(PAL.am, 0.006);
-
-    // sealed response
-    const gR = mkG({ xRange: [15, 500], yRange: [-27, 6], yTicks: [-24, -18, -12, -6, 0, 6], zeroLine: 0 }, 0.375);
+    const GW = 0.60, GH = 0.215;
+    // sealed response: free air vs 30 L box, with the true 12 dB/octave asymptote
+    const gR = new DIAG.Graph({
+      w: GW, h: GH, xLog: true, xRange: [15, 400], yRange: [-27, 6],
+      yTicks: [-24, -18, -12, -6, 0, 6], zeroLine: 0,
+    });
+    gR.position.set(0, 0.290, 0.001);
+    inner.add(gR);
     gR.addTrace((f) => DSP.sealedResponseDb(f, TS.fs, Qts), { color: PAL.cyDim, width: 1.5, dashed: true });
-    gR.addTrace((f) => 40 * Math.log10(f / AL.fc), { color: PAL.am, width: 1.4, dashed: true });
+    gR.addTrace((f) => 40 * Math.log10(f / AL.fc), { color: PAL.ink3, width: 1.2, dashed: true });
     gR.addTrace((f) => DSP.sealedResponseDb(f, AL.fc, AL.Qtc), { color: PAL.cy, width: 2.6 });
-    gR.addMarker(AL.fc, { color: PAL.am });
+    gR.addMarker(AL.fc, { color: PAL.cy, opacity: 0.55 });
     const dotR = gR.addDot(PAL.am, 0.006);
 
-    // excursion at constant SPL
-    const gX = mkG({ xRange: [20, 200], yRange: [0, 14], yTicks: [0, 4, 8, 12] }, 0.070);
-    gX.addBand(TS.Xmax * 1000, 14, PAL.rd, 0.10);
+    // excursion at constant SPL, one driver
+    const gX = new DIAG.Graph({
+      w: GW, h: GH, xLog: true, xRange: [24, 200], yRange: [0, 14], yTicks: [0, 4, 8, 12],
+    });
+    gX.position.set(0, 0, 0.001);
+    inner.add(gX);
+    gX.addBand(TS.Xmax * 1000, 14, PAL.am, 0.11);
+    gX.addTrace(() => TS.Xmax * 1000, { color: PAL.am, width: 1.2, dashed: true, n: 2 });
     gX.addTrace((f) => DSP.excursionForSpl(SPL_REF, f, TS.Sd) * 1000, { color: PAL.am, width: 2.6 });
-    gX.addMarker(F_XMAX, { color: PAL.rd });
+    gX.addMarker(F_XMAX, { color: PAL.am, opacity: 0.55 });
     const dotX = gX.addDot(PAL.cy, 0.006);
 
-    const anch = (g, gx, gy) => { const o = new T3.Object3D(); o.position.set(g.position.x + g.x(gx), g.position.y + g.y(gy), 0); inner.add(o); return o; };
-    const aZ = anch(gZ, 900, 60), aR = anch(gR, 320, -20), aX = anch(gX, 150, 4.4);
+    const anch = (gr, gx, gy) => {
+      const o = new T3.Object3D();
+      o.position.set(gr.position.x + gr.x(gx), gr.position.y + gr.y(gy), 0.004);
+      inner.add(o);
+      return o;
+    };
+    const aR = anch(gR, 21, 1.5), aX = anch(gX, 88, 10.2);
 
     // ---------------- labels --------------------------------------------------
     const L = ctx.labels;
-    const secAnchor = (x, y, z) => { const o = new T3.Object3D(); o.position.set(x, y, z || 0); sec.add(o); return o; };
+    const secAnchor = (x, y, z) => { const o = new T3.Object3D(); o.position.set(x, y, z || 0.012); sec.add(o); return o; };
     const BR = '<br>';
-    const lF = L.add(secAnchor(X_GAPC, 0.100, 0.01), { kicker: 'Motor force', text: 'F = Bl · i' + BR, value: '0.0 N', cls: 'am', offset: [0, -30] });
-    const lI = L.add(secAnchor(-0.046, -0.076, 0.01), { kicker: 'Voice coil', text: `Bl 12.0 T·m in a ${B_GAP.toFixed(2)} T gap` + BR, value: 'i = 0.00 A', cls: 'am', offset: [4, 40] });
-    const lC = L.add(secAnchor(0.030, 0.086, 0.02), { kicker: 'Charge carriers', text: 'oscillate — they never arrive' + BR, value: `±0 µm · shown ×${EXAG}`, cls: 'am', offset: [0, -42] });
-    const lX = L.add(secAnchor(X_GAPC, -0.100, 0.01), { kicker: 'Cone travel', text: `Mms ${(TS.Mms * 1000).toFixed(0)} g · Cms ${(Cms * 1e6).toFixed(0)} µm/N · Rms ${Rms.toFixed(2)} N·s/m` + BR, value: '±0.00 mm at 30.0 Hz', cls: 'acc', offset: [0, 40] });
-    const lE = L.add(secAnchor(0.057, -0.086, 0.02), { kicker: 'Back-EMF', text: 'e = Bl · v' + BR, value: '0.0 V', cls: 'acc', offset: [0, 36] });
-    const lZ = L.add(aZ, { kicker: 'Impedance', text: `Zmax ${(TS.Re * (1 + TS.Qms / Qes)).toFixed(1)} Ω` + BR, value: `fs ${TS.fs.toFixed(0)} → fc ${AL.fc.toFixed(1)} Hz`, offset: [-42, 4] });
-    const lR = L.add(aR, { kicker: 'Sealed 30 L', text: `fc ${AL.fc.toFixed(1)} · Qtc ${AL.Qtc.toFixed(2)} · f₃ ${F3.toFixed(1)} Hz` + BR, value: '−12 dB / octave', cls: 'acc', offset: [-48, 6] });
-    const lXg = L.add(aX, { kicker: 'Excursion · 96 dB', text: 'x ∝ 1/f²' + BR, value: '—', cls: 'am', offset: [-40, 4] });
-    const lB = L.add(boxAnchor, { kicker: 'Sealed chamber', text: `30 L net · Vas ${(Vas * 1000).toFixed(0)} L` + BR, value: `α = Vas/Vb = ${AL.alpha.toFixed(2)}`, offset: [-70, 6] });
-    const lEf = L.add(effAnchor, { kicker: 'Efficiency', text: `${SENS.toFixed(1)} dB @ 2.83 V / 1 m` + BR, value: `η₀ = ${(ETA0 * 100).toFixed(2)} %`, cls: 'am', offset: [-82, -4] });
+    const lF = L.add(secAnchor(X_GAPC, R_WIND + 0.021), {
+      kicker: 'Motor force', text: 'F = Bl · i, on the coil' + BR, value: '0.0 N',
+      cls: 'am', offset: [-40, -40], occlude: false, priority: 3,
+    });
+    const lC = L.add(secAnchor(0.030, 0.086), {
+      kicker: 'Charge carriers', text: 'they oscillate, they never arrive' + BR,
+      value: `±0 µm · drawn ×${EXAG}`, cls: 'am', offset: [96, -14], occlude: false, priority: 2,
+    });
+    const lI = L.add(secAnchor(-0.052, -0.030), {
+      kicker: 'Voice coil', text: `${WIRE_LEN.toFixed(1)} m of 0.32 mm wire · Bl ${TS.Bl.toFixed(1)} T·m` + BR,
+      value: 'i = 0.00 A', cls: 'am', offset: [-30, 26], occlude: false, priority: 2,
+    });
+    const lX = L.add(secAnchor(X_GAPC, -0.094, 0.008), {
+      kicker: 'Cone travel', text: `Mms ${(TS.Mms * 1000).toFixed(0)} g · Cms ${(Cms * 1e6).toFixed(0)} µm/N · Xmax ${(TS.Xmax * 1000).toFixed(1)} mm` + BR,
+      value: '±0.00 mm at 30.0 Hz', cls: 'acc', offset: [-70, 34], occlude: false, priority: 3,
+    });
+    const lR = L.add(aR, {
+      kicker: 'Sealed 30 L', text: `fc ${AL.fc.toFixed(1)} Hz · Qtc ${AL.Qtc.toFixed(2)} · f₃ ${F3.toFixed(1)} Hz` + BR,
+      value: '−12 dB / octave', cls: 'acc', offset: [64, 8], occlude: false, priority: 1,
+    });
+    const lXg = L.add(aX, {
+      kicker: 'Excursion', text: '96 dB at 1 m · one driver · half space' + BR,
+      value: '—', cls: 'am', offset: [26, 0], occlude: false, priority: 1,
+    });
 
     S = {
-      near, far, sec: U, gZ, gR, gX, dotZ, dotR, dotX,
-      labels: { lF, lI, lC, lX, lE, lZ, lR, lXg, lB, lEf },
-      shellMat: near.userData.shellMat,
-      baffleMat: near.userData.baffleMat,
+      near, far, sec: U, gR, gX, dotR, dotX,
+      labels: { lF, lI, lC, lX, lR, lXg },
       lamp: secLamp,
       woofers: [near.userData.wLo, near.userData.wHi, far.userData.wLo, far.userData.wHi],
-      ph: 0, f: F_LO, x: 0, i: 0, F: 0, e: 0, xp: X30, ip: 0, spl: SPL_REF, dr: 0,
+      ph: 0, f: F_LO, x: 0, i: 0, F: 0, e: 0, xp: X30, ip: 0, Fp: 1, spl: SPL_REF, dr: 0,
       cp: new T3.Vector3(),
     };
     seedOpacity(ov);
-    return { hardware: hw, overlay: ov };
+    return { hardware: hwg, overlay: ov };
   },
 
   update(dt, t) {
     if (!S) return;
-    // --- drive: 96 dB at 1 m, gliding between 30 Hz and 100 Hz -----------------
+    // --- drive: 96 dB at 1 m from one driver, gliding between 30 and 100 Hz ----
     const u = (t / SWEEP_T) % 2;
     const tri = u < 1 ? u : 2 - u;
     const f = F_LO * Math.pow(F_HI / F_LO, DSP.smoothstep(0.10, 0.90, tri));
@@ -937,6 +988,7 @@ export default {
     const F = forceFor(f, xp);
     S.x = xp * sn;                                   // cone displacement, m
     S.F = F.A * sn + F.B * cs;                       // instantaneous force, N
+    S.Fp = F.peak;                                   // peak force at this frequency
     S.ip = F.peak / TS.Bl;                           // peak current, A
     S.i = S.F / TS.Bl;                               // instantaneous current, A
     S.e = TS.Bl * w * xp * cs;                       // back-EMF, V
@@ -946,18 +998,18 @@ export default {
     // --- real cones move at true 1 : 1 world scale ------------------------------
     for (const d of S.woofers) d.userData.moving.position.y = d.userData.baseY + S.x;
 
-    // --- the section (a ×4 magnification of the same motion) --------------------
+    // --- the section (the same motion, drawn at the section's magnification) ----
     const U = S.sec;
     U.mov.position.x = S.x;
     const into = S.i >= 0;
     U.markT.userData.setInto(into);
     U.markB.userData.setInto(!into);
-    U.markT.position.x = X_GAPC + S.x * 0.0;         // marks stay on the gap
-    const fl = DSP.clamp(Math.abs(S.F) / 45, 0, 1) * 0.085 + 0.004;
+    // Force vector, drawn from the coil itself, just clear of the winding.
+    const fl = DSP.clamp(Math.abs(S.F) / 45, 0, 1) * 0.048 + 0.003;
     const dir = S.F >= 0 ? 1 : -1;
-    const x0 = X_GAPC + S.x;
-    U.fArrow.write((i) => [i === 0 ? x0 : x0 + dir * fl, 0.092, 0.01]);
-    U.fHead.position.set(x0 + dir * (fl + 0.005), 0.092, 0.01);
+    const x0 = X_GAPC + S.x, yA = R_WIND + 0.006;
+    U.fArrow.write((i) => [i === 0 ? x0 : x0 + dir * fl, yA, 0.012]);
+    U.fHead.position.set(x0 + dir * (fl + 0.005), yA, 0.012);
     U.fHead.rotation.z = dir > 0 ? -Math.PI / 2 : Math.PI / 2;
 
     // excursion dimension, redrawn to the live peak
@@ -967,9 +1019,9 @@ export default {
     dm[2].position.x = xp - 0.005;
 
     // spider: corrugated, inner end tied to the moving former
-    const spid = (tr, sg) => tr.write((i, u) => {
-      const y = sg * (R_FIN + u * (R_OUT * 0.70 - R_FIN));
-      const bx = -0.0042 + (1 - u) * S.x + Math.sin(u * Math.PI * 6) * 0.0018;
+    const spid = (tr, sg) => tr.write((i, u2) => {
+      const y = sg * (R_FIN + u2 * (R_OUT * 0.70 - R_FIN));
+      const bx = -0.0042 + (1 - u2) * S.x + Math.sin(u2 * Math.PI * 6) * 0.0018;
       return [bx, y, 0.0086];
     });
     spid(U.spider, 1); spid(U.spider2, -1);
@@ -990,11 +1042,9 @@ export default {
       if (d.lengthSq() > 1e-9) h.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
       h.material.opacity = 0.25 + 0.65 * Math.abs(S.i) / Math.max(S.ip, 1e-6);
     }
-    const glow = 0.45 + 0.55 * Math.abs(S.i) / Math.max(S.ip, 1e-6);
-    U.wire.material.opacity = 0.35 + 0.45 * glow;
+    U.wire.material.opacity = 0.35 + 0.45 * (0.45 + 0.55 * Math.abs(S.i) / Math.max(S.ip, 1e-6));
 
     // --- graphs ------------------------------------------------------------------
-    S.dotZ.userData.setData(f, impedance(f, AL.fc, Qmc));
     S.dotR.userData.setData(f, DSP.sealedResponseDb(f, AL.fc, AL.Qtc));
     S.dotX.userData.setData(f, xp * 1000);
 
@@ -1002,100 +1052,71 @@ export default {
     const Lb = S.labels;
     Lb.lF.setValue(`${S.F >= 0 ? '+' : '−'}${Math.abs(S.F).toFixed(1)} N`);
     Lb.lI.setValue(`i = ${S.i >= 0 ? '+' : '−'}${Math.abs(S.i).toFixed(2)} A`);
-    Lb.lC.setValue(`±${(S.dr * 1e6).toFixed(1)} µm · shown ×${EXAG}`);
+    Lb.lC.setValue(`±${(S.dr * 1e6).toFixed(1)} µm · drawn ×${EXAG}`);
     Lb.lX.setValue(`±${(xp * 1000).toFixed(2)} mm at ${f.toFixed(1)} Hz`);
-    Lb.lE.setValue(`${S.e >= 0 ? '+' : '−'}${Math.abs(S.e).toFixed(1)} V`);
     Lb.lXg.setValue(`${(xp * 1000).toFixed(2)} mm at ${f.toFixed(0)} Hz`);
   },
 
   setReveal(k) {
     if (!S) return;
-    const set = (m, o) => {
-      m.opacity = o;
-      const tr = o < 0.995;
-      if (m.transparent !== tr) { m.transparent = tr; m.needsUpdate = true; }
-      m.depthWrite = !tr;
-      // a ghosted panel must not also blow a mirror-sharp clearcoat highlight
-      m.clearcoatRoughness = 0.028 + 0.42 * k;
-      m.roughness = 0.30 + 0.60 * k;
-      m.clearcoat = 1 - k;
-      m.envMapIntensity = 1.15 - 1.09 * k;
-      m.reflectivity = 0.6 - 0.56 * k;
-      m.specularIntensity = 1 - 0.92 * k;
-      m.sheen = 0;
-    };
-    set(S.shellMat, 1 - 0.55 * k);
-    set(S.baffleMat, 1 - 0.15 * k);
-    for (const s of S.near.userData.shells) s.renderOrder = k > 0.005 ? 2 : 0;
-    S.lamp.intensity = 1.8 * k;
+    S.lamp.intensity = 2.4 * k;
   },
 
   content() {
     return `
 <h3>The motor</h3>
-<p>A coil of <span class="num">${WIRE_LEN.toFixed(1)} m</span> of 0.32 mm copper hangs in a
-radial gap of <span class="num">${B_GAP.toFixed(2)} T</span>. Only the
-<span class="num">${L_IN_GAP.toFixed(1)} m</span> inside the ${(H_GAP * 1000).toFixed(1)} mm gap
-does any work, so <b>Bl = B·l = ${TS.Bl.toFixed(1)} T·m</b>. Force follows the current exactly:</p>
-<div class="eq">F = Bl · i
-  = 12.0 × 5 A  <span class="hl">= 60 N</span>
-<span class="c">reverse i, and F reverses with it</span>
-e = Bl · v   <span class="c">the coil is also a generator</span></div>
-<p>The current is a <b>loop</b>: in one tinsel lead, ${N_TURNS.toFixed(0)} turns round the
-former, out of the other, back to the amplifier. Nothing travels down it. At
+<div class="key"><span class="lab">The idea</span><p>The coil turns current into
+force and velocity back into voltage with the same constant, <b>Bl</b>.
+Everything else on this page is a consequence of that one number.</p></div>
+<p><span class="num">${WIRE_LEN.toFixed(1)} m</span> of 0.32 mm copper hangs in a radial gap of
+<span class="num">${B_GAP.toFixed(2)} T</span>. Only the <span class="num">${L_IN_GAP.toFixed(1)} m</span>
+inside the ${(H_GAP * 1000).toFixed(1)} mm gap does any work, so Bl = ${TS.Bl.toFixed(1)} T·m.</p>
+<div class="eq">F = Bl · i        e = Bl · v
+at ${F_LO} Hz, ${SPL_REF} dB:  F̂ = <span class="hl">${F30.toFixed(1)} N</span>
+   so  î = F̂/Bl = <span class="hl">${I30.toFixed(2)} A</span></div>
+<p>The current is a <b>loop</b>: in on one tinsel lead, ${N_TURNS.toFixed(0)} turns round the
+former, out on the other, back to the amplifier. Nothing travels down it. At
 ${F_LO} Hz the carriers oscillate about a fixed point with a peak displacement of
-<span class="num">${(DSP.driftDisplacement(drift(forceFor(F_LO, X30).peak / TS.Bl), F_LO) * 1e6).toFixed(1)} µm</span>
-— while the cone they drive moves <span class="num">${(X30 * 1000).toFixed(2)} mm</span>,
-some <span class="num">${(X30 / DSP.driftDisplacement(drift(forceFor(F_LO, X30).peak / TS.Bl), F_LO)).toFixed(0)}×</span> further.
-The field that carries the energy fills the whole winding in
-<span class="num">${(T_FILL * 1e9).toFixed(0)} ns</span>, against a ${F_LO} Hz period of
-<span class="num">33.3 ms</span>.</p>
+<span class="num">${(DR30 * 1e6).toFixed(1)} µm</span>, while the cone they drive moves
+<span class="num">${(X30 * 1000).toFixed(2)} mm</span> — <span class="num">${(X30 / DR30).toFixed(0)}×</span>
+further. The field that carries the energy fills the whole winding in
+<span class="num">${(T_FILL * 1e9).toFixed(0)} ns</span>.</p>
 
-<h3>The mechanics</h3>
+<h3>The cabinet</h3>
 <p>Measured: fs <span class="num">${TS.fs.toFixed(1)} Hz</span>, Mms
-<span class="num">${(TS.Mms * 1000).toFixed(0)} g</span>, Re
-<span class="num">${TS.Re.toFixed(1)} Ω</span>, Qms <span class="num">${TS.Qms.toFixed(1)}</span>,
-Sd <span class="num">${TS.Sd.toFixed(4)} m²</span>. Everything else follows:</p>
-<div class="eq">Cms = 1/(ωs²·Mms) = <span class="hl">${(Cms * 1e6).toFixed(0)} µm/N</span>
-Qes = ωs·Mms·Re/Bl²  = ${Qes.toFixed(3)}
-Qts = ${Qts.toFixed(3)}   Vas = ρc²Sd²Cms = ${(Vas * 1000).toFixed(0)} L
+<span class="num">${(TS.Mms * 1000).toFixed(0)} g</span>, Re <span class="num">${TS.Re.toFixed(1)} Ω</span>,
+Qms <span class="num">${TS.Qms.toFixed(1)}</span>, Sd <span class="num">${TS.Sd.toFixed(4)} m²</span>.
+Thirty litres of trapped air stiffens the suspension:</p>
+<div class="eq">Vas = ρc²·Sd²·Cms = ${(Vas * 1000).toFixed(0)} L
 α   = Vas/Vb = ${(Vas * 1000).toFixed(0)}/30 = ${AL.alpha.toFixed(2)}
 fc  = fs·√(α+1) = <span class="hl">${AL.fc.toFixed(1)} Hz</span>
-Qtc = Qts·√(α+1) = ${AL.Qtc.toFixed(3)}  <span class="c">f₃ = ${F3.toFixed(1)} Hz</span></div>
+Qtc = ${AL.Qtc.toFixed(3)}   f₃ = ${F3.toFixed(1)} Hz   |Z|max ${ZMAX.toFixed(0)} Ω
+η₀  = ${(ETA0 * 100).toFixed(2)} % <span class="c">→ ${SENS.toFixed(1)} dB, 2.83 V, 1 m</span></div>
 <div class="myth"><span class="lab">Commonly got wrong</span><p>A sealed box rolls off at
-<b>12 dB/octave</b>, not 24. It is a second-order high-pass: two energy stores,
-the moving mass and the compliance of suspension plus trapped air.</p></div>
+<b>12 dB/octave</b>, not 24. It is second order: one moving mass, one compliance
+of suspension plus trapped air.</p></div>
 
-<h3>Excursion, and why bass is hard</h3>
-<p>For a given SPL the piston must displace a fixed volume of air per cycle, and
-the radiated pressure goes as acceleration, so <b>x ∝ 1/f²</b>. At 96 dB and 1 m,
-one of these drivers needs <span class="num">${(X30 * 1000).toFixed(2)} mm</span> at
-${F_LO} Hz but only <span class="num">${(X100 * 1000).toFixed(2)} mm</span> at ${F_HI} Hz —
-a factor of <span class="num">${(X30 / X100).toFixed(1)}</span>, exactly (100/30)².
-Xmax is (${(H_COIL * 1000).toFixed(1)} − ${(H_GAP * 1000).toFixed(1)})/2 =
+<h3>Why bass is hard</h3>
+<p>Far-field pressure follows volume <em>acceleration</em>,
+p = ρ·Sd·ω²·x̂/(2√2·π·r), so holding SPL constant forces <b>x ∝ 1/f²</b>. One
+driver at ${SPL_REF} dB, 1 m, half space needs <span class="num">${(X30 * 1000).toFixed(2)} mm</span>
+at ${F_LO} Hz but <span class="num">${(X100 * 1000).toFixed(2)} mm</span> at ${F_HI} Hz — a factor of
+<span class="num">${(X30 / X100).toFixed(1)}</span>, exactly (100/30)². Xmax is
+(${(H_COIL * 1000).toFixed(1)} − ${(H_GAP * 1000).toFixed(1)})/2 =
 <span class="num">${(XMAX_CHK * 1000).toFixed(1)} mm</span>, so below
-<span class="num">${F_XMAX.toFixed(1)} Hz</span> it simply runs out of travel.</p>
-
-<h3>Efficiency, honestly</h3>
-<div class="eq">η₀ = (4π²/c³)·fs³·Vas/Qes = <span class="hl">${(ETA0 * 100).toFixed(2)} %</span>
-2.83 V into ${TS.Re.toFixed(1)} Ω = ${P_283.toFixed(2)} W electrical
-    → ${(P_AC_283 * 1000).toFixed(1)} mW acoustic = ${SENS.toFixed(1)} dB @ 1 m
-    → ${(100 - ETA0 * 100).toFixed(2)} % heats the voice coil</div>
-<div class="key"><span class="lab">The idea</span><p>The coil converts current to force
-linearly and velocity back to voltage linearly, with the same constant. A
-loudspeaker is a very bad heater that leaks under one per cent of its input as
-sound — and that leak is the whole point.</p></div>`;
+<span class="num">${F_XMAX.toFixed(1)} Hz</span> it runs out of travel. All four woofers
+here move together; every figure on screen is for one of them.</p>`;
   },
 
   readouts() {
-    const s = S || { i: 0, F: 0, x: 0, xp: 0, spl: SPL_REF, f: F_LO, ip: 1 };
+    const s = S || { i: 0, F: 0, x: 0, e: 0, xp: 0, spl: SPL_REF, f: F_LO, ip: 1, Fp: 1 };
     return [
-      { k: 'COIL I', v: (s.i >= 0 ? '+' : '−') + Math.abs(s.i).toFixed(2), u: 'A', cls: 'am', bar: Math.abs(s.i) / 5 },
-      { k: 'FORCE', v: (s.F >= 0 ? '+' : '−') + Math.abs(s.F).toFixed(1), u: 'N', cls: 'am', bar: Math.abs(s.F) / 60 },
+      { k: 'DRIVE', v: s.f.toFixed(1), u: 'Hz' },
+      { k: 'COIL I', v: (s.i >= 0 ? '+' : '−') + Math.abs(s.i).toFixed(2), u: 'A', cls: 'am', bar: Math.abs(s.i) / Math.max(s.ip, 1e-6) },
+      { k: 'FORCE', v: (s.F >= 0 ? '+' : '−') + Math.abs(s.F).toFixed(1), u: 'N', cls: 'am', bar: Math.abs(s.F) / Math.max(s.Fp, 1e-6) },
+      { k: 'BACK-EMF', v: (s.e >= 0 ? '+' : '−') + Math.abs(s.e).toFixed(1), u: 'V', cls: 'acc' },
       { k: 'CONE X', v: (s.x * 1000).toFixed(2), u: 'mm', cls: 'acc', bar: Math.abs(s.x) / TS.Xmax },
-      { k: 'SPL @ 1 m', v: s.spl.toFixed(1), u: 'dB', cls: 'acc' },
-      { k: 'FC', v: AL.fc.toFixed(1), u: 'Hz' },
-      { k: 'QTC', v: AL.Qtc.toFixed(3), u: '' },
+      { k: 'SPL @ 1 m', v: s.spl.toFixed(1), u: 'dB · 1 drv, 2π', cls: 'acc' },
     ];
   },
 };

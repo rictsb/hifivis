@@ -10,14 +10,15 @@ import * as DSP from '../core/dsp.js';
 
    Every number below is either a stated design premise (a component value the
    engineer chooses) or is derived from those premises in code. Nothing is
-   chosen to look good.
+   chosen to look good, and every figure printed in the panel is interpolated
+   from the same model that drives the picture.
    =========================================================================== */
 
 // ---- physical constants ---------------------------------------------------
 const K_B = 1.380649e-23;          // J/K
 const T_K = 293.15;                // K (20 °C)
 const BW = 20000;                  // Hz, 20 Hz–20 kHz measurement bandwidth
-/** Johnson–Nyquist noise density: e = √(4kTB·R). This is V per √Ω. */
+/** Johnson–Nyquist noise density over BW: e = √(4kTB·R). This is V per √Ω. */
 const EK = Math.sqrt(4 * K_B * T_K * BW);      // 1.7994e-8 V/√Ω
 
 // ---- design premises (declared, not derived) ------------------------------
@@ -35,11 +36,7 @@ const V_SAT = 2.0;                 // V, saturation loss at each rail
 const R_PASSIVE = 10000;           // Ω, 40 kΩ passive pot at its midpoint
 const CM_HUM = 0.020;              // V rms, chassis-to-chassis 50 Hz difference
 const TOL_STD = 0.001;             // 0.1 % receiver resistors
-const TOL_TRIM = 0.0001;           // 0.01 % laser-trimmed network
-const A_CU = 0.20e-6;              // m², interconnect centre conductor (24 AWG)
-const VF = 0.66;                   // cable velocity factor
-const F_TONE = 1000;               // Hz, the test tone
-const CU_SPACING = 255.6e-12;      // m, Cu nearest-neighbour distance (fcc, a=361.5 pm)
+const RELAY_W = 0.0124;            // m, real signal-relay case width
 
 // ---- derived ---------------------------------------------------------------
 const G = DSP.undB(GAIN_DB);                       // 3.1623
@@ -48,13 +45,13 @@ const E_NI = EN_DENS * Math.sqrt(BW);              // 0.2546 µV
 const C_CABLE = C_PER_M * CABLE_L;                 // 300 pF
 const V_CLIP = (RAIL - V_SAT) / Math.SQRT2;        // 11.314 V rms
 const CLIP_DBV = DSP.dB(V_CLIP);                   // +21.07 dBV
-const V_FIELD = DSP.signalSpeed(VF);               // 1.9787e8 m/s
-const T_FLIGHT = CABLE_L / V_FIELD;                // 15.16 ns
+const PEAK_DBV = DSP.dB(V_SRC * G);                // +16.02 dBV
+const HEADROOM = CLIP_DBV - PEAK_DBV;              // 5.05 dB
+const V_MAX_SRC = V_CLIP / G;                      // 3.578 V rms
 const CMRR_STD = 1 / (2 * TOL_STD);                // 500  → 53.98 dB
-const CMRR_TRIM = 1 / (2 * TOL_TRIM);              // 5000 → 73.98 dB
+const CM_RESID = CM_HUM / CMRR_STD;                // 40.0 µV
 
 const parallel = (a, b) => (a <= 0 || b <= 0 ? 0 : (a * b) / (a + b));
-
 const eR = (R) => EK * Math.sqrt(Math.max(R, 0));
 
 /**
@@ -90,7 +87,7 @@ function chainLate(N) {
   s[1] = s[0] * G;                       n[1] = G * Math.hypot(n[0], E_NI);
   s[2] = s[1] * L.ratio;                 n[2] = Math.hypot(n[1] * L.ratio, eR(L.zOut));
   s[3] = s[2];                           n[3] = Math.hypot(n[2], eR(R_ACT));
-  return { L, s, n, snr: DSP.dB(s[3] / n[3]), peakNode: s[1] };
+  return { L, s, n, snr: DSP.dB(s[3] / n[3]) };
 }
 
 /** Ladder BEFORE the gain block ("attenuate early") — the comparison. */
@@ -100,8 +97,15 @@ function chainEarly(N) {
   s[1] = s[0] * L.ratio;                 n[1] = Math.hypot(n[0] * L.ratio, eR(L.zOut));
   s[2] = s[1] * G;                       n[2] = G * Math.hypot(n[1], E_NI);
   s[3] = s[2];                           n[3] = Math.hypot(n[2], eR(R_ACT));
-  return { L, s, n, snr: DSP.dB(s[3] / n[3]), peakNode: s[0] };
+  return { L, s, n, snr: DSP.dB(s[3] / n[3]) };
 }
+
+/** S/N referred to the (attenuated) output, tabulated for every knob position. */
+const SNR_LATE = new Float64Array(64);
+const SNR_EARLY = new Float64Array(64);
+for (let N = 0; N < 64; N++) { SNR_LATE[N] = chainLate(N).snr; SNR_EARLY[N] = chainEarly(N).snr; }
+const MARGIN_20 = SNR_LATE[20] - SNR_EARLY[20];    // 8.84 dB
+const MARGIN_63 = SNR_LATE[63] - SNR_EARLY[63];    // 10.17 dB
 
 /**
  * Cable + load transfer function. The source drives C_CABLE shunted by R_LOAD,
@@ -116,18 +120,13 @@ function loadH(f, rs) {
 const loadDb = (f, rs) => DSP.dB(DSP.cAbs(loadH(f, rs)));
 const cornerHz = (rs) => 1 / (DSP.TAU * parallel(rs, R_LOAD) * C_CABLE);
 
-/** Electron drift for the current this preamp is delivering right now. */
-function carriers(vOut) {
-  const iRms = vOut / R_LOAD;
-  const vd = DSP.driftVelocity(iRms, A_CU * 1e6);           // m/s rms
-  const disp = DSP.driftDisplacement(vd * Math.SQRT2, F_TONE);
-  return { iRms, vd, disp };
-}
+const DIV_LOSS = DSP.dB(R_LOAD / (R_PASSIVE + R_LOAD));        // −1.68 dB
+const HF_LOSS = loadDb(20000, R_PASSIVE) - DIV_LOSS;           // −0.40 dB
 
 export const MODEL = {
-  EK, G, E_SRC, E_NI, V_CLIP, CLIP_DBV, C_CABLE, T_FLIGHT, V_FIELD,
-  CMRR_STD, CMRR_TRIM, SECTIONS, ladderState, chainLate, chainEarly,
-  loadDb, cornerHz, carriers, R_PASSIVE, R_ACT, CM_HUM, CU_SPACING,
+  EK, G, E_SRC, E_NI, V_CLIP, CLIP_DBV, HEADROOM, C_CABLE, CMRR_STD,
+  SECTIONS, ladderState, chainLate, chainEarly, loadDb, cornerHz,
+  SNR_LATE, SNR_EARLY, R_PASSIVE, R_ACT,
 };
 
 /* ===========================================================================
@@ -248,6 +247,26 @@ function buildPreamp() {
   recess.position.set(0.200, H / 2, ZF - 0.0005);
   recess.castShadow = recess.receiveShadow = true;
   g.add(recess);
+
+  // engraved index ticks around the recess — machining detail sells the scale
+  const tickGeo = GEO.bevelBox(0.0009, 0.0042, 0.0010, 0.0002, 2);
+  const ticks = new THREE.InstancedMesh(tickGeo, M.anodGrey, 21);
+  {
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1);
+    const p = new THREE.Vector3(), rr = KR + 0.0086;
+    for (let i = 0; i < 21; i++) {
+      const a = THREE.MathUtils.degToRad(-120 + (i / 20) * 240);
+      q.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -a);
+      p.set(0.200 + Math.sin(a) * rr, H / 2 + Math.cos(a) * rr, ZF + 0.0006);
+      const s = i % 5 === 0 ? 1.5 : 1;
+      sc.set(1, s, 1);
+      m.compose(p, q, sc);
+      ticks.setMatrixAt(i, m);
+    }
+  }
+  ticks.castShadow = false;
+  g.add(ticks);
+
   const knobPivot = new THREE.Group();
   knobPivot.rotation.x = -Math.PI / 2;
   knobPivot.position.set(0.200, H / 2, ZF + KH / 2 + 0.0010);
@@ -336,36 +355,74 @@ function buildPreamp() {
   g.add(rear);
 
   GEO.shadowed(ch);
-  const sh = GEO.contactShadow(W * 1.35, D * 1.35, 0.55, 0.0016);
-  g.add(sh);
+  g.add(GEO.contactShadow(W * 1.35, D * 1.35, 0.55, 0.0016));
 
-  g.userData = { knob, knobPivot, disp, meter, leds };
+  g.userData = { knob, disp, meter };
   return g;
 }
 
 /* ===========================================================================
-   OVERLAY PART 1 — the relay ladder, exploded above the rack at ×2.5.
+   FRAMING
+
+   The clear stage is 960 x 840 px inside a 1600 x 1000 canvas, and the Director
+   already offsets the principal point so the camera axis lands at its centre.
+   What is left to get right is the SIZE and PLACEMENT of things inside that
+   box, so the shot is specified in pixels and solved backwards for a camera.
    =========================================================================== */
 
-// Board drawn at 2.5 × life size, then the whole plate is scaled 1.8 × in the
-// grid cell — hence the "×4.5" on its caption. A real relay case is 12.4 ×
-// 9.9 × 7.2 mm; the drawn body is 31.0 × 24.8 mm before the plate scale.
-const BW_ = 0.232, BH_ = 0.094;        // board size, metres, as drawn
-const SPITCH = 0.0320;
+const AZ = 0.40, EL = 0.058, FOV = 30;
+const HALF_TAN = Math.tan((FOV * Math.PI) / 360);
 
-/**
- * The exploded ladder.
- *
- * It is drawn flat rather than shaded: out here the only illumination is the
- * room's key light at a glancing angle over a dark environment, so a shaded
- * relay case renders as nothing at all. Flat fills, a hairline edge on every
- * part and one accent for the live path — the same language as the plots.
- */
+const PX_PER_M = 670;                       // scale on the preamp's own plane
+const HERO_PX = [165, 132];                 // where the preamp centre lands
+const MPP_HERO = 1 / PX_PER_M;
+const CAM_DIST = (500 * MPP_HERO) / HALF_TAN;             // 2.785 m
+const DECK_DIST = CAM_DIST - 0.50;                        // card plane, nearer
+const MPP_DECK = (DECK_DIST * HALF_TAN) / 500;
+
+const DIRV = new THREE.Vector3(
+  Math.sin(AZ) * Math.cos(EL), Math.sin(EL), Math.cos(AZ) * Math.cos(EL));
+const RIGHT = new THREE.Vector3(Math.cos(AZ), 0, -Math.sin(AZ));
+const UPV = new THREE.Vector3().crossVectors(DIRV, RIGHT).normalize();
+
+const PRE = new THREE.Vector3(LAYOUT.rack.x, LAYOUT.rack.shelfY[4] + FOOT + H / 2, LAYOUT.rack.z);
+const AIM = PRE.clone()
+  .addScaledVector(RIGHT, -HERO_PX[0] * MPP_HERO)
+  .addScaledVector(UPV, -HERO_PX[1] * MPP_HERO);
+const CAMP = AIM.clone().addScaledVector(DIRV, CAM_DIST);
+
+/** World point that projects to (px, py) from the camera axis, on a given plane. */
+function screenPoint(px, py, dist) {
+  const m = (dist * HALF_TAN) / 500;
+  return CAMP.clone().addScaledVector(DIRV, -dist)
+    .addScaledVector(RIGHT, px * m).addScaledVector(UPV, py * m);
+}
+
+/* ===========================================================================
+   OVERLAY — one card, two regions. The relay ladder that the knob actually
+   drives, and what moving it does to signal-to-noise.
+   =========================================================================== */
+
+const CARD_PX = [330, 470];                 // one card, left of the hero
+const CARD_AT = [-303, 55];                 // its centre, px from the axis
+const CW = CARD_PX[0] * MPP_DECK;
+const CH = CARD_PX[1] * MPP_DECK;
+const P = (px) => px * MPP_DECK;            // card pixels → metres
+
+/** Flat, unlit fill — out here the key light is glancing and shading dies. */
 function flat(hex, opacity = 1) {
   return new THREE.MeshBasicMaterial({
     color: hex, toneMapped: false, transparent: true, opacity, depthWrite: false,
   });
 }
+
+// ---- the exploded relay ladder --------------------------------------------
+const BW_ = 0.232, BH_ = 0.094;             // board size in its own units
+const SPITCH = 0.0320;
+const RW = 0.0292, RH = 0.0248;             // drawn relay body
+const BOARD_PX = 296;
+const BOARD_SCALE = (BOARD_PX * MPP_DECK) / BW_;
+const BOARD_MAG = (RW * BOARD_SCALE) / RELAY_W;           // ≈ 3.7 : 1
 
 function buildBoard() {
   const g = new THREE.Group();
@@ -381,7 +438,7 @@ function buildBoard() {
     scl.set(w, h, 1); pos.set(cx, cy, z); m.compose(pos, q, scl); im.setMatrixAt(i, m);
   };
 
-  const plate = mk(0x16211c, 1, 6);
+  const plate = mk(0x141b21, 1, 6);
   put(plate, 0, 0, 0, BW_, BH_, 0.0000);
 
   const relay = mk(0xffffff, 6, 7);
@@ -392,8 +449,7 @@ function buildBoard() {
   const resB = mk(0x8497a6, 13, 7);
   const resC = mk(0xcfd4da, 26, 8);
 
-  const ledMat = flat(0xffffff);
-  const led = new THREE.InstancedMesh(new THREE.CircleGeometry(0.0024, 14), ledMat, 6);
+  const led = new THREE.InstancedMesh(new THREE.CircleGeometry(0.0024, 14), flat(0xffffff), 6);
   led.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(18), 3);
   led.frustumCulled = false; led.renderOrder = 9;
   g.add(led);
@@ -405,7 +461,7 @@ function buildBoard() {
   );
 
   const x0 = -0.006 - SPITCH * 2.5;
-  const RY = 0.0125, RW = 0.0292, RH = 0.0248;
+  const RY = 0.0125;
   for (let i = 0; i < 6; i++) {
     const x = x0 + i * SPITCH;
     put(relay, i, x, RY, RW, RH, 0.0010);
@@ -437,14 +493,15 @@ function buildBoard() {
   const og = new THREE.BufferGeometry();
   og.setAttribute('position', new THREE.Float32BufferAttribute(outline, 3));
   const ol = new THREE.LineSegments(og, new THREE.LineBasicMaterial({
-    color: 0x8a949f, transparent: true, opacity: 0.75, depthWrite: false, toneMapped: false,
+    color: 0x8a949f, transparent: true, opacity: 0.72, depthWrite: false, toneMapped: false,
   }));
   ol.renderOrder = 12;
   g.add(ol);
 
-  // live signal path (cyan) and the ground return rail (amber): a closed loop
+  // The live signal path (cyan) and the ground return rail (amber) — the loop
+  // is closed: everything the ladder shunts away goes back along the return.
   const sig = new DIAG.Trace(64, PAL.cy, 2.4, { renderOrder: 16 });
-  const ret = new DIAG.Trace(2, PAL.am, 1.8, { renderOrder: 16, opacity: 0.7 });
+  const ret = new DIAG.Trace(2, PAL.am, 1.8, { renderOrder: 16, opacity: 0.62 });
   ret.write((i) => [i === 0 ? -BW_ / 2 + 0.006 : BW_ / 2 - 0.006, -BH_ / 2 + 0.0035, 0.0020]);
   g.add(sig, ret);
 
@@ -452,18 +509,15 @@ function buildBoard() {
   return g;
 }
 
-/** Redraw the ladder's live signal path: over an engaged section, under a bypass. */
+/** Redraw the live path: over an engaged section, straight past a bypass. */
 function writeBoardPath(board, on) {
   const { sig, x0 } = board.userData;
   const yHi = 0.0392, yLo = 0.0300;
   const pts = [[-BW_ / 2 + 0.006, yLo]];
   for (let i = 0; i < 6; i++) {
     const x = x0 + i * SPITCH;
-    if (on[i]) {
-      pts.push([x - 0.0150, yLo], [x - 0.0120, yHi], [x + 0.0120, yHi], [x + 0.0150, yLo]);
-    } else {
-      pts.push([x - 0.0150, yLo], [x + 0.0150, yLo]);
-    }
+    if (on[i]) pts.push([x - 0.0150, yLo], [x - 0.0120, yHi], [x + 0.0120, yHi], [x + 0.0150, yLo]);
+    else pts.push([x - 0.0150, yLo], [x + 0.0150, yLo]);
   }
   pts.push([BW_ / 2 - 0.006, yLo]);
   const n = 64;
@@ -475,46 +529,11 @@ function writeBoardPath(board, on) {
   });
 }
 
-/* ===========================================================================
-   OVERLAY PART 2 — the three explanatory cards.
-   =========================================================================== */
-
-const CAM_ANCHOR = new THREE.Vector3(0.910, 1.466, -0.459);
-
-/**
- * A 2 × 2 plate grid in the clear volume left of and above the rack. The four
- * plates share one orientation — billboarding each separately splays them and
- * eats the gutters.
- */
-const CELL_W = 0.46, CELL_H = 0.26;
-const GRID = { x: -0.80, y: 1.26, gx: 0.075, gy: 0.115, z: -2.75 };
-const DECK = new THREE.Group();
-DECK.position.set(GRID.x, GRID.y, GRID.z);
-DECK.lookAt(CAM_ANCHOR);
-const cellPos = (col, row) => [
-  (col - 0.5) * (CELL_W + GRID.gx),
-  (0.5 - row) * (CELL_H + GRID.gy),
-  0,
-];
-
-/** An oriented card whose local (0,0) is the bottom-left of the plot area. */
-function card(w, h, x, y, z) {
-  const g = new THREE.Group();
-  g.position.set(x, y, z);
-  DECK.add(g);
-  const inner = new THREE.Group();
-  inner.position.set(-w / 2, -h / 2, 0);
-  g.add(inner);
-  inner.add(DIAG.diagramCard(w, h, { pad: 0.024, opacity: 0.82 }));
-  g.userData.inner = inner;
-  return g;
-}
 /**
  * The stage fader records each mesh's "base" opacity the first time it sees it —
  * but it is first called with o = 0, after the diagram card has already zeroed
- * its own plate, and a material shared by two meshes is captured twice. Both
- * cases latch a base of 0 and the mesh never comes back. Seeding the value at
- * build time, while every material is still at full opacity, avoids it.
+ * its own plate. Seeding the value at build time, while every material is still
+ * at full opacity, avoids latching a base of zero.
  */
 function seedFade(root) {
   root.traverse((o) => {
@@ -524,158 +543,14 @@ function seedFade(root) {
   return root;
 }
 
-/** World position of a point given in a card's local plot coordinates. */
-const cardPt = (c, x, y, z = 0) => c.userData.inner.localToWorld(new THREE.Vector3(x, y, z));
-
-// ---------------------------------------------------------------- level card
-function buildLevelCard() {
-  const w = CELL_W, h = CELL_H;
-  const c = card(w, h, ...cellPos(0, 0));
-  const G_ = new DIAG.Graph({
-    w, h, xRange: [0, 4], yRange: [-130, 30],
-    xTicks: [0, 1, 2, 3, 4], yTicks: [-130, -90, -50, -10, 30],
-  });
-  c.userData.inner.add(G_);
-
-  const mk = (col, dash, wid) => {
-    const t = new DIAG.Trace(8, col, wid, { dashed: dash, dashSize: 0.009, gapSize: 0.007, renderOrder: 13 });
-    G_.add(t); return t;
-  };
-  const sigL = mk(PAL.cy, false, 2.6), noiL = mk(PAL.am, false, 2.2);
-  const sigE = mk(PAL.cy, true, 1.6), noiE = mk(PAL.am, true, 1.4);
-
-  const ceil = new DIAG.Trace(2, PAL.ink3, 1.3, { dashed: true, dashSize: 0.012, gapSize: 0.009, opacity: 0.8, renderOrder: 12 });
-  ceil.write((i) => [i === 0 ? 0 : w, G_.y(CLIP_DBV), 0.0006]);
-  G_.add(ceil);
-
-  const gap = new DIAG.Trace(2, PAL.gr, 3.0, { renderOrder: 14 });
-  G_.add(gap);
-
-  c.userData.G = G_;
-  c.userData.tr = { sigL, noiL, sigE, noiE, gap };
-  return c;
-}
-
-function writeLevel(c, late, early) {
-  const G_ = c.userData.G, { sigL, noiL, sigE, noiE, gap } = c.userData.tr;
-  const yr = G_.o.yRange;
-  const step = (t, arr) => t.write((i) => {
-    const k = i >> 1, edge = i & 1;
-    const v = DSP.clamp(DSP.dB(arr[k]), yr[0] + 1, yr[1] - 1);
-    return [G_.x(k + (edge ? 0.92 : 0.08)), G_.y(v), 0.0012];
-  });
-  step(sigL, late.s); step(noiL, late.n);
-  step(sigE, early.s); step(noiE, early.n);
-  const X = G_.x(3.5);
-  const ys = G_.y(DSP.clamp(DSP.dB(late.s[3]), yr[0] + 1, yr[1] - 1));
-  const yn = G_.y(DSP.clamp(DSP.dB(late.n[3]), yr[0] + 1, yr[1] - 1));
-  gap.write((i) => [X, i === 0 ? yn : ys, 0.0016]);
-}
-
-// -------------------------------------------------------------- loading card
-function buildLoadCard() {
-  const w = CELL_W, h = CELL_H;
-  const c = card(w, h, ...cellPos(1, 0));
-  const G_ = new DIAG.Graph({
-    w, h, xLog: true, xRange: [20, 2e7], yRange: [-12, 2],
-    yTicks: [-12, -9, -6, -3, 0], zeroLine: 0,
-  });
-  c.userData.inner.add(G_);
-  G_.addTrace((f) => loadDb(f, R_PASSIVE), { color: PAL.rd, width: 2.2, n: 300 });
-  G_.addTrace((f) => loadDb(f, R_ACT), { color: PAL.cy, width: 2.6, n: 300 });
-  G_.addMarker(20000, { color: PAL.ink3, width: 1.2, opacity: 0.6 });
-  const dA = G_.addDot(PAL.cy, 0.0048); dA.userData.setData(20000, loadDb(20000, R_ACT));
-  const dP = G_.addDot(PAL.rd, 0.0048); dP.userData.setData(20000, loadDb(20000, R_PASSIVE));
-  c.userData.G = G_;
-  return c;
-}
-
-// ---------------------------------------------------------- interconnect card
-const CBL = { x0: 0.078, x1: 0.378, yH: 0.186, yC: 0.118, yS: 0.084 };
-const CBL_SCALE = (CBL.x1 - CBL.x0) / CABLE_L;      // 0.300 m for 3 m → 1 : 10
-const CARRIER_MAG = 2e10;
-const N_CARRY = 17;
-
-function buildCableCard() {
-  const w = CELL_W, h = CELL_H;
-  const c = card(w, h, ...cellPos(0, 1));
-  const inner = c.userData.inner;
-  const M = { block: flat(0x2b333c) };
-  const xD = CBL.x0 - 0.030, xR = CBL.x1 + 0.030;   // driver / receiver terminals
-  const yMid = (CBL.yH + CBL.yC) / 2;
-
-  for (const x of [xD - 0.018, xR + 0.018]) {
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.036, 0.104), M.block);
-    b.position.set(x, yMid, 0.004);
-    b.renderOrder = 6;
-    inner.add(b);
-    const o = new DIAG.Trace(5, PAL.ink3, 1.3, { renderOrder: 14, opacity: 0.85 });
-    const hw = 0.018, hh = 0.052;
-    o.write((i) => [x + [-hw, hw, hw, -hw, -hw][i], yMid + [-hh, -hh, hh, hh, -hh][i], 0.009]);
-    inner.add(o);
-  }
-
-  // A closed loop: out along pin 2, back along pin 3. Both legs are drawn,
-  // and they are joined at the source and at the receiver.
-  const P = [[xD, CBL.yC], [xD, CBL.yH], [xR, CBL.yH], [xR, CBL.yC], [xD, CBL.yC]];
-  const loop = new DIAG.Trace(5, PAL.cy, 2.6, { renderOrder: 13 });
-  loop.write((i) => [P[i][0], P[i][1], 0.001]);
-  inner.add(loop);
-
-  // pin 1 / shield: bonded at one end only, so it carries no signal return
-  const Sh = [[xD, CBL.yS], [xR, CBL.yS]];
-  const shield = new DIAG.Trace(2, PAL.ink3, 1.9,
-    { renderOrder: 12, opacity: 0.8, dashed: true, dashSize: 0.010, gapSize: 0.007 });
-  shield.write((i) => [Sh[i][0], Sh[i][1], 0.001]);
-  inner.add(shield);
-  const bond = new THREE.Mesh(new THREE.CircleGeometry(0.0035, 12),
-    new THREE.MeshBasicMaterial({ color: PAL.ink3, toneMapped: false, transparent: true }));
-  bond.position.set(xD, CBL.yS, 0.002);
-  inner.add(bond);
-
-  // charge carriers — they oscillate about a fixed point, in antiphase on the
-  // two legs. Magnified; see the label.
-  const swarm = new DIAG.Swarm(N_CARRY * 2, { color: PAL.am, size: 0.0030, additive: false });
-  inner.add(swarm);
-
-  // instantaneous current direction, one arrow per leg, opposite by definition
-  const arrowMat = new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true });
-  const arrows = [CBL.yH, CBL.yC].map((y) => {
-    const a = new THREE.Mesh(new THREE.ConeGeometry(0.0062, 0.0150, 12), arrowMat);
-    a.position.set((CBL.x0 + CBL.x1) / 2, y, 0.003);
-    inner.add(a);
-    return a;
-  });
-
-  // the field lives between the conductors — that is what propagates
-  const front = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.005, CBL.yH - CBL.yC),
-    new THREE.MeshBasicMaterial({ color: PAL.cy, transparent: true, opacity: 0.85, depthWrite: false, toneMapped: false, blending: THREE.AdditiveBlending }),
-  );
-  front.position.set(CBL.x0, yMid, 0.002);
-  front.renderOrder = 15;
-  inner.add(front);
-  const halo = DIAG.glow(PAL.cy, 0.042, 0.40);
-  halo.position.copy(front.position);
-  inner.add(halo);
-
-  c.userData.swarm = swarm;
-  c.userData.front = front;
-  c.userData.halo = halo;
-  c.userData.arrows = arrows;
-  return c;
-}
-
 /* ===========================================================================
    THE STAGE
    =========================================================================== */
 
-const SWEEP = 0.072;          // simulated seconds for one down-and-up of the knob
-const FRONT_CYCLE = 0.0042;   // simulated seconds per wavefront launch
-const FRONT_RUN = 0.0028;     // of which the front is in flight
-const FRONT_RATIO = (FRONT_RUN / 0.002) / T_FLIGHT;   // real-time slow-down
+const SWEEP = 26;             // seconds for one full down-and-up of the knob
+const PH0 = 0.096;            // phase so the still frame lands mid-scale
 
-const S = { N: 20, late: chainLate(20), early: chainEarly(20), lab: {} };
+const S = { N: 24, late: chainLate(24), lab: {} };
 
 export default {
   id: 'preamp',
@@ -683,160 +558,153 @@ export default {
   nav: 'Preamp',
   kicker: 'Preamp',
   standfirst: 'Volume is not gain — it is a resistor ladder throwing voltage away.',
-  shot: { position: [0.910, 1.466, -0.459], target: [-0.28, 1.06, -2.90], fov: 32 },
-  timeScale: 0.002,
+  shot: { position: CAMP.toArray(), target: AIM.toArray(), fov: FOV },
+  timeScale: 1,
   alwaysUpdate: false,
 
   build(ctx) {
     const hardware = buildPreamp();
     const overlay = new THREE.Group();
 
-    const level = buildLevelCard();
-    const load = buildLoadCard();
-    const cable = buildCableCard();
+    // ---- the card ---------------------------------------------------------
+    const deck = new THREE.Group();
+    deck.position.copy(screenPoint(CARD_AT[0], CARD_AT[1], DECK_DIST));
+    deck.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(RIGHT, UPV, DIRV));
+    overlay.add(deck);
 
-    // the exploded ladder occupies the fourth plate of the grid
-    const boardCell = card(CELL_W, CELL_H, ...cellPos(1, 1));
+    const inner = new THREE.Group();          // origin = bottom-left of the card
+    inner.position.set(-CW / 2, -CH / 2, 0);
+    deck.add(inner);
+    inner.add(DIAG.diagramCard(CW, CH, { pad: P(14), opacity: 0.88 }));
+
+    // hairline between the two regions
+    const rule = new DIAG.Trace(2, 0x39414c, 1.0, { opacity: 0.7, renderOrder: 6 });
+    rule.write((i) => [i === 0 ? P(12) : P(318), P(258), 0.0004]);
+    inner.add(rule);
+
+    // ---- region 1: the relay ladder ---------------------------------------
     const board = buildBoard();
-    board.scale.setScalar(1.8);                    // drawn ×4.5 life size
-    board.position.set(CELL_W / 2, CELL_H * 0.52, 0.006);
-    boardCell.userData.inner.add(board);
-    overlay.add(DECK);
+    board.scale.setScalar(BOARD_SCALE);
+    board.position.set(P(165), P(348), 0.002);
+    inner.add(board);
 
-    // leader from the knob up to the plate that explains it
-    const knobW = new THREE.Vector3(0.200, LAYOUT.rack.shelfY[4] + FOOT + H / 2, LAYOUT.rack.z + ZF + 0.03);
-    const bEnd = cardPt(boardCell, CELL_W + 0.024, 0.02);
-    const lead = new DIAG.Trace(28, PAL.cy, 1.3,
-      { opacity: 0.4, renderOrder: 11, dashed: true, dashSize: 0.012, gapSize: 0.010 });
-    lead.write((i, t) => [
-      knobW.x + (bEnd.x - knobW.x) * t,
-      knobW.y + (bEnd.y - knobW.y) * t + Math.sin(Math.PI * t) * 0.030,
-      knobW.z + (bEnd.z - knobW.z) * t,
-    ]);
-    overlay.add(lead);
+    // ---- region 2: S/N against knob position ------------------------------
+    const gw = P(280), gh = P(176);
+    const G_ = new DIAG.Graph({
+      w: gw, h: gh, xRange: [0, 63], yRange: [55, 125],
+      xTicks: [0, 16, 32, 48, 63], yTicks: [60, 80, 100, 120],
+    });
+    G_.position.set(P(34), P(40), 0.002);
+    inner.add(G_);
+    G_.addTrace((n) => SNR_EARLY[Math.round(n)],
+      { color: PAL.cy, width: 1.5, n: 64, dashed: true, opacity: 0.75 });
+    G_.addTrace((n) => SNR_LATE[Math.round(n)], { color: PAL.cy, width: 2.6, n: 64 });
 
-    // ---- labels -------------------------------------------------------------
+    const mark = G_.addMarker(0, { color: PAL.ink3, width: 1.1, opacity: 0.55 });
+    const gap = new DIAG.Trace(2, PAL.gr, 3.0, { renderOrder: 15 });
+    G_.add(gap);
+    const dotL = G_.addDot(PAL.cy, P(3.2));
+    const dotE = G_.addDot(PAL.ink3, P(2.6));
+
+    // ---- labels -----------------------------------------------------------
     const L = ctx.labels;
-    const sup = (x) => x.toExponential(1).replace(/e\+?(-?)(\d+)/, (_, sg, d) =>
-      '×10' + (sg ? '⁻' : '') + d.split('').map((c) => '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c]).join(''));
-    const top = (c) => cardPt(c, CELL_W / 2, CELL_H + 0.028);
+    const cardPt = (x, y) => inner.localToWorld(new THREE.Vector3(x, y, 0));
+    const plotPt = (x, y) => G_.localToWorld(new THREE.Vector3(G_.x(x), G_.y(y), 0));
 
-    S.lab.vol = L.add(new THREE.Vector3(-0.262, LAYOUT.rack.shelfY[4] + FOOT + H / 2, LAYOUT.rack.z + ZF + 0.02),
-      { kicker: 'Line preamp · gain is fixed after the ladder', value: '−20 dB · 10.0 : 1 · 0.632 V · 50 Ω', cls: 'acc', offset: [-124, 0] });
+    S.lab.hw = L.add(
+      new THREE.Vector3(PRE.x + 0.02, PRE.y, PRE.z + ZF + 0.03),
+      {
+        kicker: 'Line preamp · fixed gain, then the ladder',
+        value: '−24 dB · 15.8 : 1 · 399 mV · 50 Ω',
+        cls: 'acc', offset: [0, 52], priority: 3,
+      });
 
-    S.lab.board = L.add(cardPtV(board, 0, BH_ / 2 + 0.020),
-      { kicker: 'Relay ladder, drawn ×4.5 · 32·16·8·4·2·1 dB', value: '010100 · Z 2.86 kΩ', offset: [0, -16] });
+    S.lab.board = L.add(cardPt(P(165), CH + P(6)), {
+      kicker: `Relay ladder, drawn ×${BOARD_MAG.toFixed(1)} · 32·16·8·4·2·1 dB`,
+      value: '011000 · Z 3.15 kΩ', cls: 'plain', occlude: false,
+      offset: [0, -26], priority: 2,
+    });
 
-    S.lab.lvl = L.add(top(level),
-      { kicker: 'Gain staging · dBV · ── late  ╌╌ early', value: 'S/N 114.7 / 105.9 dB', cls: 'acc', offset: [0, -14] });
-    S.lab.ceil = L.add(cardPt(level, 0.405, level.userData.G.y(CLIP_DBV)),
-      { kicker: 'Clip ceiling', value: '+21.1 dBV', offset: [-38, 20] });
+    S.lab.snr = L.add(cardPt(P(165), P(258)), {
+      kicker: 'S/N re. output · 20 Hz-20 kHz unweighted',
+      value: 'late 104.0 · early 94.2 dB',
+      cls: 'plain', occlude: false, offset: [0, 15], priority: 2,
+    });
 
-    S.lab.load = L.add(top(load),
-      { kicker: 'Cable load · 20 Hz – 20 MHz · 3 m, 300 pF, 47 kΩ', value: '50 Ω source: −3 dB at 10.6 MHz', cls: 'acc', offset: [0, -14] });
-    S.lab.f20k = L.add(cardPt(load, load.userData.G.x(20000), 0.018),
-      { kicker: '20 kHz', offset: [0, 0] });
-    S.lab.pass = L.add(cardPt(load, 0.125, load.userData.G.y(-5.5)),
-      { kicker: 'Passive 10 kΩ pot', value: '−3 dB at 64.3 kHz', cls: 'am', offset: [0, 8] });
+    S.lab.margin = L.add(plotPt(30, 62), {
+      kicker: 'Late ladder − early ladder', value: '+9.8 dB',
+      cls: 'plain', occlude: false, offset: [0, 0], priority: 1,
+    });
 
-    S.lab.cable = L.add(top(cable),
-      { kicker: 'Balanced pair 1 : 10 · out pin 2, back pin 3', value: 'CMRR 54.0 dB → 40 µV residual', cls: 'acc', offset: [0, -14] });
-    S.lab.drift = L.add(cardPt(cable, CELL_W / 2, 0.048),
-      { kicker: `Field front 1 : ${sup(FRONT_RATIO)} · carriers ×2×10¹⁰`, value: 'field 15.2 ns · swing 1.11 pm', cls: 'am', offset: [0, 0] });
+    S.lab.late = L.add(plotPt(52, SNR_LATE[52] + 5), {
+      kicker: 'Ladder after the gain block', cls: 'plain', occlude: false,
+      offset: [0, -8], priority: 0,
+    });
 
     seedFade(overlay);
-    S.hw = hardware; S.board = board; S.level = level; S.load = load; S.cable = cable;
-    setDisplay(hardware.userData.disp, S.N);
-    writeBoardPath(board, S.late.L.on);
-    writeLevel(level, S.late, S.early);
+    Object.assign(S, { hw: hardware, board, G: G_, mark, gap, dotL, dotE });
+    this._sync(S.N);
     return { hardware, overlay };
   },
 
-  update(dt, t) {
-    // ---- the knob ---------------------------------------------------------
-    const ph = ((t / SWEEP) % 1 + 1) % 1;
-    const tri = ph < 0.5 ? ph * 2 : 2 - ph * 2;
-    const Nf = 60 - 54 * tri;
-    const N = Math.round(Nf);
-    const changed = N !== S.N;
-    S.N = N;
-    S.late = chainLate(N);
-    S.early = chainEarly(N);
-    const late = S.late;
-
-    const f = (63 - Nf) / 63;
-    S.hw.userData.knob.rotation.y = THREE.MathUtils.degToRad(-30 - 300 * f);
-
-    if (changed) {
-      setDisplay(S.hw.userData.disp, N);
-      writeBoardPath(S.board, late.L.on);
-      const { led, relay } = S.board.userData;
-      for (let i = 0; i < 6; i++) {
-        _c.setHex(late.L.on[i] ? 0x5cc0f2 : 0x101820); led.setColorAt(i, _c);
-        _c.setHex(late.L.on[i] ? 0x2e5f7a : 0x333c46); relay.setColorAt(i, _c);
-      }
-      led.instanceColor.needsUpdate = true;
-      relay.instanceColor.needsUpdate = true;
+  /** Push one knob position through the whole model and into the picture. */
+  _sync(N) {
+    const late = chainLate(N);
+    S.N = N; S.late = late;
+    setDisplay(S.hw.userData.disp, N);
+    writeBoardPath(S.board, late.L.on);
+    const { led, relay } = S.board.userData;
+    for (let i = 0; i < 6; i++) {
+      _c.setHex(late.L.on[i] ? 0x5cc0f2 : 0x101820); led.setColorAt(i, _c);
+      _c.setHex(late.L.on[i] ? 0x2e5f7a : 0x333c46); relay.setColorAt(i, _c);
     }
-    S.hw.userData.meter.scale.x = Math.max(0.001, (63 - Nf) / 63);
-    writeLevel(S.level, late, S.early);
+    led.instanceColor.needsUpdate = true;
+    relay.instanceColor.needsUpdate = true;
 
-    // ---- the interconnect -------------------------------------------------
-    const car = carriers(late.s[3]);
-    const amp = car.disp * CBL_SCALE * CARRIER_MAG;
-    // velocity is in phase with the current; displacement is its integral, so
-    // it lags by 90° — the carriers never travel, they rock about a fixed point.
-    const phase = DSP.TAU * F_TONE * t;
-    const d = -Math.cos(phase) * amp;
-    const sgn = Math.sin(phase) >= 0 ? 1 : -1;
-    const mag = Math.max(0.14, Math.abs(Math.sin(phase)));
-    S.cable.userData.arrows.forEach((a, k) => {
-      a.rotation.z = (k === 0 ? sgn : -sgn) > 0 ? -Math.PI / 2 : Math.PI / 2;
-      a.scale.set(1, mag, 1);
-    });
-    const span = CBL.x1 - CBL.x0;
-    S.cable.userData.swarm.update((i) => {
-      const row = i < N_CARRY ? 1 : -1;
-      const k = i % N_CARRY;
-      const x = CBL.x0 + ((k + 0.5) / N_CARRY) * span + row * d;
-      return { p: [x, row > 0 ? CBL.yH : CBL.yC, 0.003], s: 1, c: PAL.am };
-    });
+    const G_ = S.G, yl = SNR_LATE[N], ye = SNR_EARLY[N];
+    S.mark.userData.setX(N);
+    S.gap.write((i) => [G_.x(N), G_.y(i === 0 ? ye : yl), 0.0018]);
+    S.dotL.userData.setData(N, yl);
+    S.dotE.userData.setData(N, ye);
 
-    const fp = ((t / FRONT_CYCLE) % 1 + 1) % 1;
-    const u = fp * (FRONT_CYCLE / FRONT_RUN);
-    const on = u <= 1;
-    const fx = CBL.x0 + span * DSP.clamp(u, 0, 1);
-    S.cable.userData.front.position.x = fx;
-    S.cable.userData.halo.position.x = fx;
-    S.cable.userData.front.visible = on;
-    S.cable.userData.halo.visible = on;
-
-    // ---- readout labels ----------------------------------------------------
     const ratio = 1 / late.L.ratio;
-    S.lab.vol.setValue(`−${N} dB · ${ratio < 100 ? ratio.toFixed(1) : Math.round(ratio)} : 1 · ${DSP.si(late.s[3], 3)}V · 50 Ω`);
+    const rTxt = ratio < 100 ? ratio.toFixed(1) : Math.round(ratio);
+    S.lab.hw.setValue(`−${N} dB · ${rTxt} : 1 · ${DSP.si(late.s[3], 3)}V · 50 Ω`);
     S.lab.board.setValue(`${late.L.on.map((b) => (b ? 1 : 0)).join('')} · Z ${DSP.si(late.L.zOut, 3)}Ω`);
-    S.lab.lvl.setValue(`S/N ${late.snr.toFixed(1)} / ${S.early.snr.toFixed(1)} dB`);
-    S.lab.drift.setValue(`field ${DSP.si(T_FLIGHT, 3)}s · swing ${DSP.si(car.disp, 3)}m`);
+    S.lab.snr.setValue(`late ${yl.toFixed(1)} · early ${ye.toFixed(1)} dB`);
+    S.lab.margin.setValue(`+${(yl - ye).toFixed(2)} dB`);
+  },
+
+  update(dt, t) {
+    // The knob is a human hand, so it runs in real time; nothing else here is
+    // fast enough to need a scale.
+    const Nf = 32 - 28 * Math.cos(DSP.TAU * (t / SWEEP + PH0));
+    const N = DSP.clamp(Math.round(Nf), 0, 63);
+    if (N !== S.N) this._sync(N);
+    S.hw.userData.knob.rotation.y = THREE.MathUtils.degToRad(-30 - 300 * (63 - Nf) / 63);
+    S.hw.userData.meter.scale.x = Math.max(0.001, (63 - Nf) / 63);
   },
 
   content() {
+    const n = (x) => `<span class="num">${x}</span>`;
     return `
+<div class="key"><span class="lab">The idea</span><p>Volume is subtraction. The gain is fixed; the knob only decides how much of it to throw away — and where in the chain to throw it.</p></div>
+
 <h3>The knob is an attenuator</h3>
-<p>Voltage gain here is fixed at <span class="num">+10.0 dB</span> and never moves. The control is six relay-switched L-pads, binary-weighted <span class="num">32/16/8/4/2/1 dB</span>, cascaded in a <span class="num">10 kΩ</span> image impedance. Turning down does not turn the amplifier down — it discards voltage ahead of it.</p>
-<div class="eq">a = 10^(−20/20) = <span class="hl">0.100</span>  <span class="c">a 10 : 1 divider</span>
-V = 2.000 × 3.162 × 0.100
-  = <span class="hl">0.632 V rms</span></div>
+<p>Voltage gain is fixed at ${n('+10.0 dB')}. The control is six relay-switched L-pads, binary-weighted ${n('32/16/8/4/2/1 dB')}, each designed into a ${n('10 kΩ')} image impedance so the sections cascade without interacting.</p>
+<div class="eq">a = 10^(−20/20) = <span class="hl">0.100</span>  <span class="c">10 : 1</span>
+V = 2.000 × 3.162 × 0.100 = <span class="hl">0.632 V</span></div>
 
-<h3>Where the ladder sits</h3>
-<p>Put it <b>after</b> the gain block and it scales the signal and that block's noise together, so signal-to-noise hardly moves — but the block runs flat out at <span class="num">+16.0 dBV</span> against a ceiling of <span class="num">+21.1 dBV</span>, only <span class="num">5.0 dB</span> spare. Put it <b>before</b> and headroom is safe, but the block's noise is now fixed while the signal shrinks: at −20 dB that costs <span class="num">8.8 dB</span> of S/N. Attenuate as late as headroom allows; a source hotter than <span class="num">3.58 V rms</span> forces the ladder to the front.</p>
+<h3>Late, not early</h3>
+<p>The ladder sits <b>after</b> the gain block. That does not hold signal-to-noise still: referred to its own output it falls from ${n(SNR_LATE[0].toFixed(1) + ' dB')} at unity to ${n(SNR_LATE[52].toFixed(1) + ' dB')} at −52 dB, because the denominator is what moved. What it holds is the <b>margin</b> over the same ladder placed first.</p>
+<div class="eq"><span class="c">S/N late − S/N early</span>
+−20 dB: <span class="hl">${MARGIN_20.toFixed(2)} dB</span>   −63 dB: <span class="hl">${MARGIN_63.toFixed(2)} dB</span></div>
+<p>Turned well down, the output noise is the ladder's own Johnson noise; put the ladder first and the block multiplies that by ${n('3.162')}, so the margin tends towards the gain itself. Headroom pays for it — the block sits at ${n(PEAK_DBV.toFixed(1) + ' dBV')} under a ${n(CLIP_DBV.toFixed(1) + ' dBV')} ceiling, ${n(HEADROOM.toFixed(2) + ' dB')} spare. A source above ${n(V_MAX_SRC.toFixed(2) + ' V rms')} forces the ladder to the front.</p>
 
-<h3>Why it is active</h3>
-<div class="myth"><span class="lab">Commonly got wrong</span><p>"A passive control is more transparent — nothing is in the way." Its own wiper impedance is. A 40 kΩ pot at midpoint is a <span class="num">10 kΩ</span> source; into 3 m of cable (<span class="num">300 pF</span>) loaded by 47 kΩ that is −3 dB at <span class="num">64.3 kHz</span>, <span class="num">−0.40 dB</span> at 20 kHz, on top of <span class="num">1.68 dB</span> lost to the resistive divider. The <span class="num">50 Ω</span> buffer fitted here corners at <span class="num">10.6 MHz</span>.</p></div>
+<div class="myth"><span class="lab">Commonly got wrong</span><p>"A passive control is more transparent." Its wiper impedance is not. A 40 kΩ pot at midpoint is a ${n('10 kΩ')} source; into 3 m of cable (${n('300 pF')}) loaded by 47 kΩ that is −3 dB at ${n((cornerHz(R_PASSIVE) / 1e3).toFixed(1) + ' kHz')} and ${n(HF_LOSS.toFixed(2) + ' dB')} at 20 kHz, on top of ${n(DIV_LOSS.toFixed(2) + ' dB')} lost in the divider. The ${n('50 Ω')} buffer here corners at ${n((cornerHz(R_ACT) / 1e6).toFixed(1) + ' MHz')}.</p></div>
 
-<h3>Balanced</h3>
-<p>Pins 2 and 3 carry the signal out and back: one closed loop, no phantom return. Hum common to both cancels at the receiver. A four-resistor difference amplifier rejects by <span class="num">1/(2δ)</span> — 0.1 % parts give <span class="num">54.0 dB</span>, so <span class="num">20 mV</span> of chassis-to-chassis 50 Hz leaves <span class="num">40 µV</span>. Single-ended, all 20 mV arrives.</p>
-
-<div class="key"><span class="lab">The idea</span><p>Volume is subtraction. What a preamplifier sells is a low output impedance and a cheap place to lose level.</p></div>`;
+<h3>Balanced out</h3>
+<p>Pins 2 and 3 carry signal out and back — one closed loop. A four-resistor difference amplifier rejects what is common to both by at worst ${n('1/(2δ)')}: 0.1 % parts give ${n(DSP.dB(CMRR_STD).toFixed(1) + ' dB')}, so ${n('20 mV')} of chassis-to-chassis hum leaves ${n((CM_RESID * 1e6).toFixed(0) + ' µV')} — and only if the driving impedances match too. A few tens of ohms of imbalance in the source costs more than the resistors do.</p>`;
   },
 
   readouts() {
@@ -845,12 +713,9 @@ V = 2.000 × 3.162 × 0.100
       { k: 'Volume', v: `−${S.N}`, u: 'dB', cls: 'acc', bar: (63 - S.N) / 63 },
       { k: 'Divider', v: `${r < 100 ? r.toFixed(2) : Math.round(r)} : 1`, u: '' },
       { k: 'Output', v: DSP.si(l.s[3], 3), u: 'V rms' },
-      { k: 'Out Z', v: '50.0', u: 'Ω' },
-      { k: 'Cable −3 dB', v: (cornerHz(R_ACT) / 1e6).toFixed(2), u: 'MHz', cls: 'acc' },
-      { k: 'S/N', v: l.snr.toFixed(1), u: 'dB', bar: l.snr / 125 },
+      { k: 'Output noise', v: (l.n[3] * 1e6).toFixed(2), u: 'µV' },
+      { k: 'S/N re. out', v: SNR_LATE[S.N].toFixed(1), u: 'dB', bar: SNR_LATE[S.N] / 125 },
+      { k: 'Late − early', v: `+${(SNR_LATE[S.N] - SNR_EARLY[S.N]).toFixed(2)}`, u: 'dB', cls: 'acc' },
     ];
   },
 };
-
-/** World point from a board-local (x,y) — the board's origin is its centre. */
-function cardPtV(obj, x, y) { return obj.localToWorld(new THREE.Vector3(x, y, 0)); }

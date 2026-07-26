@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LAYOUT } from '../core/layout.js';
+import { LAYOUT, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
@@ -36,26 +36,32 @@ const LP_BAND = 0.14605 - 0.0600;
 const PITCH = LP_BAND / LP_TURNS;               // 129.08 µm
 
 // --- gain budget -------------------------------------------------------------
-const V_CART = 0.30e-3;                         // V rms, MC at the 5 cm/s reference
+// The cartridge is a 10 Ω source loaded by 100 Ω, so the amplifier input sees
+// a divided signal and a 9.09 Ω source resistance. Both matter below.
+const V_CART = 0.30e-3;                         // V rms, MC open-circuit at 5 cm/s
+const R_CART = 10;                              // Ω, MC coil resistance
+const Z_LOAD = 100;                             // Ω, MC loading
+const LOAD_DB = DSP.dB(Z_LOAD / (Z_LOAD + R_CART));   // −0.828 dB
+const V_IN = V_CART * DSP.undB(LOAD_DB);        // 0.27273 mV rms at the input
 const V_LINE = 2.0;                             // V rms, full line level
-const G_TOTAL_DB = DSP.dB(V_LINE / V_CART);     // 76.478 dB
+const G_TOTAL_DB = DSP.dB(V_LINE / V_IN);       // 77.306 dB
 const G_STAGE_DB = 64.0;                        // this unit's specification
-const V_OUT = V_CART * DSP.undB(G_STAGE_DB);    // 0.4755 V rms
-const G_REST_DB = G_TOTAL_DB - G_STAGE_DB;      // 12.478 dB left for the line stage
+const V_OUT = V_IN * DSP.undB(G_STAGE_DB);      // 0.4322 V rms
+const G_REST_DB = G_TOTAL_DB - G_STAGE_DB;      // 13.306 dB left for the line stage
 // A *passive* RIAA network is unity at DC and lossy in the midband:
 const NET_LOSS_1K = DSP.dB(DSP.cAbs(DSP.riaaRaw(1000)));   // −19.911 dB
 const AMP_RAW_DB = G_STAGE_DB - NET_LOSS_1K;    // 83.911 dB of raw amplification
 
 // --- noise -------------------------------------------------------------------
 const K_B = 1.380649e-23, T_K = 293.15;         // 20 °C
-const R_CART = 10;                              // Ω, MC coil resistance
+const R_SRC = (R_CART * Z_LOAD) / (R_CART + Z_LOAD);  // 9.091 Ω seen by the input
 const EN_DEV = 1.0e-9;                          // V/√Hz, input device
-const EN_R = Math.sqrt(4 * K_B * T_K * R_CART); // 0.4024 nV/√Hz Johnson
-const EN_TOT = Math.hypot(EN_DEV, EN_R);        // 1.0779 nV/√Hz
+const EN_R = Math.sqrt(4 * K_B * T_K * R_SRC);  // 0.3836 nV/√Hz Johnson
+const EN_TOT = Math.hypot(EN_DEV, EN_R);        // 1.0711 nV/√Hz
 // The noise is shaped by the playback curve too, so the honest bandwidth is
 // ∫|H(f)/H(1k)|² df over 20 Hz–20 kHz, not a flat 20 kHz.
 const ENB = (() => {
-  const a = Math.log(20), b = Math.log(20000), n = 2000;
+  const a = Math.log(20), b = Math.log(20000), n = 4000;
   let s = 0;
   for (let i = 0; i < n; i++) {
     const f = Math.exp(a + ((b - a) * (i + 0.5)) / n);
@@ -64,8 +70,8 @@ const ENB = (() => {
   }
   return s;                                     // 8630 Hz
 })();
-const V_NOISE = EN_TOT * Math.sqrt(ENB);        // 100.1 nV rms
-const SNR_DB = DSP.dB(V_CART / V_NOISE);        // 69.5 dB
+const V_NOISE = EN_TOT * Math.sqrt(ENB);        // 99.5 nV rms
+const SNR_DB = DSP.dB(V_IN / V_NOISE);          // 68.8 dB
 
 // --- what component tolerance actually costs ---------------------------------
 // 0.1 % resistors with 1 % film capacitors put each RC within √(.001²+.01²).
@@ -91,73 +97,85 @@ const TOL_DB = (() => {
   return worst;                                 // 0.103 dB
 })();
 
-// --- the input loop: carriers vs field ---------------------------------------
-const Z_LOAD = 100;                             // Ω, MC loading
+// --- the input loop: carriers vs field (quoted in prose, not drawn) ----------
 const I_RMS = V_CART / (Z_LOAD + R_CART);       // 2.727 µA
 const I_PK = I_RMS * Math.SQRT2;                // 3.857 µA
 const WIRE_MM2 = 0.05;                          // mm², tonearm litz
 const V_DRIFT = DSP.driftVelocity(I_PK, WIRE_MM2);        // 5.669 nm/s
 const X_DRIFT = DSP.driftDisplacement(V_DRIFT, 1000);     // 0.902 pm
 const C_FIELD = DSP.signalSpeed(0.66);          // 1.979e8 m/s
-const CABLE_L = 1.2;                            // m of arm cable
-const T_TRANSIT = CABLE_L / C_FIELD;            // 6.07 ns
 const CYCLE_1K = 1 / 1000;                      // s
 const FIELD_PER_HALF = (C_FIELD * CYCLE_1K) / 2;// 98.9 km
 const SPEED_RATIO = C_FIELD / V_DRIFT;          // 3.49e16
 const CU_SPACING = 255.6e-12;                   // m, fcc Cu nearest neighbour a/√2
 
-// display magnifications, stated on screen
-const CARRIER_MAG = 3e10;
-const CARRIER_MAG_TXT = (CARRIER_MAG / 1e10) + '×10¹⁰';
-const GROOVE_MAG = 1300;
+/** Unicode superscript exponent — `toExponential().replace()` prints "3.5×1016". */
+const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+const sup10 = (v, digits = 1) => {
+  const e = Math.floor(Math.log10(Math.abs(v)));
+  const m = v / Math.pow(10, e);
+  return m.toFixed(digits) + ' × 10' + [...String(e)].map((c) => SUP[c]).join('');
+};
 
 // --- presentation ------------------------------------------------------------
-const SWEEP = 0.0065;                           // simulated seconds per sweep
-const W1K = DSP.TAU * 1000;
+// The sweep is a real swept-sine measurement, so it runs in real time: no
+// magnification factor is claimed anywhere on this stage.
+const SWEEP = 3.4;                              // seconds per 20 Hz → 20 kHz sweep
+const GROOVE_MAG = 1000;                        // the excursion strip, stated on screen
 
 const S = {
   f: 1000, rec: 0, play: 0, sum: 0,
-  vin: V_CART, vout: V_OUT, gain: G_STAGE_DB,
+  vin: V_IN, vout: V_OUT, gain: G_STAGE_DB,
 };
 
 const sgn = (v) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2);
-/** Frequency with its unit, never uppercased into nonsense. */
-const hz = (f) => (f >= 1000 ? (f / 1000).toFixed(2) + ' kHz' : f.toFixed(2) + ' Hz');
+
+// ---------------------------------------------------------------------------
+// FRAMING
+//
+// The clear stage is 960 × 840 of a 1600 × 1000 canvas. Rather than guess, the
+// card is positioned in normalised device coordinates through place(), so its
+// screen extent is known before anything is rendered: it lands between NDC
+// x −0.08 and +0.53, which is screen x 736…1092 — clear of the chapter rail at
+// 160 and of the panel at 1120.
+// ---------------------------------------------------------------------------
+const CH_H = 0.112, CH_FOOT = 0.008;
+const HERO_Y = LAYOUT.bayCentre(3, CH_H) + CH_FOOT;         // 0.678
+const HERO_Z = LAYOUT.rack.z + (LAYOUT.rack.d - 0.06) / 2;  // fascia plane, −3.08
+const HERO_R = 0.354;                           // bounding radius of the chassis
+const AZ = 0.44, EL = 0.075, FOV = 30;
+
+const RIGHT_W = new THREE.Vector3(Math.cos(AZ), 0, -Math.sin(AZ));
+const OFF = 0.335;                              // slide the frame right of the hero
+const _base = frameShot([0, HERO_Y, HERO_Z], HERO_R, { fill: 0.55, az: AZ, el: EL, fov: FOV });
+const SHOT = {
+  position: [_base.position[0] + RIGHT_W.x * OFF, _base.position[1], _base.position[2] + RIGHT_W.z * OFF],
+  target: [RIGHT_W.x * OFF, HERO_Y, HERO_Z + RIGHT_W.z * OFF],
+  fov: FOV,
+};
+
+const CAM = new THREE.Vector3(...SHOT.position);
+const FWD = new THREE.Vector3(...SHOT.target).sub(CAM).normalize();
+const RGT = new THREE.Vector3().crossVectors(FWD, new THREE.Vector3(0, 1, 0)).normalize();
+const UPV = new THREE.Vector3().crossVectors(RGT, FWD).normalize();
+const ASPECT = 1.6, TANH = Math.tan((FOV * Math.PI) / 360);
+
+/** World point that projects to (ndcX, ndcY) at `dist` metres down the axis. */
+function place(ndcX, ndcY, dist) {
+  return CAM.clone()
+    .addScaledVector(FWD, dist)
+    .addScaledVector(RGT, ndcX * ASPECT * TANH * dist)
+    .addScaledVector(UPV, ndcY * TANH * dist);
+}
 
 // ---------------------------------------------------------------------------
 // local helpers
 // ---------------------------------------------------------------------------
-
-/** fadeTree() captures a mesh's opacity the first time it sees it — and the
- *  app's first call happens at reveal = 0. Seed the base so nothing dies. */
-function seedFade(obj, base) {
-  obj.traverse((c) => { if (c.material && !c.isLine2) c.userData._baseOp = base; });
-  return obj;
-}
-
 function anchor(parent, x, y, z = 0) {
   const o = new THREE.Object3D();
   o.position.set(x, y, z);
   parent.add(o);
   return o;
-}
-
-/** Arc-length parameterised closed polyline. */
-function loopPath(pts) {
-  const cum = [0];
-  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
-  const total = cum[cum.length - 1];
-  const tmp = new THREE.Vector3();
-  return {
-    pts, total,
-    at(s) {
-      const d = ((s % total) + total) % total;
-      let i = 1;
-      while (i < cum.length - 1 && cum[i] < d) i++;
-      const seg = Math.max(1e-9, cum[i] - cum[i - 1]);
-      return tmp.copy(pts[i - 1]).lerp(pts[i], (d - cum[i - 1]) / seg);
-    },
-  };
 }
 
 function poly(pts, color, width, opts = {}) {
@@ -182,9 +200,9 @@ function bar(x0, x1, y, h, z, color) {
   m.renderOrder = 11;
   g.add(m);
   for (const x of [x0, x1]) {
-    g.add(poly([V3(x, y - h * 1.15, z + 0.0004), V3(x, y + h * 1.15, z + 0.0004)], color, 2.2));
+    g.add(poly([V3(x, y - h * 1.5, z + 0.0004), V3(x, y + h * 1.5, z + 0.0004)], color, 2.2));
   }
-  return seedFade(g, 0.92);
+  return g;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,48 +213,50 @@ function buildHardware() {
   const R = LAYOUT.rack;
   const W = R.w - 0.03;          // 0.555
   const D = R.d - 0.06;          // 0.440
-  const H = 0.078;
-  const FOOT = 0.006;
-  const FT = 0.018;              // a thick, properly machined fascia
+  const H = CH_H;                // 0.112 — bay 3 allows 0.160
+  const FOOT = CH_FOOT;
+  const FT = 0.020;              // a thick, properly machined fascia
   const fz = D / 2;
 
   const face = M.alu.clone();
-  face.color.setHex(0xc4c7cd);
-  face.roughness = 0.23;
+  face.color.setHex(0xc6c9cf);
+  face.roughness = 0.22;
 
   const g = new THREE.Group();
-  g.position.set(R.x, LAYOUT.bayCentre(3, H) + FOOT, R.z);
+  g.position.set(R.x, HERO_Y, R.z);
 
-  const box = GEO.chassis(W, H, D, {
-    r: 0.0026, seg: 4, faceThick: FT, body: M.anodBlack, face,
-  });
-  g.add(box);
+  g.add(GEO.chassis(W, H, D, { r: 0.0028, seg: 4, faceThick: FT, body: M.anodBlack, face }));
 
   // --- fascia -----------------------------------------------------------------
-  // applied centre plate, standing 0.7 mm proud of the brushed panel
-  const plate = new THREE.Mesh(GEO.bevelBox(0.214, 0.0495, 0.0035, 0.0009, 3), M.anodBlack);
-  plate.position.set(0, 0, fz + 0.0012);
+  // applied centre plate, standing 1.2 mm proud of the brushed panel
+  const plate = new THREE.Mesh(GEO.bevelBox(0.262, 0.072, 0.0040, 0.0011, 3), M.anodBlack);
+  plate.position.set(0, 0, fz + 0.0014);
   g.add(plate);
 
   // chrome bezel around the plate — four hairline bars
-  const bezH = GEO.bevelBox(0.2205, 0.0013, 0.0018, 0.0004, 2);
-  const bezV = GEO.bevelBox(0.0013, 0.0521, 0.0018, 0.0004, 2);
+  const bezH = GEO.bevelBox(0.2695, 0.0015, 0.0020, 0.0004, 2);
+  const bezV = GEO.bevelBox(0.0015, 0.0750, 0.0020, 0.0004, 2);
   for (const sy of [1, -1]) {
     const b = new THREE.Mesh(bezH, M.chrome);
-    b.position.set(0, sy * 0.0254, fz + 0.0026);
+    b.position.set(0, sy * 0.0368, fz + 0.0031);
     g.add(b);
   }
   for (const sx of [1, -1]) {
     const b = new THREE.Mesh(bezV, M.chrome);
-    b.position.set(sx * 0.1096, 0, fz + 0.0026);
+    b.position.set(sx * 0.1340, 0, fz + 0.0031);
     g.add(b);
   }
 
+  // full-width chrome inlay along the bottom of the fascia — a light-catcher
+  const inlay = new THREE.Mesh(GEO.bevelBox(0.508, 0.0024, 0.0018, 0.0005, 2), M.chrome);
+  inlay.position.set(0, -0.0455, fz + 0.0010);
+  g.add(inlay);
+
   // milled relief lines flanking the plate
   for (const sx of [1, -1]) {
-    for (let i = 0; i < 3; i++) {
-      const l = new THREE.Mesh(GEO.bevelBox(0.048, 0.0011, 0.0011, 0.0003, 2), M.anodBlack);
-      l.position.set(sx * 0.083, (i - 1) * 0.0085, fz + 0.0004);
+    for (let i = 0; i < 4; i++) {
+      const l = new THREE.Mesh(GEO.bevelBox(0.052, 0.0012, 0.0012, 0.0003, 2), M.anodBlack);
+      l.position.set(sx * 0.0975, (i - 1.5) * 0.0105, fz + 0.0004);
       g.add(l);
     }
   }
@@ -244,81 +264,79 @@ function buildHardware() {
   // recessed indicator well: a darker anodised inset, not glass (glass here is
   // an opaque dielectric and would hide everything behind it)
   const well = M.anodBlack.clone();
-  well.color.setHex(0x0d0f12);
+  well.color.setHex(0x0c0e11);
   well.roughness = 0.30;
-  const win = new THREE.Mesh(GEO.bevelBox(0.176, 0.0336, 0.0016, 0.0005, 2), well);
-  win.position.set(0, 0, fz + 0.0026);
+  const win = new THREE.Mesh(GEO.bevelBox(0.212, 0.0500, 0.0018, 0.0005, 2), well);
+  win.position.set(0, 0, fz + 0.0031);
   g.add(win);
 
   // hairline backlit bar — kept small so bloom stays a glint, not a flare
-  const glow = new THREE.Mesh(GEO.bevelBox(0.086, 0.0022, 0.0008, 0.0003, 2), M.meterGlow);
-  glow.position.set(-0.030, 0.0095, fz + 0.0038);
+  const glow = new THREE.Mesh(GEO.bevelBox(0.100, 0.0026, 0.0009, 0.0003, 2), M.meterGlow);
+  glow.position.set(-0.046, 0.0140, fz + 0.0044);
   g.add(glow);
 
   // stepped cartridge-loading ladder: 8 segments, the first four lit
-  const segGeo = GEO.bevelBox(0.0064, 0.0026, 0.0008, 0.0003, 2);
+  const segGeo = GEO.bevelBox(0.0076, 0.0030, 0.0009, 0.0003, 2);
   const segDim = M.plastic.clone();
-  segDim.color.setHex(0x1a2b33);
+  segDim.color.setHex(0x18272e);
   for (let i = 0; i < 8; i++) {
     const s = new THREE.Mesh(segGeo, i < 4 ? M.meterGlow : segDim);
-    s.position.set(-0.0555 + i * 0.0092, -0.0075, fz + 0.0038);
+    s.position.set(-0.0930 + i * 0.0110, -0.0125, fz + 0.0044);
     g.add(s);
   }
-  // MC / MM / mute indicators
-  const ledGeo = GEO.bevelCyl(0.0016, 0.0018, 0.0014, 16, 0.0003);
-  [[0.0455, M.ledCyan], [0.0455, null], [0.0640, M.ledAmber]]
-    .forEach(([x, m], i) => {
-      if (!m) return;
-      const l = new THREE.Mesh(ledGeo, m);
-      l.rotation.x = Math.PI / 2;
-      l.position.set(x, i === 0 ? 0.0095 : -0.0075, fz + 0.0038);
-      g.add(l);
-    });
+  // MC and mute indicators
+  const ledGeo = GEO.bevelCyl(0.0018, 0.0020, 0.0015, 16, 0.0003);
+  for (const [x, y, m] of [[0.0720, 0.0140, M.ledCyan], [0.0940, -0.0125, M.ledAmber]]) {
+    const l = new THREE.Mesh(ledGeo, m);
+    l.rotation.x = Math.PI / 2;
+    l.position.set(x, y, fz + 0.0044);
+    g.add(l);
+  }
 
   // two machined stepped controls: MM/MC selector and cartridge loading
   function control(x, pointer) {
     const c = new THREE.Group();
     c.position.set(x, 0, fz);
-    const r = 0.0163;
-    const bez = new THREE.Mesh(GEO.bevelCyl(r + 0.0064, r + 0.0070, 0.0026, 44, 0.0007), M.anodBlack);
+    const r = 0.0205;
+    const bez = new THREE.Mesh(GEO.bevelCyl(r + 0.0068, r + 0.0075, 0.0030, 48, 0.0008), M.anodBlack);
     bez.rotation.x = Math.PI / 2;
-    bez.position.z = 0.0013;
+    bez.position.z = 0.0015;
     c.add(bez);
     const kg = new THREE.Group();
     kg.rotation.x = Math.PI / 2;
-    kg.position.z = 0.0026 + 0.0136 / 2;
-    const k = GEO.knob(r, 0.0136, { body: mats().alu, mark: M.chrome, flutes: 52 });
+    kg.position.z = 0.0030 + 0.0160 / 2;
+    const k = GEO.knob(r, 0.0160, { body: mats().alu, mark: M.chrome, flutes: 60 });
     k.rotation.y = pointer;
     kg.add(k);
     c.add(kg);
     // engraved index positions
-    const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.00062, 8, 6), M.chrome, 5);
+    const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.00068, 8, 6), M.chrome, 5);
     const m4 = new THREE.Matrix4();
     for (let i = 0; i < 5; i++) {
       const a = Math.PI * 0.5 + (i / 4 - 0.5) * Math.PI * 1.3;
-      m4.makeTranslation(Math.cos(a) * (r + 0.0098), Math.sin(a) * (r + 0.0098), 0.0018);
+      m4.makeTranslation(Math.cos(a) * (r + 0.0105), Math.sin(a) * (r + 0.0105), 0.0020);
       dots.setMatrixAt(i, m4);
     }
     c.add(dots);
     return c;
   }
-  g.add(control(-0.178, Math.PI + 0.65));
-  g.add(control(0.178, Math.PI - 0.33));
+  g.add(control(-0.196, Math.PI + 0.65));
+  g.add(control(0.196, Math.PI - 0.33));
 
   GEO.screwRow(g, [
-    [-0.2585, 0.0268], [-0.2585, -0.0268], [-0.2585, 0],
-    [0.2585, 0.0268], [0.2585, -0.0268], [0.2585, 0],
-  ], fz + 0.0005, 0.0019);
+    [-0.2590, 0.0400], [-0.2590, -0.0400], [-0.2590, 0],
+    [0.2590, 0.0400], [0.2590, -0.0400], [0.2590, 0],
+  ], fz + 0.0006, 0.0021);
 
   // --- top and feet -----------------------------------------------------------
-  const v = GEO.ventSlots(0.26, 0.22, 3, 11, { mat: M.plastic, sw: 0.0034, sd: 0.019 });
-  v.position.set(0, H / 2 - 0.0017, -0.055);
+  const v = GEO.ventSlots(0.28, 0.22, 3, 12, { mat: M.plastic, sw: 0.0034, sd: 0.019 });
+  v.position.set(0, H / 2 - 0.0017, -0.060);
   g.add(v);
 
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
-      const f = new THREE.Mesh(GEO.bevelCyl(0.0122, 0.0142, FOOT, 28, 0.0008), M.steel);
-      f.position.set(sx * (W / 2 - 0.040), -H / 2 - FOOT / 2, sz * (D / 2 - 0.052));
+      const f = new THREE.Mesh(GEO.bevelCyl(0.0130, 0.0152, FOOT, 28, 0.0009), M.steel);
+      f.position.set(sx * (W / 2 - 0.042), -H / 2 - FOOT / 2, sz * (D / 2 - 0.054));
       g.add(f);
     }
   }
@@ -375,59 +393,69 @@ function buildHardware() {
   rear.add(perf);
 
   GEO.shadowed(g);
-  g.add(GEO.contactShadow(W * 1.3, D * 1.3, 0.45, -H / 2 - FOOT + 0.0013));
+  g.add(GEO.contactShadow(W * 1.25, D * 1.25, 0.45, -H / 2 - FOOT + 0.0013));
   return g;
 }
 
 // ---------------------------------------------------------------------------
-// OVERLAY
+// OVERLAY — one card, two plot regions, six labels
 // ---------------------------------------------------------------------------
 function buildOverlay(ctx) {
-  const M = mats();
   const L = ctx.labels;
   const root = new THREE.Group();
   const R = {};
-  const lab = {};
 
-  // A single editorial column of three panels, coplanar, floating beside the
-  // rack and in front of the monoblock so nothing occludes it.
-  const CW = 0.470;                 // common card width
-  const CX = 0.428, CZ = -2.660, CRY = 0.18;
-  const column = (y, h) => {
-    const g2 = new THREE.Group();
-    g2.position.set(CX, y, CZ);
-    g2.rotation.y = CRY;
-    root.add(g2);
-    const c = DIAG.diagramCard(CW, h, { opacity: 0.90, pad: 0.018 });
-    c.userData.plate.userData._baseOp = 0.90;
-    g2.add(c);
-    return g2;
-  };
+  // --- the stage key ----------------------------------------------------------
+  // A soft frontal source aimed only at bay 3, so the hero separates from the
+  // five identical boxes around it. Lives in the overlay, so it exists only
+  // while this chapter is on screen (see setReveal).
+  const key = new THREE.SpotLight(0xfff3e4, 0, 2.6, 0.34, 0.92, 1.6);
+  key.position.set(0.22, HERO_Y + 0.42, HERO_Z + 0.80);
+  key.castShadow = false;
+  key.target.position.set(0, HERO_Y, HERO_Z);
+  root.add(key, key.target);
+  R.key = key;
 
-  // ======================= 1. the RIAA plot ================================
-  const GH = 0.300;
-  const col = column(0.575, GH);
+  // --- one card, floating clear of the rack -----------------------------------
+  const CW = 0.380, CH = 0.482, PAD = 0.020;
+  const CARD_DIST = 2.20;
+  const PX = 0.002 * TANH * CARD_DIST;          // metres per screen pixel on the card
+  const holder = new THREE.Group();
+  holder.position.copy(place(0.318, 0.050, CARD_DIST));
+  holder.lookAt(CAM);
+  root.add(holder);
 
+  const card = new THREE.Group();
+  card.position.set(-CW / 2, -CH / 2, 0);
+  holder.add(card);
+
+  const plate = DIAG.diagramCard(CW, CH, { opacity: 0.90, pad: PAD });
+  // fadeTree captures a mesh's opacity the first time it sees it, and the app's
+  // first call happens at reveal 0 — seed the plate or it never comes back.
+  plate.userData.plate.userData._baseOp = 0.90;
+  card.add(plate);
+
+  // ======================= 1. the RIAA curves ==============================
+  const GH = 0.290, GY = CH - GH;
   const g = new DIAG.Graph({
     w: CW, h: GH, xLog: true, xRange: [20, 20000], yRange: [-25, 25],
     yTicks: [-20, -10, 0, 10, 20], zeroLine: 0,
   });
-  col.add(g);
+  g.position.set(0, GY, 0);
+  card.add(g);
   R.graph = g;
 
   // The record curve rises at +6 dB/oct between f1…f2 and again above f3 —
   // those are the constant-groove-amplitude decades.
   for (const [fa, fb] of [[F1, F2], [F3, 20000]]) {
     const x0 = g.x(fa), x1 = g.x(fb);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, GH), flatMat(PAL.am, 0.014));
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, GH), flatMat(PAL.am, 0.013));
     m.position.set((x0 + x1) / 2, GH / 2, -0.0004);
     m.renderOrder = 5;
-    m.userData._baseOp = 0.014;
     g.add(m);
   }
 
-  for (const f of [F1, F2, F3]) g.addMarker(f, { color: PAL.ink3, width: 1.2, opacity: 0.5 });
-  g.addMarker(1000, { color: PAL.ink3, width: 1.1, opacity: 0.28, dashed: true });
+  for (const f of [F1, F2, F3]) g.addMarker(f, { color: PAL.ink3, width: 1.2, opacity: 0.55 });
 
   g.addTrace((f) => DSP.riaaRecordDb(f), { color: PAL.am, width: 2.8, n: 420, z: 0.0006 });
   g.addTrace((f) => DSP.riaaPlaybackDb(f), { color: PAL.cy, width: 2.8, n: 420, z: 0.0008 });
@@ -436,9 +464,8 @@ function buildOverlay(ctx) {
   R.tSum.setProgress(0.001);
 
   for (const f of [F1, F2, F3]) {
-    const d = g.addDot(PAL.ink, 0.0036);
+    const d = g.addDot(PAL.ink, 0.0034);
     d.userData.setData(f, DSP.riaaPlaybackDb(f));
-    d.userData._baseOp = 1;
   }
 
   R.cursor = g.addMarker(1000, { color: PAL.ink, width: 1.5, dashed: false, opacity: 0.45 });
@@ -446,223 +473,56 @@ function buildOverlay(ctx) {
   R.dotPlay = g.addDot(PAL.cy, 0.0052);
   R.dotSum = g.addDot(PAL.gr, 0.0052);
 
-  // Labels: two above the plot, one on the sum, three staggered beneath.
-  // (`text` and `value` render on the SAME line in the stylesheet, so every
-  //  label here is kicker + value — two lines, never three.)
-  lab.play = L.add(anchor(g, g.x(20), GH), {
-    kicker: 'Playback — de-emphasis', cls: 'acc',
-    value: sgn(DSP.riaaPlaybackDb(20)) + ' dB at 20 Hz', offset: [78, -24],
-  });
-  lab.rec = L.add(anchor(g, g.x(20000), GH), {
-    kicker: 'Record — pre-emphasis', cls: 'am',
-    value: sgn(DSP.riaaRecordDb(20000)) + ' dB at 20 kHz', offset: [-74, -24],
-  });
-  lab.sum = L.add(anchor(g, g.x(20), g.y(0)), {
-    kicker: 'Record + playback', value: '0.00 dB', offset: [70, -13],
-  });
-
-  const tTag = (f, us, kind, dy) => L.add(anchor(g, g.x(f), 0), {
-    kicker: kind, value: us + ' µs · ' + hz(f), offset: [0, dy],
-  });
-  lab.t1 = tTag(F1, '3180', 'T1 pole', 24);
-  lab.t2 = tTag(F2, '318', 'T2 zero', 58);
-  lab.t3 = tTag(F3, '75', 'T3 pole', 24);
-
   // ======================= 2. groove excursion =============================
-  const gvH = 0.156;
-  const gv = column(0.300, gvH);
-
+  // Same 50 Hz, same 5 cm/s, with and without pre-emphasis, drawn at ×1000
+  // against the average groove pitch.
   const mid = CW / 2;
-  const halfFlat = A_50_FLAT * GROOVE_MAG;      // 0.2387
-  const halfRiaa = A_50_RIAA * GROOVE_MAG;      // 0.0339
-  const halfPitch = (PITCH / 2) * GROOVE_MAG;   // 0.0968
+  const halfFlat = A_50_FLAT * GROOVE_MAG;      // 0.1592
+  const halfRiaa = A_50_RIAA * GROOVE_MAG;      // 0.0226
+  const halfPitch = (PITCH / 2) * GROOVE_MAG;   // 0.0645
 
   for (const sx of [-1, 1]) {
-    gv.add(poly([V3(mid + sx * halfPitch, 0.018, 0.006), V3(mid + sx * halfPitch, 0.136, 0.006)],
-      PAL.ink3, 1.3, { opacity: 0.5, dashed: true, dashSize: 0.006, gapSize: 0.005 }));
+    card.add(poly([V3(mid + sx * halfPitch, 0.006, 0.006), V3(mid + sx * halfPitch, 0.086, 0.006)],
+      PAL.ink3, 1.3, { opacity: 0.55, dashed: true, dashSize: 0.006, gapSize: 0.005 }));
   }
-  gv.add(bar(mid - halfFlat, mid + halfFlat, 0.114, 0.0105, 0.008, PAL.am));
-  gv.add(bar(mid - halfRiaa, mid + halfRiaa, 0.072, 0.0105, 0.008, PAL.cy));
-  gv.add(poly([V3(mid - halfPitch, 0.040, 0.008), V3(mid + halfPitch, 0.040, 0.008)],
-    PAL.ink3, 1.6, { opacity: 0.7 }));
+  card.add(poly([V3(mid - halfPitch, 0.010, 0.006), V3(mid + halfPitch, 0.010, 0.006)],
+    PAL.ink3, 1.4, { opacity: 0.55 }));
+  card.add(bar(mid - halfFlat, mid + halfFlat, 0.062, 0.0090, 0.008, PAL.am));
+  card.add(bar(mid - halfRiaa, mid + halfRiaa, 0.032, 0.0090, 0.008, PAL.cy));
 
-  lab.gvFlat = L.add(anchor(gv, mid, 0.114), {
-    kicker: '50 Hz cut at constant velocity', cls: 'am',
-    value: '±' + (A_50_FLAT * 1e6).toFixed(1) + ' µm peak', offset: [0, -20],
-  });
-  lab.gvRiaa = L.add(anchor(gv, mid + halfRiaa, 0.072), {
-    kicker: 'with RIAA pre-emphasis', cls: 'acc',
-    value: '±' + (A_50_RIAA * 1e6).toFixed(1) + ' µm · ÷' + A_RATIO.toFixed(2),
-    offset: [100, 4],
-  });
-  lab.gvPitch = L.add(anchor(gv, mid, 0.040), {
-    kicker: 'adjacent groove centres',
-    value: (PITCH * 1e6).toFixed(0) + ' µm · shown ×' + GROOVE_MAG, offset: [0, 20],
+  // ======================= labels ==========================================
+  const lab = {};
+
+  lab.hero = L.add(new THREE.Vector3(0.12, HERO_Y + 0.030, HERO_Z), {
+    kicker: 'Moving-coil phono stage · 100 Ω',
+    value: G_STAGE_DB.toFixed(2) + ' dB at 1 kHz',
+    offset: [0, -34], priority: 6,
   });
 
-  // ======================= 3. the input loop ===============================
-  const DW = 0.620, DH = 0.262;                 // design space
-  const SC = CW / DW;                           // 0.903
-  const inn = new THREE.Group();
-  inn.position.set(CX, 1.000, CZ);
-  inn.rotation.y = CRY;
-  inn.scale.setScalar(SC);
-  root.add(inn);
-
-  const inCard = DIAG.diagramCard(DW, DH, { opacity: 0.92, pad: 0.020 });
-  inCard.userData.plate.userData._baseOp = 0.92;
-  inn.add(inCard);
-
-  const board = new THREE.Mesh(GEO.bevelBox(0.400, 0.222, 0.0035, 0.0008, 2), M.pcb);
-  board.position.set(0.400, 0.128, 0.0018);
-  inn.add(board);
-  for (const [x, y] of [[0.212, 0.028], [0.212, 0.228], [0.588, 0.028], [0.588, 0.228]]) {
-    const s = GEO.screw(0.0014);
-    s.position.set(x, y, 0.0042);
-    inn.add(s);
-  }
-
-  const LZ = 0.010;                             // schematic plane
-
-  // cartridge coil: four half-loops bulging left
-  const coilPts = [];
-  const NB = 4, NS = 12;
-  for (let i = 0; i <= NB * NS; i++) {
-    const u = i / (NB * NS);
-    const a = ((u * NB) % 1) * Math.PI;
-    coilPts.push(V3(0.055 - 0.0128 * Math.sin(a), 0.094 + 0.102 * u, LZ));
-  }
-
-  // closed input loop: coil → hot → input device → cold → coil
-  const loopPts = coilPts.concat([
-    V3(0.300, 0.196, LZ), V3(0.300, 0.094, LZ), V3(0.055, 0.094, LZ),
-  ]);
-  const closed = loopPts.concat([loopPts[0].clone()]);
-  R.path = loopPath(closed);
-  R.loop = poly(closed, PAL.cy, 3.0, { opacity: 1 });
-  inn.add(R.loop);
-
-  // cartridge body / arm — a separate node from the coil
-  inn.add(poly([
-    V3(0.026, 0.074, LZ), V3(0.088, 0.074, LZ), V3(0.088, 0.218, LZ),
-    V3(0.026, 0.218, LZ), V3(0.026, 0.074, LZ),
-  ], PAL.ink3, 1.2, { opacity: 0.5, dashed: true, dashSize: 0.007, gapSize: 0.005 }));
-
-  // circulating current: hot one way, cold the other, always
-  R.arrows = [];
-  for (const [x, y, dir] of [[0.172, 0.196, 1], [0.172, 0.094, -1]]) {
-    const c = new THREE.Mesh(new THREE.ConeGeometry(0.0062, 0.0165, 14),
-      new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true }));
-    c.position.set(x, y, LZ + 0.001);
-    c.userData._baseOp = 1;
-    c.userData.dir = dir;
-    inn.add(c);
-    R.arrows.push(c);
-  }
-
-  // Carriers. They oscillate about a fixed point; they do not travel. The dim
-  // ticks are each carrier's rest position, so the swing is visible as an
-  // offset from a mark rather than as motion along the wire.
-  R.NC = 18;
-  const rest = new DIAG.Swarm(R.NC, { color: 0x8b96a4, size: 0.0026, additive: false });
-  rest.position.z = 0.0012;
-  rest.update((i) => {
-    const p = R.path.at(((i + 0.5) * R.path.total) / R.NC);
-    return { p: [p.x, p.y, p.z], s: 1, c: 0xffffff };
+  lab.play = L.add(anchor(g, g.x(20), g.y(DSP.riaaPlaybackDb(20))), {
+    kicker: 'Playback — de-emphasis', cls: 'acc', occlude: false, priority: 4,
+    value: sgn(DSP.riaaPlaybackDb(20)) + ' dB at 20 Hz', offset: [94, -15],
   });
-  inn.add(rest);
-
-  R.carriers = new DIAG.Swarm(R.NC, { color: PAL.cy, size: 0.0052, additive: true });
-  R.carriers.position.z = 0.0016;
-  inn.add(R.carriers);
-
-  const resBody = (x, y, len, vert) => {
-    const m = new THREE.Mesh(GEO.bevelCyl(0.0040, 0.0040, len, 20, 0.0006), M.anodGrey.clone());
-    m.material.color.setHex(0x5d6672);
-    m.rotation.z = vert ? 0 : Math.PI / 2;
-    m.position.set(x, y, LZ - 0.001);
-    return m;
-  };
-  inn.add(resBody(0.248, 0.145, 0.030, true));
-  inn.add(poly([V3(0.248, 0.196, LZ), V3(0.248, 0.094, LZ)], PAL.cy, 1.6, { opacity: 0.55 }));
-
-  // Four paralleled low-noise input devices, inside the loop. Drawn as unlit
-  // can tops: a real metal cylinder seen end-on reflects only the dark room
-  // and disappears, so this one element belongs to the diagram layer.
-  const canGeo = new THREE.CircleGeometry(0.0084, 28);
-  const canMat = new THREE.MeshBasicMaterial({
-    color: 0xa8b0ba, toneMapped: false, transparent: true, opacity: 0.97,
+  lab.sum = L.add(anchor(g, g.x(20), g.y(0)), {
+    kicker: 'Record + playback', occlude: false, priority: 5,
+    value: '0.00 dB', offset: [76, -14],
   });
-  const tabGeo = new THREE.CircleGeometry(0.0016, 12);
-  const tabMat = new THREE.MeshBasicMaterial({
-    color: 0x22282f, toneMapped: false, transparent: true, opacity: 0.9,
+  lab.rec = L.add(anchor(g, g.x(20), g.y(DSP.riaaRecordDb(20))), {
+    kicker: 'Record — pre-emphasis', cls: 'am', occlude: false, priority: 4,
+    value: sgn(DSP.riaaRecordDb(20)) + ' dB at 20 Hz', offset: [94, 16],
   });
-  for (const [x, y] of [[0.281, 0.120], [0.319, 0.120], [0.281, 0.170], [0.319, 0.170]]) {
-    const can = new THREE.Mesh(canGeo, canMat);
-    can.position.set(x, y, LZ + 0.0016);
-    can.renderOrder = 11;
-    can.userData._baseOp = 0.97;
-    inn.add(can);
-    const tab = new THREE.Mesh(tabGeo, tabMat);
-    tab.position.set(x + 0.0057, y + 0.0057, LZ + 0.0019);
-    tab.renderOrder = 12;
-    tab.userData._baseOp = 0.9;
-    inn.add(tab);
-  }
-  inn.add(poly([
-    V3(0.262, 0.098, LZ + 0.0012), V3(0.338, 0.098, LZ + 0.0012),
-    V3(0.338, 0.192, LZ + 0.0012), V3(0.262, 0.192, LZ + 0.0012),
-    V3(0.262, 0.098, LZ + 0.0012),
-  ], 0xd8dee6, 1.1, { opacity: 0.45 }));
-
-  // passive EQ ladder: three 0.1 % series resistors, two film capacitors
-  inn.add(poly([
-    V3(0.300, 0.145, LZ), V3(0.334, 0.145, LZ), V3(0.334, 0.196, LZ), V3(0.592, 0.196, LZ),
-  ], PAL.cy, 1.8, { opacity: 0.6 }));
-  for (const x of [0.372, 0.448, 0.524]) inn.add(resBody(x, 0.196, 0.026, false));
-  for (const x of [0.410, 0.486]) {
-    const cap = new THREE.Mesh(GEO.bevelBox(0.023, 0.044, 0.012, 0.0022, 2), M.plastic.clone());
-    cap.material.color.setHex(0xc2bca8);
-    cap.material.roughness = 0.55;
-    cap.position.set(x, 0.144, LZ - 0.001);
-    inn.add(cap);
-    inn.add(poly([V3(x, 0.196, LZ), V3(x, 0.062, LZ)], PAL.cy, 1.4, { opacity: 0.5 }));
-  }
-
-  // signal ground rail — the return the EQ network and the output use
-  inn.add(poly([V3(0.212, 0.062, LZ), V3(0.592, 0.062, LZ)], PAL.cy, 1.8, { opacity: 0.55 }));
-  inn.add(poly([V3(0.212, 0.094, LZ), V3(0.212, 0.062, LZ)], PAL.cy, 1.6, { opacity: 0.55 }));
-
-  // chassis / arm earth — a different node, tied to the rail at one point only
-  inn.add(poly([
-    V3(0.040, 0.074, LZ), V3(0.040, 0.026, LZ), V3(0.556, 0.026, LZ),
-  ], PAL.am, 1.9, { opacity: 0.85, dashed: true, dashSize: 0.0085, gapSize: 0.006 }));
-  inn.add(poly([V3(0.500, 0.026, LZ), V3(0.500, 0.062, LZ)], PAL.am, 1.6,
-    { opacity: 0.85, dashed: true, dashSize: 0.005, gapSize: 0.004 }));
-  for (let i = 0; i < 3; i++) {
-    const w = 0.016 - i * 0.005;
-    inn.add(poly([V3(0.556 - w, 0.019 - i * 0.005, LZ), V3(0.556 + w, 0.019 - i * 0.005, LZ)],
-      PAL.am, 1.9, { opacity: 0.9 }));
-  }
-  const gpost = new THREE.Mesh(GEO.bevelCyl(0.0052, 0.0056, 0.008, 24, 0.0008), M.gold);
-  gpost.rotation.x = Math.PI / 2;
-  gpost.position.set(0.556, 0.026, LZ - 0.002);
-  inn.add(gpost);
-
-  lab.field = L.add(anchor(inn, 0.190, 0.196, LZ), {
-    kicker: 'Field at 0.66 c',
-    value: (C_FIELD / 1e8).toFixed(2) + '×10⁸ m/s · 1.2 m in ' + (T_TRANSIT * 1e9).toFixed(2) + ' ns',
-    offset: [18, -26],
+  lab.corner = L.add(anchor(g, g.x(F2), 0), {
+    kicker: 'T₁ 3180 · T₂ 318 · T₃ 75 µs', occlude: false, priority: 2,
+    value: F1.toFixed(2) + ' · ' + F2.toFixed(2) + ' · ' + F3.toFixed(0) + ' Hz',
+    offset: [0, 42],
   });
-  lab.earth = L.add(anchor(inn, 0.110, 0.0, LZ), {
-    kicker: 'Chassis earth', cls: 'am',
-    value: 'no signal current', offset: [0, 28],
-  });
-  lab.drift = L.add(anchor(inn, 0.440, 0.0, LZ), {
-    kicker: 'Carriers oscillate, shown ' + CARRIER_MAG_TXT, cls: 'acc',
-    value: '±' + (X_DRIFT * 1e12).toFixed(2) + ' pm · v̂ '
-      + (V_DRIFT * 1e9).toFixed(2) + ' nm/s',
-    offset: [0, 28],
+  lab.exc = L.add(anchor(card, mid, 0.010), {
+    kicker: '50 Hz at 5 cm/s, shown ×' + GROOVE_MAG, cls: 'acc', occlude: false, priority: 3,
+    text: 'grey: adjacent groove centres, '
+      + (PITCH * 1e6).toFixed(0) + ' µm',
+    value: '±' + (A_50_FLAT * 1e6).toFixed(1) + ' → ±' + (A_50_RIAA * 1e6).toFixed(1)
+      + ' µm · ÷' + A_RATIO.toFixed(2),
+    offset: [0, 40],
   });
 
   R.lab = lab;
@@ -678,33 +538,26 @@ export default {
   nav: 'Phono stage',
   kicker: 'Phono stage',
   standfirst: 'Two curves that are one function and its exact reciprocal.',
-  shot: { position: [0.96, 1.07, -0.77], target: [0.52, 0.755, -2.85], fov: 34 },
-  timeScale: 0.002,
+  shot: SHOT,
+  timeScale: 1,
   alwaysUpdate: false,
 
   build(ctx) {
     const hardware = buildHardware();
     const built = buildOverlay(ctx);
     R = built.R;
-    // DIAG.lineMaterial enables alphaToCoverage. The fat-line shader then takes
-    // its alpha from edge coverage and ignores material.opacity, so a Trace
-    // never fades and leaks into every other stage's shot. Opt this stage out;
-    // SMAA still cleans up the edges.
-    built.overlay.traverse((c) => {
-      if (c.material && c.material.isLineMaterial) c.material.alphaToCoverage = false;
-    });
     return { hardware, overlay: built.overlay };
   },
 
-  /** Belt and braces: the app stops calling fadeTree once reveal snaps to 0. */
+  /** The stage key belongs to this chapter only. */
   setReveal(k) {
-    if (this.overlay) this.overlay.visible = k > 0.004;
+    if (R && R.key) R.key.intensity = 0 * k;
   },
 
-  update(dt, t, ctx) {
+  update(dt, t) {
     if (!R) return;
 
-    // ---- frequency sweep, 20 Hz → 20 kHz -----------------------------------
+    // ---- swept sine, 20 Hz → 20 kHz in 3.4 s, in real time -----------------
     const ph = (((t / SWEEP) % 1) + 1) % 1;
     const f = 20 * Math.pow(1000, ph);
     S.f = f;
@@ -713,7 +566,7 @@ export default {
     S.sum = S.rec + S.play;
     // A constant-velocity source cut with pre-emphasis presents the cartridge
     // output as the record curve; the stage hands back a level output.
-    S.vin = V_CART * DSP.undB(S.rec);
+    S.vin = V_IN * DSP.undB(S.rec);
     S.gain = G_STAGE_DB + S.play;
     S.vout = S.vin * DSP.undB(S.gain);
 
@@ -722,26 +575,6 @@ export default {
     R.dotPlay.userData.setData(f, S.play);
     R.dotSum.userData.setData(f, S.sum);
     R.tSum.setProgress(ph);
-
-    // ---- the input loop at 1 kHz -------------------------------------------
-    // i(t) = Î·cos ωt, so the carrier displacement is x(t) = (v̂/ω)·sin ωt.
-    const c1 = Math.cos(W1K * t);
-    const s1 = Math.sin(W1K * t);
-    const disp = X_DRIFT * CARRIER_MAG * s1;
-    const P = R.path, N = R.NC;
-    R.carriers.update((i) => {
-      const p = P.at(((i + 0.5) * P.total) / N + disp);
-      // instanceColor defaults to black in Swarm, so it must always be set
-      return { p: [p.x, p.y, p.z], s: 0.7 + 0.3 * Math.abs(c1), c: 0xffffff };
-    });
-    // Brightness follows |i|, and the whole loop lights together: 6.07 ns is
-    // nothing against a 1 ms period, so this circuit is lumped.
-    R.loop._baseOpacity = 0.26 + 0.74 * Math.abs(c1);
-    for (const a of R.arrows) {
-      const s = 0.28 + 0.72 * Math.abs(c1);
-      a.scale.set(s, s, s);
-      a.rotation.z = (c1 * a.userData.dir >= 0 ? -1 : 1) * (Math.PI / 2);
-    }
   },
 
   content() {
@@ -755,13 +588,19 @@ excursion grow as <span class="num">1/f</span>. At the
 <span class="num">${(A_1K * 1e6).toFixed(2)} &micro;m</span>; at 50 Hz the same
 velocity needs <span class="num">${(A_50_FLAT * 1e6).toFixed(1)} &micro;m</span>
 against a <span class="num">${(PITCH * 1e6).toFixed(0)} &micro;m</span> average
-pitch &mdash; the cutter would run through its neighbour. Constant velocity at
-the top of the band buries the treble in surface noise instead.</p>
+pitch, and the cutter crosses into its neighbour.</p>
 
-<div class="eq">H(s) = (1 + sT&#8322;) / (1 + sT&#8321;)(1 + sT&#8323;)  <span class="c">playback</span>
-T&#8321;  3180 &micro;s   pole  <span class="hl">${F1.toFixed(2)} Hz</span>
-T&#8322;   318 &micro;s   zero  <span class="hl">${F2.toFixed(2)} Hz</span>
-T&#8323;    75 &micro;s   pole  <span class="hl">${F3.toFixed(2)} Hz</span></div>
+<div class="key"><span class="lab">The idea</span><p>Pre-emphasis is not a tone
+control. It trades bass excursion against treble noise and hands playback the
+exact reciprocal. The green trace is summed point by point from the other two
+and is <span class="num">0.00 dB</span> across the band; the only real error is
+tolerance, about <span class="num">&plusmn;${TOL_DB.toFixed(2)} dB</span> with
+0.1&nbsp;% resistors and 1&nbsp;% film capacitors.</p></div>
+
+<div class="eq">H(s) = (1+sT&#8322;) / (1+sT&#8321;)(1+sT&#8323;)  <span class="c">playback</span>
+T&#8321;  3180 &micro;s  pole  <span class="hl">${F1.toFixed(2)} Hz</span>
+T&#8322;   318 &micro;s  zero  <span class="hl">${F2.toFixed(2)} Hz</span>
+T&#8323;    75 &micro;s  pole  <span class="hl">${F3.toFixed(2)} Hz</span></div>
 
 <p>The corners split the record curve into four asymptotes: constant velocity
 below <span class="num">${F1.toFixed(1)} Hz</span>, <b>+6 dB/octave</b> to
@@ -770,56 +609,42 @@ below <span class="num">${F1.toFixed(1)} Hz</span>, <b>+6 dB/octave</b> to
 A 6 dB/octave rise in <em>velocity</em> is constant <em>amplitude</em> &mdash;
 the shaded decades are where the groove stops getting wider. At 50 Hz that is
 <span class="num">${Math.abs(REC_50).toFixed(2)} dB</span>, a factor
-<span class="num">${A_RATIO.toFixed(2)}</span>:
-<span class="num">${(A_50_FLAT * 1e6).toFixed(1)}</span> becomes
-<span class="num">${(A_50_RIAA * 1e6).toFixed(1)} &micro;m</span>.</p>
+<span class="num">${A_RATIO.toFixed(2)}</span>.</p>
 
 <h3>Gain and noise budget</h3>
-<div class="eq">cartridge  0.300 mV rms <span class="c">(5 cm/s pk, 1 kHz)</span>
-line level 2.000 V rms
-20&middot;log&#8321;&#8320;(2/0.0003)  = <span class="hl">${G_TOTAL_DB.toFixed(2)} dB</span>
-this stage, 1 kHz     = ${G_STAGE_DB.toFixed(2)} dB &rarr; ${V_OUT.toFixed(3)} V
-line stage remainder  = ${G_REST_DB.toFixed(2)} dB (&times;${DSP.undB(G_REST_DB).toFixed(2)})
-<span class="c">passive network, 1 kHz vs its LF gain</span>
-20&middot;log&#8321;&#8320;|H(1k)|      = <span class="hl">${NET_LOSS_1K.toFixed(2)} dB</span>
-<span class="c">so the amplifiers must make</span> ${AMP_RAW_DB.toFixed(2)} dB</div>
+<div class="eq">0.300 mV  <span class="c">cartridge, 5 cm/s at 1 kHz</span>
+${LOAD_DB.toFixed(2)} dB  <span class="c">100 &Omega; load on a 10 &Omega; coil</span>
+${(V_IN * 1e3).toFixed(3)} mV  <span class="c">at the input</span>
+2.000 V   <span class="c">line level &rarr;</span> <span class="hl">${G_TOTAL_DB.toFixed(2)} dB</span>
+${G_STAGE_DB.toFixed(2)} dB  <span class="c">this stage &rarr;</span> ${V_OUT.toFixed(3)} V rms
+${G_REST_DB.toFixed(2)} dB  <span class="c">left for the line stage</span>
+<span class="c">passive network at 1 kHz</span> ${NET_LOSS_1K.toFixed(2)} dB
+<span class="c">so the amplifiers make</span> ${AMP_RAW_DB.toFixed(2)} dB</div>
 
-<div class="eq">e&#8345; 1.00 nV/&radic;Hz &oplus; &radic;(4kTR), R=10 &Omega; = ${(EN_R * 1e9).toFixed(2)}
-                    = ${(EN_TOT * 1e9).toFixed(2)} nV/&radic;Hz
-RIAA-weighted noise BW  = ${(ENB / 1000).toFixed(2)} kHz
-                    &rarr; ${(V_NOISE * 1e9).toFixed(0)} nV rms
-S/N vs 0.300 mV     = <span class="hl">${SNR_DB.toFixed(1)} dB</span></div>
+<div class="eq">e&#8345; 1.00 &oplus; &radic;(4kT&middot;${R_SRC.toFixed(2)} &Omega;) = ${(EN_R * 1e9).toFixed(2)}
+       = ${(EN_TOT * 1e9).toFixed(2)} nV/&radic;Hz
+RIAA-weighted noise BW ${(ENB / 1000).toFixed(2)} kHz
+       &rarr; ${(V_NOISE * 1e9).toFixed(1)} nV rms
+S/N re ${(V_IN * 1e6).toFixed(0)} &micro;V = <span class="hl">${SNR_DB.toFixed(1)} dB</span></div>
 
 <p>Four paralleled input devices reach that
-<span class="num">1 nV/&radic;Hz</span> &mdash; uncorrelated noise falls as
-<span class="num">&radic;n</span>. The figure is unweighted,
-20 Hz&ndash;20 kHz, and beats a flat 20 kHz sum because playback discards more
-treble noise than the bass lift adds. On most pressings the surface noise sets
-the floor, not the electronics.</p>
-
-<div class="key"><span class="lab">The idea</span><p>Pre-emphasis is not a tone
-control. It trades bass excursion against treble noise and hands the exact
-reciprocal to playback. The green trace is summed point by point from the other
-two and is identically <span class="num">0.00 dB</span>; the only real error is
-tolerance, about <span class="num">&plusmn;${TOL_DB.toFixed(2)} dB</span> with
-0.1&nbsp;% resistors and 1&nbsp;% film capacitors.</p></div>
+<span class="num">1 nV/&radic;Hz</span>; uncorrelated noise falls as
+<span class="num">&radic;n</span>. The bandwidth is the playback curve's own
+noise integral, not a flat 20 kHz, because de-emphasis discards more treble
+noise than the bass lift adds. Unweighted. On most pressings surface noise sets
+the floor.</p>
 
 <div class="myth"><span class="lab">Commonly got wrong</span><p>The earth wire
-is not the signal return. Each coil has two terminals and its own screened
-pair: what leaves on the hot comes back on the cold. The earth post exists
-because the arm tube, bearing and platter are a <em>different</em> node, tied to
-signal ground at one point only. Carriers in that loop drift at
-<span class="num">${(V_DRIFT * 1e9).toFixed(2)} nm/s</span> peak; on a 1 kHz
-signal they oscillate
-<span class="num">&plusmn;${(X_DRIFT * 1e12).toFixed(2)} pm</span>,
+is not the signal return. The coil has two terminals and its own screened pair:
+what leaves on the hot comes back on the cold. The earth post exists because the
+arm tube, bearing and platter are a <em>different</em> node, tied to signal
+ground at a single point. Carriers in that loop oscillate
+<span class="num">&plusmn;${(X_DRIFT * 1e12).toFixed(2)} pm</span> at 1 kHz,
 <span class="num">1/${Math.round(CU_SPACING / X_DRIFT)}</span> of a copper atom
-spacing. The field does the work at
-<span class="num">${(C_FIELD / 1e8).toFixed(2)}&times;10&#8312; m/s</span>: in
-half a cycle it covers
-<span class="num">${(FIELD_PER_HALF / 1000).toFixed(0)} km</span> while a
-carrier moves <span class="num">${(2 * X_DRIFT * 1e12).toFixed(2)} pm</span> and
-returns &mdash; a ratio of
-<span class="num">${SPEED_RATIO.toExponential(1).replace('e+', '&times;10')}</span>.</p></div>
+spacing, while the field covers
+<span class="num">${(FIELD_PER_HALF / 1000).toFixed(0)} km</span> in half a
+cycle &mdash; a ratio of
+<span class="num">${sup10(SPEED_RATIO)}</span>.</p></div>
 `;
   },
 
@@ -835,7 +660,7 @@ returns &mdash; a ratio of
       { k: 'GAIN', v: S.gain.toFixed(2), u: 'dB', cls: 'am', bar: S.gain / 90 },
       {
         k: 'IN → OUT',
-        v: (S.vin * 1e3).toPrecision(3) + ' → ' + (S.vout * 1e3).toFixed(0),
+        v: (S.vin * 1e3).toFixed(3) + ' → ' + (S.vout * 1e3).toFixed(0),
         u: 'mV rms', cls: 'acc',
       },
     ];
