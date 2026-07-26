@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { LAYOUT, frameShot } from '../core/layout.js';
-import { mats, PAL } from '../core/materials.js';
+import { PAL } from '../core/materials.js';
 import { radialSprite } from '../core/tex.js';
+import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
 import { DRIVER, TS, SPEAKER, AMP, ROOM } from '../core/spec.js';
@@ -10,9 +11,18 @@ import { DRIVER, TS, SPEAKER, AMP, ROOM } from '../core/spec.js';
 /* ===========================================================================
  * AIR · ROOM · EAR — the last 4.83 m.
  *
- * No hardware of its own. The subject is the path: one loudspeaker, one direct
- * ray, one floor bounce, one ear. Two plates hang above it — a magnified window
- * of the air at 1 kHz, and what the floor does to the response.
+ * No hardware of its own. The subject is the listening geometry, seen from the
+ * left of the median plane so that the 4.830 m direct path lies ACROSS the
+ * frame instead of running away from the lens: loudspeaker at the left, the
+ * floor bounce as a pool on the polished floor in the middle, the seat at the
+ * right. A wavefront travels each path at 343.2 m/s and the direct one arrives
+ * 1.208 ms ahead of the bounce.
+ *
+ * ONE plate hangs above it — a magnified window of the air itself, which is the
+ * only claim in this chapter that a picture tells better than a sentence. The
+ * floor-bounce comb used to be a second plate; it is now two numbers in a label
+ * and two in the panel, because the folded amber path in the picture already
+ * says everything the plate said.
  *
  * Every primary comes from src/core/spec.js. Nothing here re-declares a driver,
  * a sensitivity or a room; everything else is derived at module load and the
@@ -56,7 +66,7 @@ const IMG_FLOOR = V(SL.x, -SL.y, SL.z);
 const R_FLOOR = IMG_FLOOR.distanceTo(EAR);                     // 5.2449 m
 const DT_FLOOR = (R_FLOOR - R_DIR) / c;                        // 1.2078 ms
 const kFloor = SL.y / (SL.y + EAR.y);
-const B_FLOOR = V(SL.x + (EAR.x - SL.x) * kFloor, 0, SL.z + (EAR.z - SL.z) * kFloor);
+const B_FLOOR = V(SL.x + (EAR.x - SL.x) * kFloor, 0.006, SL.z + (EAR.z - SL.z) * kFloor);
 
 // --- level chain ----------------------------------------------------------
 /** CHOSEN: the loudest peak on this track — a third of the monoblock's rating,
@@ -66,9 +76,14 @@ const SPL_1M = DSP.splAt(SENS_1W, PEAK_W, 1);                  // 110.11 dB
 const SPL_SEAT_1 = DSP.splAt(SENS_1W, PEAK_W, R_DIR);          // 96.43 dB
 /** Pair, mono-correlated, listener on the median plane: +6.02 dB. */
 const SPL_SEAT = SPL_SEAT_1 + DSP.dB(2);                       // 102.45 dB
+/**
+ * Per LOUDSPEAKER, which is the only way this can be written without mixing
+ * references: 100 W into one drive unit at η₀ = 0.647 % makes 0.647 W of sound
+ * and 99.35 W of heat. Doubling those for the pair and then quoting a
+ * single-speaker SPL in the same clause is the error a reader checks first.
+ */
 const W_AC_EACH = TS.eta0 * PEAK_W;                            // 0.647 W
-const W_AC = 2 * W_AC_EACH;                                    // 1.293 W
-const W_HEAT = 2 * (PEAK_W - W_AC_EACH);                       // 198.7 W
+const W_HEAT_EACH = PEAK_W - W_AC_EACH;                        // 99.35 W
 
 /**
  * The room hands some of it back. ᾱ is not asserted: Sabine inverted on the
@@ -76,9 +91,7 @@ const W_HEAT = 2 * (PEAK_W - W_AC_EACH);                       // 198.7 W
  * Lp − Ldirect = 10·log10(1 + (4/R)·4πr²/Q).
  *
  * spec.ROOM is {W, D, H} — width across, depth away from the listener, height —
- * matching LAYOUT.room's axis names. It was {L, W, H} until the last revision,
- * and reading `ROOM.L` here quietly produced NaN through the whole Sabine
- * ladder and into the panel.
+ * matching LAYOUT.room's axis names.
  */
 const V_ROOM = ROOM.W * ROOM.D * ROOM.H;                       // 206.46 m³
 const S_ROOM = 2 * (ROOM.W * ROOM.D + ROOM.W * ROOM.H + ROOM.D * ROOM.H);   // 234.88 m²
@@ -100,7 +113,6 @@ const W_REF = DSP.TAU * F_REF;
 const XI_REF = U_REF / W_REF;                        // 0.3860 µm rms
 const XI_PK = XI_REF * Math.SQRT2;                   // 0.5460 µm peak
 const U_PK = U_REF * Math.SQRT2;                     // 3.4303 mm/s peak
-const P_PK = P_REF_PA * Math.SQRT2;                  // 1.4176 Pa peak
 /** Peak speeds. A sinusoid's MEAN speed is 2/π of its peak, so distances
  *  covered in the same time stand at (π/2)× this — the odometer ratio. */
 const SPEED_RATIO = c / U_PK;                        // 1.0005 × 10⁵
@@ -125,8 +137,6 @@ const COMB_NULL_F = 1 / (2 * DT_FLOOR);                // 414.0 Hz
 const COMB_NULL_DB = DSP.dB(1 - COMB_A);               // −15.34 dB
 const COMB_PEAK_F = 1 / DT_FLOOR;                      // 827.9 Hz
 const COMB_PEAK_DB = DSP.dB(1 + COMB_A);               // +5.25 dB
-const combDb = (f) => DSP.dB(Math.sqrt(
-  1 + COMB_A * COMB_A + 2 * COMB_A * Math.cos(DSP.TAU * f * DT_FLOOR)));
 
 // --- parcel-window layout -------------------------------------------------
 const LAM_REF = DSP.lambda(F_REF, c);                         // 0.3432 m at 1 kHz
@@ -145,18 +155,18 @@ const K_REF = DSP.TAU / LAM_REF;                              // 18.31 rad/m
 const LAM_XI_RATIO = LAM_REF / (2 * XI_PK);                   // 3.1432 × 10⁵
 
 /**
- * Row heights inside the card. The MAGNIFIED block is above the rule and the
+ * Row heights inside the plate. The MAGNIFIED block is above the rule and the
  * ×1 block below it, and the horizontal scale is ×1 in BOTH — only the
  * displacement is magnified, and only above the rule. The amber territory bar
  * therefore lives above the rule with the parcels it belongs to, and the grey
  * λ arrow lives below it with the true-scale rows. Nothing on this plate is a
  * ×25 000 object under a ×1 heading.
  */
-const ROWS_M = [0.168, 0.140, 0.112, 0.084, 0.056];
-const ROWS_T = [-0.074, -0.106];
-const Y_TRK = 0.014;                       // amber 2ξ bar, magnified block
-const Y_DIV = -0.022;                      // the rule between the two blocks
-const Y_LAM = -0.188;                      // grey λ arrow, ×1 block
+const ROWS_M = [0.194, 0.164, 0.134, 0.104, 0.074];
+const ROWS_T = [-0.060, -0.096];
+const Y_TRK = 0.028;                       // amber 2ξ bar, magnified block
+const Y_DIV = -0.010;                      // the rule between the two blocks
+const Y_LAM = -0.196;                      // grey λ arrow, ×1 block
 const Y_TOP = ROWS_M[0], Y_BOT = Y_LAM;
 
 /**
@@ -207,107 +217,37 @@ const noHook = (g) => { delete g.userData.setOpacity; return g; };
 
 /**
  * Centred diagram card: local (0,0) is the middle of the plate.
- * The plate is left fully opaque. A 6 % leak is invisible over the backdrop but
- * not over a specular highlight, and a loudspeaker's surround ghosting through
- * a plate that is supposed to be in front of it reads as a compositing bug.
+ *
+ * `DIAG.diagramCard` is now a lit dielectric slab with a machined alloy bezel on
+ * all four sides — it takes light, shades across its face, casts a shadow and
+ * appears in the floor reflection. The wash and the hand-rolled rim that used to
+ * sit on top of it here were fighting a card that no longer needs either, and
+ * with the widened emitters they turned the plate into a light-grey monitor.
+ * Both are gone; the plate is the plate.
  */
-function card(w, h, opacity = 1.0) {
+function card(w, h) {
   const g = new THREE.Group();
-  const k = noHook(DIAG.diagramCard(w, h, { opacity, pad: 0.022 }));
+  const k = noHook(DIAG.diagramCard(w, h, { opacity: 1.0, pad: 0.024 }));
   k.position.set(-w / 2, -h / 2, 0);
   g.add(k);
-  return g;
-}
-
-/**
- * THE SPECULAR LAYER.
- *
- * A lit plate with nothing in front of it reads as a decal. Real instrument
- * glass is a slightly convex dielectric: the reflected image of the studio's
- * wide front strip sweeps across it as a soft band that is brightest where the
- * curvature turns the normal toward the source, and the band has a rolloff
- * rather than an edge. This is a genuine `mats().glass` clone with an envMap —
- * the band is the reflection, not a painted gradient.
- *
- * The emitters were widened and dimmed since this was tuned, so the band is now
- * broader and softer; opacity and roughness are back up to keep it readable.
- */
-function coverGlass(w, h, bulge = 0.032) {
-  const g = new THREE.PlaneGeometry(w, h, 32, 20);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const u = p.getX(i) / (w / 2), v = p.getY(i) / (h / 2);
-    // Curvature is mostly about the HORIZONTAL axis, so the reflected image of
-    // the studio's wide front strip lands as a horizontal band that sweeps up
-    // the plate — the way a meter lens behaves — rather than as a round blob.
-    p.setZ(i, bulge * (1 - v * v) * (1 - 0.28 * u * u));
-  }
-  g.computeVertexNormals();
-  const m = mats().glass.clone();
-  m.color.setHex(0x04060a);
-  m.transparent = true;
-  // The reflection must land as a soft mid-grey band with a rolloff, not a
-  // white veil. Any higher and the plate reads as fogged.
-  // A flatter, rougher panel spreads the strip's image into a broad sweep
-  // instead of concentrating it into a hot bar over the data.
-  m.opacity = 0.10;
-  m.depthWrite = false;
-  m.roughness = 0.26;
-  m.clearcoatRoughness = 0.15;
-  m.envMapIntensity = 1.30;
-  const mesh = new THREE.Mesh(g, m);
-  mesh.renderOrder = 92;
-  return mesh;
-}
-
-/**
- * A luminance ramp across the plate.
- *
- * The card is a flat 0x080a0d, and a flat value is the thing that most reliably
- * says "compositing layer" rather than "object in this room" — a black lacquer
- * panel under a wide softbox has a long unbroken gradient down its face, not one
- * value. This is a very soft off-centre wash, up and camera-left toward the key,
- * laid under the cover glass so the glass's own reflection band rides on top of
- * it rather than on top of nothing.
- */
-function plateWash(w, h) {
-  const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(w * 1.5, h * 2.0),
+  /**
+   * SMOKED FILTER. The plate is a lit dielectric, and with the widened emitters
+   * a plate turned toward the key returns enough of it to sit at about 60 %
+   * luminance — a light grey rectangle with no contrast left for the data on it.
+   * A real instrument face solves this the same way: a smoked filter under the
+   * cover glass, which halves the substrate without touching what is drawn on
+   * top of it. This sits between the plate and the traces, so the parcels keep
+   * their full value and the plate goes back to being a dark plate.
+   */
+  const smoke = new THREE.Mesh(
+    new THREE.PlaneGeometry(w + 0.040, h + 0.040),
     new THREE.MeshBasicMaterial({
-      map: radialSprite(256, 'rgba(255,255,255,1)', 'rgba(255,255,255,0)', 1.5),
-      color: 0x2b3a4b, transparent: true, opacity: 0.55, depthWrite: false,
-      blending: THREE.AdditiveBlending, toneMapped: false,
+      color: 0x05070a, transparent: true, opacity: 0.62, depthWrite: false,
     }));
-  m.position.set(-w * 0.16, h * 0.30, 0.0006);
-  m.renderOrder = 4;
-  return m;
-}
-
-/**
- * The plate's rim. A card with a single even 1 px border is a pasted PNG: real
- * hardware has an edge with thickness, and an edge with thickness is lit — the
- * top catches the strip, the bottom returns almost nothing, and the two sides
- * fall between. Four segments at four values do that for the cost of four lines,
- * plus an inner hairline a few millimetres in to read as a bezel step.
- */
-function bezel(group, w, h, order = 94) {
-  const X = w / 2, Y = h / 2;
-  const seg = [
-    [[-X, Y], [X, Y], 0.42],        // top: facing the front strip
-    [[-X, -Y], [-X, Y], 0.24],      // left: the key side
-    [[X, -Y], [X, Y], 0.13],
-    [[-X, -Y], [X, -Y], 0.10],      // bottom: nothing above it to reflect
-  ];
-  for (const [a, b, op] of seg) {
-    const e = poly([[a[0], a[1], 0.014], [b[0], b[1], 0.014]], 0xaebac8, 1.2, { opacity: op });
-    e.renderOrder = order;
-    group.add(e);
-  }
-  const i = 0.010;
-  const inner = poly([[-X + i, Y - i, 0.013], [X - i, Y - i, 0.013]], 0x8d98a6, 1.0,
-    { opacity: 0.13 });
-  inner.renderOrder = order;
-  group.add(inner);
+  smoke.position.z = 0.0008;
+  smoke.renderOrder = 4;
+  g.add(smoke);
+  return g;
 }
 
 /**
@@ -335,25 +275,69 @@ function poly(pts, color, width, opts = {}) {
   return t;
 }
 
+// ---------------------------------------------------------------------------
+// THE PATHS, AND HOW THEY ARE DRAWN
+// ---------------------------------------------------------------------------
 /**
- * A ray drawn as a beam, graded along its length. A ray of one constant value
- * from end to end is the overlay-demo tell: it prints over everything it
- * crosses with no sense of distance. Splitting it into short segments whose
- * opacity ramps toward the listener gives the ray an aerial perspective, so the
- * far end — which is the end that passes in front of the rack — sits back where
- * it belongs. Each segment is a wide dim underlay plus a narrow core, because a
- * single-width screen-space line has a bimodal profile, full value or nothing.
+ * A ray is carrying 1/r pressure, so it must not be a line of one value from
+ * end to end: that is the tractor-beam tell. Opacity here follows the pressure
+ * the ray is actually carrying,
+ *
+ *     p(s) ∝ 1/s      referenced to the 1 m point,
+ *
+ * so the beam is at full weight leaving the drive unit and has fallen to 1/4.83
+ * — 13.7 dB — by the time it reaches the seat. The folded path takes a further
+ * ×0.90 at the bounce, which is the same pressure reflection coefficient the
+ * comb figures are computed from, so the amber ray visibly steps down where it
+ * touches the floor.
  */
-function gradBeam(group, a, b, color, coreW, op0, op1, segs = 5) {
-  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
-  const P = (u) => A.clone().lerp(B, DSP.clamp(u, 0, 1));
+const OP_REF = 0.62;                       // opacity at the 1 m reference point
+const beamOp = (s, k = 1) => OP_REF * k * (1 / Math.max(1, s));
+
+/** Cumulative arc length along a polyline path. */
+function arcs(pts) {
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + pts[i].distanceTo(pts[i - 1]));
+  return cum;
+}
+/** Point at arc length s along a polyline. */
+function pointAt(pts, cum, s) {
+  const t = DSP.clamp(s, 0, cum[cum.length - 1]);
+  let i = 1;
+  while (i < cum.length - 1 && cum[i] < t) i++;
+  const f = (t - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
+  return pts[i - 1].clone().lerp(pts[i], f);
+}
+
+/**
+ * Draw a path as a chain of short hairlines whose opacity is the 1/r law
+ * sampled at each segment's midpoint. `refl` is the running pressure
+ * coefficient (1 before the bounce, 0.90 after it).
+ */
+function rayPath(group, pts, color, coreW, opts = {}) {
+  /**
+   * `gain` is a LUMINANCE match, not a level: PAL.am at the same alpha reads
+   * about 20 % brighter than PAL.cy, and the amber path must not look louder
+   * than the direct one when it is in fact 0.83 of the pressure. The physics is
+   * carried entirely by `refl` and the 1/r law.
+   */
+  const { segs = 9, dashed = false, halo = true, refl = () => 1, gain = 1 } = opts;
+  const cum = arcs(pts);
+  const L = cum[cum.length - 1];
   for (let i = 0; i < segs; i++) {
-    const p0 = P(i / segs - 0.005), p1 = P((i + 1) / segs + 0.005);
-    const op = op0 + (op1 - op0) * ((i + 0.5) / segs);
-    const pts = [[p0.x, p0.y, p0.z], [p1.x, p1.y, p1.z]];
-    group.add(poly(pts, color, coreW * 3.6, { opacity: op * 0.16, renderOrder: 9 }));
-    group.add(poly(pts, color, coreW, { opacity: op, renderOrder: 11 }));
+    const s0 = (i / segs) * L, s1 = ((i + 1) / segs) * L;
+    const sm = (s0 + s1) / 2;
+    const a = pointAt(pts, cum, Math.max(0, s0 - 0.004));
+    const b = pointAt(pts, cum, Math.min(L, s1 + 0.004));
+    const op = beamOp(sm, refl(sm)) * gain;
+    const p = [[a.x, a.y, a.z], [b.x, b.y, b.z]];
+    if (halo) group.add(poly(p, color, coreW * 3.4, { opacity: op * 0.13, renderOrder: 9 }));
+    group.add(poly(p, color, coreW, {
+      opacity: op, renderOrder: 11, dashed,
+      dashSize: 0.075, gapSize: 0.055,
+    }));
   }
+  return { pts, cum, L };
 }
 
 /** A circle lying in the world XZ plane at height y. */
@@ -364,10 +348,10 @@ function floorRing(cx, cz, r, y, colour, width, opacity, n = 84) {
 }
 
 /**
- * A pool of light lying on the polished floor. The floor now carries a real
- * planar reflection, and a hard-edged additive ring on a near-black plane has
- * nothing between the ring and the black. This puts a wide, very soft gradient
- * under the bounce so there is a mid-grey ramp for the reflection to work on.
+ * A pool of light lying on the polished floor. The floor carries a real planar
+ * reflection, and a hard-edged additive ring on a near-black plane has nothing
+ * between the ring and the black. This puts a wide, very soft gradient under the
+ * bounce so there is a mid-grey ramp for the reflection to work on.
  */
 function floorPool(x, z, r, colour, opacity) {
   const m = new THREE.Mesh(
@@ -384,22 +368,29 @@ function floorPool(x, z, r, colour, opacity) {
 }
 
 // ---------------------------------------------------------------------------
-// THE SHOT, and a way of placing plates inside it.
+// THE SHOT, and a way of placing the plate inside it.
 // ---------------------------------------------------------------------------
 /**
- * Framed on the listening geometry. The camera sits a little left of the median
- * plane and a little high, which does three things the previous framing did
- * not: the right loudspeaker lands wholly inside the safe box instead of being
- * sliced by the panel edge; the listening chair drops to the very bottom of the
- * frame so its headrest reads as foreground rather than as a shape cut in half;
- * and the ear marker separates in silhouette from the rack and the monoblocks
- * behind it, so it can be read as being at the seat.
+ * The previous framing put a 0.86 m sphere 1.22 m up and 0.2 m in front of the
+ * seat, which framed the two diagram plates and squeezed the entire system into
+ * a 200 px strip along the bottom edge. It also sat almost on the median plane,
+ * where the 4.830 m direct path runs straight away from the lens and collapses
+ * to a couple of hundred pixels.
  *
- * The set's key and its warm floor pool are both built for a frontal camera;
- * swinging round to the side turns that pool into a hard-edged wash and rakes a
- * blown specular off the right cabinet, so the axis stays near the median.
+ * This shot swings 23° to the left of the median plane and drops the lens to
+ * 1.93 m so that:
+ *   · the direct path lies ACROSS the frame — 530 px of the 960 px clear band —
+ *     with the loudspeaker at the left and the seat at the right;
+ *   · the floor bounce sits between them at the bottom of the triangle, on the
+ *     polished floor where the planar reflection can work on it;
+ *   · the lens is low enough that the reflected cabinets and the reflected
+ *     bounce fill the lower third, so the picture is not one thin band.
+ *
+ * 23° is as far round as the set goes: at 36° the camera looks past the top
+ * corner of the cyclorama and the frame gains a hard black wedge and a visible
+ * seam where the lit sweep ends.
  */
-const SHOT = frameShot([-0.42, 1.22, 0.20], 0.860, { fill: 0.62, az: -0.06, el: 0.1463, fov: 32 });
+const SHOT = frameShot([-0.72, 1.06, -0.75], 1.52, { fill: 0.60, az: -0.40, el: 0.115, fov: 35 });
 
 const CAM_P = V(...SHOT.position);
 const CAM_F = V(...SHOT.target).sub(CAM_P).normalize();
@@ -407,10 +398,10 @@ const CAM_R = CAM_F.clone().cross(V(0, 1, 0)).normalize();
 const CAM_U = CAM_R.clone().cross(CAM_F).normalize();
 const D2R = Math.PI / 180;
 /**
- * Place a plate at a chosen angle off the lens axis. The Director's shift lens
+ * Place the plate at a chosen angle off the lens axis. The Director's shift lens
  * puts the axis at the centre of the clear band (screen x 670 of 1600), so at
- * fov 32 the SAFE BOX runs from −16.3° to +14.5° horizontally and +13.2° to
- * −14.0° vertically. Every plate edge below is inside that.
+ * fov 35 the SAFE BOX runs from −17.7° to +15.7° horizontally and +14.4° to
+ * −15.3° vertically. The plate's edges are inside that.
  */
 const place = (hDeg, vDeg, dist) => CAM_P.clone().addScaledVector(
   CAM_F.clone()
@@ -418,19 +409,35 @@ const place = (hDeg, vDeg, dist) => CAM_P.clone().addScaledVector(
     .addScaledVector(CAM_U, Math.tan(vDeg * D2R))
     .normalize(), dist);
 
-/** Both plates hang in the band above the loudspeakers, at the same depth to
- *  within 100 mm, so they read as two pages of one instrument rather than as
- *  cards scattered through the room. */
-const D_AIR = 3.80, D_COMB = 3.90;
-const P_AIR = place(-6.2, 6.3, D_AIR);
-const P_COMB = place(8.8, 6.6, D_COMB);
+/** The plate hangs in the empty upper-left band, clear of every silhouette. */
+const D_AIR = 4.60;
+const P_AIR = place(-9.66, 9.13, D_AIR);
 
 /**
- * Screen scale of the parcel plate at the delivered 1600 × 1000 basis, so the
- * claim "2ξ is under a thousandth of a pixel" is measured rather than asserted.
+ * Screen scale of the plate at the delivered 1600 × 1000 basis, so the claim
+ * "2ξ is under a thousandth of a pixel" is measured rather than asserted.
  */
 const PX_PER_M = 1600 / (2 * D_AIR * Math.tan((SHOT.fov * Math.PI) / 360) * 1.6);
-const XI_PX = 2 * XI_PK * PX_PER_M;                          // 5.0 × 10⁻⁴ px
+const XI_PX = 2 * XI_PK * PX_PER_M;                          // 3.9 × 10⁻⁴ px
+
+// ---------------------------------------------------------------------------
+// THE WAVEFRONT
+// ---------------------------------------------------------------------------
+/**
+ * A short bright segment travelling each path at the true 343.2 m/s, on the
+ * stage's own 1 : 500 clock. This is NOT a dot racing along a wire: it is the
+ * disturbance, at its real speed, and the plate above it shows — at ×1 — that
+ * the air it passes through does not go with it. That contrast is the chapter.
+ *
+ * `PIP_PHASE` is a phase offset on the launch cycle, chosen so the delivered
+ * still lands with the direct wavefront a few centimetres short of the seat and
+ * the floor wavefront still 0.6 m behind it: one picture, both arrivals, the
+ * 1.208 ms gap visible as a gap. The relationship between the two is correct at
+ * every instant; the offset only chooses which instant the poster frame shows.
+ */
+const LAUNCH = 0.0220;             // s of simulated time between launches
+const PIP_PHASE = 0.00830;
+const PIP_LEN = 0.46;              // m of path lit at once
 
 export default {
   id: 'air',
@@ -439,7 +446,8 @@ export default {
   kicker: 'Air & ear',          // set with textContent — a literal ampersand
   standfirst: 'The air never travels. Only the news does.',
   shot: SHOT,
-  /** One clock for the whole stage: 1 : 500. A 1 kHz cycle takes 0.5 s on screen. */
+  /** One clock for the whole stage: 1 : 500. A 1 kHz cycle takes 0.5 s on screen,
+   *  and the 14.07 ms flight to the seat takes 7.0 s. */
   timeScale: 0.002,
 
   build(ctx) {
@@ -449,87 +457,94 @@ export default {
     const spr = radialSprite(128, 'rgba(255,255,255,1)', 'rgba(255,255,255,0)', 1.7);
 
     // =====================================================================
-    // 1 · THE PATH — one direct ray, one floor bounce, one ear
+    // 1 · THE PATHS — one direct ray, one floor bounce, one ear
     // =====================================================================
     const field = new THREE.Group();
     overlay.add(field);
 
-    // the left channel: the ray this chapter follows
-    gradBeam(field, [SL.x, SL.y, SL.z], [EAR.x, EAR.y, EAR.z], PAL.cy, 2.0, 0.24, 0.90);
-    // the right channel is drawn too, because the level at the seat is the
-    // correlated PAIR — but it is held back so the frame has one subject
-    gradBeam(field, [SR.x, SR.y, SR.z], [EAR.x, EAR.y, EAR.z], PAL.cy, 1.1, 0.06, 0.22, 3);
-    // the folded path: down to the floor and back up
-    gradBeam(field, [SL.x, SL.y, SL.z], [B_FLOOR.x, 0.006, B_FLOOR.z], PAL.am, 1.8, 0.28, 0.78, 4);
-    gradBeam(field, [B_FLOOR.x, 0.006, B_FLOOR.z], [EAR.x, EAR.y, EAR.z], PAL.am, 1.8, 0.78, 0.88, 3);
+    // The left channel: the ray this chapter follows.
+    S.pathD = rayPath(field, [SL, EAR], PAL.cy, 1.4);
+    /**
+     * The right channel is drawn because the level at the seat is the correlated
+     * PAIR, +6.02 dB. It is dashed rather than dimmed: it carries exactly the
+     * same pressure as the left, and drawing it at a lower value would say
+     * otherwise. Dashing says "same thing, not the subject".
+     */
+    rayPath(field, [SR, EAR], PAL.cy, 0.9, { segs: 6, dashed: true, halo: false });
+    // The folded path: down to the floor and back up, ×0.90 after the bounce.
+    S.pathF = rayPath(field, [SL, B_FLOOR, EAR], PAL.am, 1.3, {
+      segs: 10, gain: 0.82, refl: (s) => (s > SL.distanceTo(B_FLOOR) ? R_HARD : 1),
+    });
 
+    // The drive units: a small open marker, not a light source.
     for (const src of [SL, SR]) {
-      const g = DIAG.glow(PAL.cy, 0.085, src === SL ? 0.7 : 0.32, spr);
+      const g = DIAG.glow(PAL.cy, 0.052, src === SL ? 0.42 : 0.20, spr);
       g.position.copy(src);
       field.add(g);
     }
 
-    // the bounce point on the polished floor — the floor mirrors it back
-    field.add(floorPool(B_FLOOR.x, B_FLOOR.z, 0.60, PAL.am, 0.085));
-    field.add(floorRing(B_FLOOR.x, B_FLOOR.z, 0.115, 0.010, PAL.am, 1.7, 0.72));
-    field.add(floorRing(B_FLOOR.x, B_FLOOR.z, 0.185, 0.010, PAL.am, 1.0, 0.28));
-    {
-      const g = DIAG.glow(PAL.am, 0.115, 0.62, spr);
-      g.position.set(B_FLOOR.x, 0.014, B_FLOOR.z);
-      field.add(g);
-    }
+    // The bounce point on the polished floor — the floor mirrors it back.
+    field.add(floorPool(B_FLOOR.x, B_FLOOR.z, 0.70, PAL.am, 0.070));
+    field.add(floorRing(B_FLOOR.x, B_FLOOR.z, 0.105, 0.010, PAL.am, 1.5, 0.60));
+    field.add(floorRing(B_FLOOR.x, B_FLOOR.z, 0.168, 0.010, PAL.am, 0.9, 0.20));
 
-    // the ear — the one place the eye should land
-    {
-      // Small and well under clipping. A hot additive sprite here reads as a
-      // blown highlight, not as a marker, and the piece has been pulled up on
-      // exactly that: the ring is the marker, the glow only seats it.
-      const g = DIAG.glow(PAL.cy, 0.078, 0.50, spr);
-      g.position.copy(EAR);
-      field.add(g);
-      S.earRing = new DIAG.Trace(56, PAL.cy, 1.6, { opacity: 0.9, renderOrder: 13 });
-      S.earRing2 = new DIAG.Trace(56, PAL.cy, 1.0, { opacity: 0.34, renderOrder: 13 });
-      field.add(S.earRing, S.earRing2);
+    // ---- the travelling wavefronts ---------------------------------------
+    S.pipD = poly([[0, 0, 0], [0, 0, 0]], PAL.cy, 2.4, { opacity: 0.92, renderOrder: 15 });
+    S.pipDh = poly([[0, 0, 0], [0, 0, 0]], PAL.cy, 7.0, { opacity: 0.13, renderOrder: 14 });
+    S.pipF = poly([[0, 0, 0], [0, 0, 0]], PAL.am, 2.0, { opacity: 0.80, renderOrder: 15 });
+    S.pipFh = poly([[0, 0, 0], [0, 0, 0]], PAL.am, 6.0, { opacity: 0.11, renderOrder: 14 });
+    field.add(S.pipD, S.pipDh, S.pipF, S.pipFh);
 
-      /**
-       * The ear is 4.83 m from the loudspeaker and the rack is 5.4 m beyond it,
-       * so without a depth cue the marker floats and can be read as sitting on
-       * the equipment. A plumb line from the marker down into the headrest of
-       * the chair directly below it fixes it to the seat. The headrest is
-       * 0.32 m nearer the camera than the line, so the line is depth-tested
-       * away where it reaches the crown: it ends by going into the seat.
-       */
-      field.add(poly([[EAR.x, EAR.y - 0.10, EAR.z], [EAR.x, 0.22, EAR.z]], PAL.cy, 1.2,
-        { opacity: 0.42, dashed: true, dashSize: 0.030, gapSize: 0.024, renderOrder: 12 }));
-    }
+    // ---- the ear ----------------------------------------------------------
+    /**
+     * A flat marker, not a glowing terminal ball with concentric rings: one thin
+     * ring in the image plane and two short ticks. The plumb line below it lands
+     * in the headrest of the chair directly beneath, which is what fixes the
+     * marker to the seat rather than to the rack five metres behind it.
+     */
+    S.earRing = new DIAG.Trace(56, PAL.cy, 1.4, { opacity: 0.88, renderOrder: 13 });
+    field.add(S.earRing);
+    S.earTick = [
+      new DIAG.Trace(2, PAL.cy, 1.4, { opacity: 0.7, renderOrder: 13 }),
+      new DIAG.Trace(2, PAL.cy, 1.4, { opacity: 0.7, renderOrder: 13 }),
+    ];
+    field.add(...S.earTick);
+    field.add(poly([[EAR.x, EAR.y - 0.085, EAR.z], [EAR.x, 0.22, EAR.z]], PAL.cy, 1.0,
+      { opacity: 0.34, dashed: true, dashSize: 0.030, gapSize: 0.024, renderOrder: 12 }));
 
     // =====================================================================
-    // 2 · THE PARCEL WINDOW — air is not a conveyor
+    // 2 · THE PARCEL WINDOW — the one plate
     // =====================================================================
-    /** Sized and placed so the plate crops only the very top corner of the left
-     *  cabinet and leaves the loudspeaker's acoustic centre — where the cyan ray
-     *  starts — clear below it. A ray that appears to leave the bottom edge of a
-     *  diagram card instead of a driver is the whole illusion gone. */
-    const CW = 0.94, CH = 0.56;
+    const CW = 0.94, CH = 0.54;
     const air = card(CW, CH);
-    air.add(plateWash(CW, CH));
     air.position.copy(P_AIR);
-    air.userData.yaw = 0.155;                 // off the lens axis: see update()
-    air.userData.pitch = -0.045;
+    air.userData.yaw = 0.150;                 // off the lens axis: see update()
+    air.userData.pitch = -0.048;
     overlay.add(air);
     S.air = air;
 
+    /**
+     * The window's content runs from the crest arrow at +0.241 down to the λ
+     * arrow's tick at −0.216, so its own centre is 0.0125 above the plate's.
+     * Everything below hangs off `wnd`, which carries that offset, and the
+     * margins above and below the drawing are then equal. Left as-is the plate
+     * has a visibly deeper empty band along its bottom edge.
+     */
+    const wnd = new THREE.Group();
+    wnd.position.y = -0.0125;
+    air.add(wnd);
+
     S.swarm = new DIAG.Swarm(COLS * (ROWS_M.length + ROWS_T.length),
       { color: PAL.cy, size: 0.0092 });
-    air.add(S.swarm);
+    wnd.add(S.swarm);
 
     // the compression maximum, travelling at ω/k = c through both blocks
     S.crest = poly([[0, Y_BOT - 0.024, 0.003], [0, Y_TOP + 0.030, 0.003]], PAL.cy, 1.3,
       { opacity: 0.42, dashed: true, dashSize: 0.014, gapSize: 0.011 });
-    air.add(S.crest);
+    wnd.add(S.crest);
     S.crestTip = poly([[-0.013, Y_TOP + 0.030, 0.003], [0, Y_TOP + 0.047, 0.003],
       [0.013, Y_TOP + 0.030, 0.003]], PAL.cy, 1.9, { opacity: 0.8 });
-    air.add(S.crestTip);
+    wnd.add(S.crestTip);
 
     /**
      * ABOVE THE RULE, with the block it belongs to: the whole territory of one
@@ -537,136 +552,83 @@ export default {
      * same ×25 000 as the parcels immediately above it. A dashed leader ties it
      * to the parcel it measures.
      */
-    air.add(poly([[-XI_DRAWN, Y_TRK, 0.002], [XI_DRAWN, Y_TRK, 0.002]], PAL.am, 3.0,
+    wnd.add(poly([[-XI_DRAWN, Y_TRK, 0.002], [XI_DRAWN, Y_TRK, 0.002]], PAL.am, 3.0,
       { opacity: 0.92 }));
     for (const sx of [-1, 1]) {
-      air.add(poly([[sx * XI_DRAWN, Y_TRK - 0.015, 0.002], [sx * XI_DRAWN, Y_TRK + 0.015, 0.002]],
+      wnd.add(poly([[sx * XI_DRAWN, Y_TRK - 0.015, 0.002], [sx * XI_DRAWN, Y_TRK + 0.015, 0.002]],
         PAL.am, 1.6, { opacity: 0.85 }));
     }
     S.trkLead = poly([[0, ROWS_M[ROWS_M.length - 1] - 0.006, 0.002], [0, Y_TRK + 0.016, 0.002]],
       PAL.am, 1.0, { opacity: 0.34, dashed: true, dashSize: 0.008, gapSize: 0.007 });
-    air.add(S.trkLead);
+    wnd.add(S.trkLead);
     // small, because the bar it rides on is only 27 mm of a 343 mm wave and a
     // fat dot swallows the very measurement it is supposed to be marking
     S.trkDot = DIAG.glow(PAL.am, 0.013, 0.9, spr);
     S.trkDot.position.set(0, Y_TRK, 0.004);
-    air.add(S.trkDot);
+    wnd.add(S.trkDot);
 
     // the rule between the magnified block and the ×1 block
-    air.add(poly([[-SPAN / 2 - 0.020, Y_DIV, 0.001], [SPAN / 2 + 0.020, Y_DIV, 0.001]],
+    wnd.add(poly([[-SPAN / 2 - 0.020, Y_DIV, 0.001], [SPAN / 2 + 0.020, Y_DIV, 0.001]],
       PAL.ink3, 1.0, { opacity: 0.34, dashed: true, dashSize: 0.018, gapSize: 0.015 }));
 
     /**
      * BELOW THE RULE, everything at ×1: two rows of parcels whose real ±0.546 µm
-     * is 5×10⁻⁷ of a column spacing and therefore invisible, one wavelength drawn
+     * is 2×10⁻⁵ of the 26.4 mm column spacing and therefore invisible, one λ drawn
      * full size, and the parcel's true territory marked — not drawn — by a
-     * hairline at the centre of it. 2ξ is λ/314 000, i.e. 5×10⁻⁴ px on this
+     * hairline at the centre of it. 2ξ is λ/314 000, i.e. 4×10⁻⁴ px on this
      * plate, so a mark is the only honest way to put it on the page at all.
      */
-    air.add(noHook(DIAG.dimension(
+    wnd.add(noHook(DIAG.dimension(
       [-LAM_REF / 2, Y_LAM, 0.002], [LAM_REF / 2, Y_LAM, 0.002],
       { color: PAL.ink3, width: 1.3, head: 0.018 })));
-    air.add(poly([[0, Y_LAM - 0.016, 0.003], [0, Y_LAM + 0.016, 0.003]], PAL.am, 1.4,
+    wnd.add(poly([[0, Y_LAM - 0.016, 0.003], [0, Y_LAM + 0.016, 0.003]], PAL.am, 1.4,
       { opacity: 0.85 }));
 
-    const aTitle = anchor(air, -CW / 2, CH / 2);
-    const aTrue = anchor(air, -CW / 2, -CH / 2);
-
-    // above 40, which is where the loudspeaker chapter's own cover glass sits
-    liftOrder(air, 44);
-    air.add(coverGlass(CW + 0.040, CH + 0.040));
-    bezel(air, CW + 0.040, CH + 0.036);
-
-    // =====================================================================
-    // 3 · WHAT THE FLOOR DOES — the comb
-    // =====================================================================
-    const KW = 0.64, KH = 0.42;
-    const comb = card(KW, KH);
-    comb.add(plateWash(KW, KH));
-    comb.position.copy(P_COMB);
-    comb.userData.yaw = -0.150;
-    comb.userData.pitch = -0.045;
-    overlay.add(comb);
-    S.comb = comb;
+    const aTitle = anchor(air, CW / 2, CH / 2);
 
     /**
-     * The comb runs to 20 kHz, but its teeth are 1/Δt = 828 Hz apart, so a
-     * 300-pixel plot taken that far turns the top two octaves into a solid
-     * block of ink. That is an aliasing artefact, not a measurement. The axis
-     * stops at 6 kHz, where seven teeth are still individually resolvable, and
-     * the label states the period so the reader can continue it.
+     * THE SPECULAR LAYER. `GEO.instrumentGlass` is crowned, so the studio's wide
+     * front strip lands on it as a soft band that sweeps as the plate turns,
+     * rather than as a rectangle with corners; its reflectivity is 0.34, which is
+     * a coated cover glass returning ~1.7 % at normal incidence rather than the
+     * 4 % of bare glass. It sits 3 mm in front of the emissive traces. This
+     * replaces a hand-rolled near-mirror that returned the whole softbox.
      */
-    const g = new DIAG.Graph({
-      w: 0.50, h: 0.25, xLog: true, xRange: [80, 6000], yRange: [-20, 8],
-      yTicks: [-20, -10, 0, 8], zeroLine: 0,
-    });
-    g.position.set(-0.235, -0.118, 0.001);
-    comb.add(g);
-    g.addTrace((f) => combDb(f), { color: PAL.cy, width: 1.9, n: 1600 });
-    g.addMarker(COMB_NULL_F, { color: PAL.am, width: 1.3, opacity: 0.8 });
-    g.addMarker(COMB_PEAK_F, { color: PAL.am, width: 1.0, opacity: 0.45 });
-    g.addDot(PAL.am, 0.007).userData.setData(COMB_NULL_F, COMB_NULL_DB);
-    S.graph = g;
-
-    const kTitle = anchor(comb, -KW / 2, KH / 2);
-
-    liftOrder(comb, 56);
-    comb.add(coverGlass(KW + 0.040, KH + 0.040, 0.022));
-    bezel(comb, KW + 0.040, KH + 0.036);
+    liftOrder(air, 44);
+    const glass = GEO.instrumentGlass(CW + 0.030, CH + 0.030);
+    glass.position.z = 0.006;
+    glass.renderOrder = 92;
+    air.add(glass);
 
     // =====================================================================
-    // LABELS — five, plus five axis numerals
+    // LABELS — three, and no more
     // =====================================================================
     S.lab = {};
     S.lab.air = L.add(aTitle, {
       kicker: 'Air parcels · 1 kHz · 94 dB',
-      text: br('x is ×1; above the rule ξ is ×' + MAG_S + ', so the crest gains '
-        + fmt(DRAWN_RATIO, 0) + ' : 1 on the parcel, not '
-        + fmt(SPEED_RATIO / 1e5, 2) + '×10⁵'),
+      text: br('above the rule, ξ ×' + MAG_S + ': the crest gains '
+        + fmt(DRAWN_RATIO, 0) + ' : 1, not ' + fmt(SPEED_RATIO / 1e5, 2)
+        + '×10⁵<br>below it ×1: λ ' + fmt(LAM_REF * 1000, 1) + ' mm drawn; 2ξ = λ/'
+        + (Math.round(LAM_XI_RATIO / 1000) * 1000).toLocaleString('en-GB')
+        + ' = ' + XI_PX.toFixed(4) + ' px, marked'),
       value: 'ξ = +0.000 of ' + fmt(XI_PK * 1e6, 3) + ' µm peak',
-      cls: 'acc', occlude: false, priority: 5, offset: [186, -50],
-    });
-    S.lab.tru = L.add(aTrue, {
-      kicker: 'Below the rule · ×1 · true scale',
-      text: br('grey arrow λ ' + fmt(LAM_REF * 1000, 1)
-        + ' mm; amber tick 2ξ, marked — not drawn'),
-      value: '2ξ = λ/' + (Math.round(LAM_XI_RATIO / 1000) * 1000).toLocaleString('en-GB')
-        + ' = ' + XI_PX.toFixed(4) + ' px',
-      cls: 'am', occlude: false, priority: 3, offset: [286, 46],
+      cls: 'acc', occlude: false, priority: 5, offset: [160, 40],
     });
     S.lab.seat = L.add(EAR.clone(), {
-      kicker: 'At the seat · ' + fmt(R_DIR, 3) + ' m · direct field',
+      kicker: 'At the seat · ' + fmt(R_DIR, 3) + ' m · wavefront ' + fmt(c, 1) + ' m/s',
       /** The reverberant field lives here rather than in the panel: it belongs
        *  to the seat, and the panel has no room for the Sabine sentence. */
-      text: br(fmt(SENS_1W, 1) + ' dB/1 W/1 m · ' + PEAK_W + ' W → '
-        + fmt(SPL_1M, 1) + ' dB at 1 m → ' + fmt(SPL_SEAT_1, 1) + ' dB here<br>'
-        + '+' + fmt(REV_Q8, 1) + '–' + fmt(REV_Q2, 1) + ' dB of room past the '
-        + fmt(RC_Q2, 1) + ' m critical distance'),
+      text: br(PEAK_W + ' W → ' + fmt(SPL_1M, 1) + ' dB at 1 m → '
+        + fmt(SPL_SEAT_1, 1) + ' dB here<br>+' + fmt(REV_Q8, 1) + '–'
+        + fmt(REV_Q2, 1) + ' dB of room (r_c ' + fmt(RC_Q2, 1) + ' m)'),
       value: fmt(SPL_SEAT, 1) + ' dB SPL, the pair · ' + fmt(T_DIR * 1000, 2) + ' ms',
-      cls: 'acc', priority: 4, offset: [-122, 118],
+      cls: 'acc', priority: 4, offset: [-96, -126],
     });
     S.lab.floor = L.add(B_FLOOR.clone().setY(0.02), {
-      kicker: 'Floor bounce · image source ' + fmt(AC_Y, 3) + ' m down',
+      kicker: 'Floor bounce · image source ' + fmt(AC_Y, 3) + ' m down · ρ ' + fmt(R_HARD, 2),
       value: '+' + fmt(R_FLOOR - R_DIR, 3) + ' m · +' + fmt(DT_FLOOR * 1000, 3)
-        + ' ms · λ/2 at ' + fmt(COMB_NULL_F, 0) + ' Hz',
-      cls: 'am', priority: 2, offset: [-152, 66],
-    });
-    S.lab.comb = L.add(kTitle, {
-      kicker: 'Direct + floor · dB re direct alone',
-      text: br('hard floor, pressure coefficient ' + fmt(R_HARD, 2)),
-      value: fmt(COMB_NULL_DB, 1) + ' dB at ' + fmt(COMB_NULL_F, 0)
-        + ' Hz · +' + fmt(COMB_PEAK_DB, 1) + ' at ' + fmt(COMB_PEAK_F, 0),
-      cls: 'am', occlude: false, priority: 3, offset: [150, -44],
-    });
-
-    // 200 Hz rather than 100: at xRange[0] = 80 the 100 Hz tick sits on the
-    // y-axis and its numeral collides with the −15 dB one.
-    g.tickLabels(L, {
-      xVals: [200, 1000, 5000],
-      yVals: [-15, 0],
-      xFmt: (v) => (v >= 1000 ? v / 1000 + ' k' : String(v)),
-      yFmt: (v) => (v > 0 ? '+' + v : String(v)),
-      xOffset: [0, 14], yOffset: [-23, 0],
+        + ' ms · ' + fmt(COMB_NULL_DB, 1) + ' dB at ' + fmt(COMB_NULL_F, 0) + ' Hz',
+      cls: 'am', priority: 3, offset: [-40, 104],
     });
 
     S.overlay = overlay;
@@ -690,8 +652,8 @@ export default {
         const x0 = (j - half) * SPACING;
         const arg = K_REF * x0 - ph;
         // Above the rule: displacement magnified ×MAG. Below it: the real
-        // ±0.546 µm, which is 5×10⁻⁷ of a spacing and therefore invisible —
-        // that is the point of drawing it.
+        // ±0.546 µm, which is 2×10⁻⁵ of a 26.4 mm spacing and therefore
+        // invisible — that is the point of drawing it.
         const disp = (mag ? XI_DRAWN : XI_PK) * Math.cos(arg);
         // Condensation is −∂ξ/∂x ∝ sin(arg). Size and colour carry it
         // normalised, so both blocks read as the same wave: below the rule the
@@ -723,6 +685,29 @@ export default {
       S.trkLead.write((i) => [xt, i === 0 ? ROWS_M[ROWS_M.length - 1] - 0.006 : Y_TRK + 0.013, 0.002]);
     }
 
+    // ---- the wavefronts ---------------------------------------------------
+    // s = c·t_since_launch, in metres of path. Both launch together; the direct
+    // arrives at 14.07 ms and the folded one 1.208 ms later.
+    const tf = ((t + PIP_PHASE) % LAUNCH + LAUNCH) % LAUNCH;
+    const sWave = c * tf;
+    const pip = (core, halo, path, refl) => {
+      const s1 = Math.min(sWave, path.L);
+      const s0 = Math.max(0, s1 - PIP_LEN);
+      const a = pointAt(path.pts, path.cum, s0), b = pointAt(path.pts, path.cum, s1);
+      const live = sWave > 0.02 && sWave < path.L + PIP_LEN * 0.6;
+      core.visible = halo.visible = live;
+      if (!live) return;
+      const k = beamOp(Math.max(1, s1), refl(s1)) / OP_REF;      // the 1/r law again
+      core.material.opacity = core._baseOpacity * DSP.clamp(0.30 + 0.70 * k, 0, 1);
+      halo.material.opacity = halo._baseOpacity * DSP.clamp(0.30 + 0.70 * k, 0, 1);
+      for (const tr of [core, halo]) tr.write((i) => (i === 0 ? [a.x, a.y, a.z] : [b.x, b.y, b.z]));
+    };
+    if (S.pathD) {
+      pip(S.pipD, S.pipDh, S.pathD, () => 1);
+      pip(S.pipF, S.pipFh, S.pathF,
+        (s) => (s > SL.distanceTo(B_FLOOR) ? R_HARD : 1));
+    }
+
     // ---- live state -------------------------------------------------------
     // One instant, one set of numbers. `readouts()` latches this at 10 Hz and
     // writes the world label from the SAME latch, so a still frame can never
@@ -730,91 +715,84 @@ export default {
     S.live = {
       xi: XI_PK * Math.cos(ph),
       u: -U_PK * Math.sin(ph),
-      p: -P_PK * Math.sin(ph),
-      news: c * t,
-      path: 4 * XI_PK * F_REF * t,
+      // Two odometers on ONE clock — the time since this wavefront left the
+      // drive unit — so the footer's two figures divide into PATH_RATIO and the
+      // reader can check the 1.57×10⁵ claim without being told it.
+      news: sWave,
+      path: 4 * XI_PK * F_REF * tf,
     };
     if (!S.shown) { S.shown = S.live; syncLabels(); }
 
     /**
-     * The plates are billboards yawed a few degrees off the lens axis. A card
+     * The plate is a billboard yawed a few degrees off the lens axis. A card
      * exactly square to the lens is always a decal: its cover glass returns one
      * flat value and its edges have no thickness. A small yaw and pitch let the
-     * widened front strip sweep across the convex glass as a band and give the
-     * plate's rim a highlight that changes along its length.
+     * widened front strip sweep across the crowned glass as a band and give the
+     * plate's bezel a highlight that changes along its length.
      */
-    for (const gr of [S.air, S.comb]) {
-      if (!gr) continue;
-      gr.quaternion.copy(ctx.camera.quaternion);
-      gr.rotateY(gr.userData.yaw);
-      gr.rotateX(gr.userData.pitch);
+    if (S.air) {
+      S.air.quaternion.copy(ctx.camera.quaternion);
+      S.air.rotateY(S.air.userData.yaw);
+      S.air.rotateX(S.air.userData.pitch);
     }
-    // the ear marker is a ring drawn in the image plane too
+    // the ear marker is drawn in the image plane too
     if (S.earRing) {
       const cam = ctx.camera;
       const rt = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
       const upv = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-      const ring = (tr, k) => tr.write((i, u) => {
-        const a = u * DSP.TAU;
-        return [
-          EAR.x + (Math.cos(a) * rt.x + Math.sin(a) * upv.x) * k,
-          EAR.y + (Math.cos(a) * rt.y + Math.sin(a) * upv.y) * k,
-          EAR.z + (Math.cos(a) * rt.z + Math.sin(a) * upv.z) * k,
-        ];
-      });
-      ring(S.earRing, 0.098);
-      ring(S.earRing2, 0.155);
+      const at = (dx, dy) => [
+        EAR.x + rt.x * dx + upv.x * dy, EAR.y + rt.y * dx + upv.y * dy,
+        EAR.z + rt.z * dx + upv.z * dy,
+      ];
+      S.earRing.write((i, u) => at(Math.cos(u * DSP.TAU) * 0.062, Math.sin(u * DSP.TAU) * 0.062));
+      S.earTick[0].write((i) => at(i === 0 ? 0.082 : 0.124, 0));
+      S.earTick[1].write((i) => at(i === 0 ? -0.082 : -0.124, 0));
     }
   },
 
   content() {
     return `
 <h3>Air is not a conveyor</h3>
-<p>The woofer does not send you air, it sends a disturbance: every parcel
-oscillates about a fixed point and stays there.</p>
-
 <div class="myth"><span class="lab">Commonly got wrong</span><p>Sound is not moving
-air. A 40 Hz note swings it ±<span class="num">${fmt(XI_SEAT_BASS_PK * 1e6, 1)}</span> µm
-at the seat; the threshold of hearing swings it
-±<span class="num">${(XI_THR_PK * 1e12).toFixed(1)}</span> pm — a tenth of a hydrogen
-atom's ${(BOHR_D * 1e12).toFixed(0)} pm.</p></div>
+air. The woofer sends a disturbance: each parcel oscillates about a fixed point
+and stays there. A 40 Hz note swings it
+±<span class="num">${fmt(XI_SEAT_BASS_PK * 1e6, 1)}</span> µm at the seat; the
+threshold of hearing, ±<span class="num">${(XI_THR_PK * 1e12).toFixed(1)}</span> pm —
+a tenth of a hydrogen atom's ${(BOHR_D * 1e12).toFixed(0)} pm.</p></div>
 
 <div class="eq">1 kHz, 94 dB SPL <span class="c">(p = ${fmt(P_REF_PA, 2)} Pa rms)</span>
 u = p/ρc = ${fmt(P_REF_PA, 2)}/${fmt(Z0, 1)}   = <span class="hl">${fmt(U_REF * 1e3, 2)} mm/s</span>
 ξ = u/ω  = 2.43e−3/${W_REF.toFixed(0)} = <span class="hl">${fmt(XI_REF * 1e6, 3)} µm</span> <span class="c">rms</span>
 c/û = ${fmt(c, 1)}/${fmt(U_PK * 1e3, 2)}e−3  = <span class="hl">${fmt(SPEED_RATIO / 1e5, 2)}×10⁵</span></div>
 
-<p>One wavelength is <span class="num">${fmt(LAM_XI_RATIO / 1e5, 2)}×10⁵</span> parcel
-territories. The footer's odometers run at
-<span class="num">${fmt(PATH_RATIO / 1e5, 2)}×10⁵</span> — mean speed is 2/π of peak.</p>
+<p>A wavefront crosses the room in
+<span class="num">${fmt(T_DIR * 1000, 2)}</span> ms; a parcel covers
+<span class="num">${(4 * XI_PK * F_REF * T_DIR * 1e6).toFixed(1)}</span> µm in the
+same time. The footer's two odometers divide into
+<span class="num">${fmt(PATH_RATIO / 1e5, 2)}×10⁵</span>.</p>
 
 <h3>Level, and the floor</h3>
-<p>Efficiency <span class="num">${fmt(TS.eta0 * 100, 3)}</span>% makes 1 W at 1 m
-<span class="num">${fmt(SENS_1W, 2)}</span> dB; 2.83 V is
-<span class="num">${fmt(P_283, 2)}</span> W into the ${DRIVER.Re} Ω coil and reads
-<span class="num">${fmt(SENS_283, 2)}</span> dB. A ${PEAK_W} W peak —
-<span class="num">${fmt(W_AC, 2)}</span> W of sound,
-<span class="num">${fmt(W_HEAT, 0)}</span> W of heat — gives
-<span class="num">${fmt(SPL_SEAT_1, 1)}</span> dB direct at
-<span class="num">${fmt(R_DIR, 3)}</span> m,
-<span class="num">${fmt(SPL_SEAT, 1)}</span> dB for the pair.</p>
+<div class="eq">1 W/1 m ${fmt(SENS_1W, 2)} dB <span class="c">(η₀ ${fmt(TS.eta0 * 100, 3)} %)</span>
+2.83 V = ${fmt(P_283, 2)} W in ${DRIVER.Re} Ω → ${fmt(SENS_283, 2)} dB
+${PEAK_W} W → ${fmt(W_AC_EACH, 2)} W sound + ${fmt(W_HEAT_EACH, 1)} W heat
+<span class="hl">${fmt(SPL_SEAT_1, 1)} dB</span> at ${fmt(R_DIR, 3)} m · <span class="hl">${fmt(SPL_SEAT, 1)} dB</span> the pair
+floor +${fmt(DT_FLOOR * 1000, 3)} ms ×${fmt(COMB_A, 2)}: ${fmt(COMB_NULL_DB, 1)} @${fmt(COMB_NULL_F, 0)} +${fmt(COMB_PEAK_DB, 1)} @${fmt(COMB_PEAK_F, 0)}</div>
 
-<p>The bounce is that axis mirrored under the floor,
-+<span class="num">${fmt(DT_FLOOR * 1000, 3)}</span> ms late: one event, coloured,
-not an echo.</p>`;
+<p>The floor is that axis mirrored, arriving late: one event, coloured, not an
+echo.</p>`;
   },
 
   readouts() {
     // latch: the footer and the world labels must show the SAME instant
     if (S.live) { S.shown = S.live; syncLabels(); }
-    const v = S.shown || { xi: 0, u: 0, p: 0, news: 0, path: 0 };
+    const v = S.shown || { xi: 0, u: 0, news: 0, path: 0 };
     return [
       { k: 'DIRECT AT SEAT', v: fmt(SPL_SEAT, 1), u: 'dB SPL', cls: 'acc', bar: (SPL_SEAT - 40) / 80 },
+      { k: 'FLOOR NULL', v: fmt(COMB_NULL_DB, 1), u: 'dB @ ' + fmt(COMB_NULL_F, 0) + ' Hz', cls: 'am' },
       { k: 'PARCEL DISPL', v: sgn(v.xi, 3, 1e6), u: 'µm pk', cls: 'acc' },
       { k: 'PARCEL VEL', v: sgn(v.u, 2, 1e3), u: 'mm/s' },
-      { k: 'PARCEL PRESSURE', v: sgn(v.p, 3), u: 'Pa' },
-      { k: 'NEWS TRAVELLED', v: fmt(v.news, 2), u: 'm', cls: 'acc' },
-      { k: 'PARCEL TRAVELLED', v: fmt(v.path * 1e6, 1), u: 'µm' },
+      { k: 'WAVEFRONT', v: fmt(v.news, 2), u: 'm of ' + fmt(R_DIR, 2), cls: 'acc', bar: v.news / R_DIR },
+      { k: 'PARCEL, SAME TIME', v: fmt(v.path * 1e6, 1), u: 'µm' },
     ];
   },
 };

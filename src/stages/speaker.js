@@ -108,7 +108,29 @@ function hw() {
   if (_hw) return _hw;
   const m = mats();
   _hw = {};
-  for (const k of HW_KEYS) if (m[k]) _hw[k] = m[k].clone();
+  for (const k of HW_KEYS) {
+    if (!m[k]) continue;
+    const c = m[k].clone();
+    /*
+     * AND THE CLONE MUST BE RE-OPENED.
+     *
+     * Cloning is only half the defence. Stages are built in order and the app
+     * calls `fadeTree(overlay, 0)` after each one, which writes
+     * `opacity = 0` and `visible = false` straight onto whatever material that
+     * stage's overlay used — including the shared library. This stage is ninth,
+     * so by the time it builds, several library materials have already been
+     * switched off by earlier chapters, and `.clone()` faithfully copies the
+     * off state.
+     *
+     * That is not hypothetical: it cost half a day here. The motor cutaway's
+     * back plate, pole, magnet, top plate, cone and dust cap all rendered as
+     * nothing but their outlines, because every one of them was a clone of a
+     * material an earlier stage had already zeroed. Three flat colours and a
+     * ×5 lamp made no difference, for the obvious reason.
+     */
+    c.opacity = 1; c.transparent = false; c.visible = true; c.depthWrite = true;
+    _hw[k] = c;
+  }
   return _hw;
 }
 
@@ -214,45 +236,74 @@ function cabMat() {
   // top-to-bottom ramp back on the cheek, which is the whole reason to build a
   // gloss cabinet. clearcoatRoughness stays low — orange peel is a core job.
   _cab.color.setHex(0x0a0b0e);
-  _cab.roughness = 0.22;
+  _cab.roughness = 0.16;
   _cab.clearcoat = 1.0;
-  _cab.clearcoatRoughness = 0.030;
-  _cab.envMapIntensity = 2.25;
-  _cab.reflectivity = 0.66;
+  _cab.clearcoatRoughness = 0.022;
+  _cab.envMapIntensity = 2.05;
+  _cab.reflectivity = 0.70;
   return _cab;
 }
 
 /**
- * A slightly convex clear panel. This is the specular layer that sits in FRONT
- * of a diagram card, so the studio's wide front strip sweeps across it as a
- * soft band instead of the card reading as a flat decal pasted on the render.
- * Convexity is what turns the reflection into a moving highlight rather than a
- * static rectangle.
+ * Bow the named edges of a plan polygon outward.
+ *
+ * A flat gloss flank returns ONE value: the reflected direction barely changes
+ * over a 470 mm plane, so the whole cheek comes back as the single patch of
+ * environment it happens to point at, and the cabinet renders as a black card
+ * with a bright fillet down one edge. That is the art director's "no clearcoat
+ * ramp" finding, and no amount of envMapIntensity fixes it, because the thing
+ * that is missing is a CHANGE in the reflected direction.
+ *
+ * A 7 mm sagitta over the flank makes it a very shallow cylinder about the
+ * vertical axis. The reflected direction now sweeps ~9° from front fillet to
+ * back, which drags the studio's horizon band down the cheek as a soft vertical
+ * ramp — the reflected-horizon trick the rig was rebuilt to provide. It is also
+ * what the cabinets it is being judged against actually do.
+ *
+ * @param idxs indices i of the edges pts[i] → pts[i+1] to bow
  */
-function glassPanel(w, h, bulge = 0.006) {
-  // CYLINDRICAL, not spherical. A doubly-curved panel is a convex mirror: it
-  // collapses the whole studio into one small blown highlight sitting in the
-  // middle of the plot. Curving in x only turns the same source into a soft
-  // vertical band that sweeps across as the camera drifts, which is what glass
-  // over an instrument actually looks like.
-  const g = new THREE.PlaneGeometry(w, h, 26, 4);
-  const p = g.attributes.position;
-  const hw2 = w / 2;
-  for (let i = 0; i < p.count; i++) {
-    const u = p.getX(i) / hw2;
-    p.setZ(i, bulge * (1 - u * u));
+function bowEdges(pts, idxs, sag) {
+  const out = [];
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    out.push(pts[i]);
+    if (!idxs.includes(i)) continue;
+    const a = pts[i], b = pts[(i + 1) % n];
+    const nx = -(b[1] - a[1]), nz = b[0] - a[0];     // outward for this winding
+    const l = Math.hypot(nx, nz) || 1;
+    for (const t of [0.25, 0.5, 0.75]) {
+      const k = 1 - (2 * t - 1) * (2 * t - 1);       // parabolic, zero at both ends
+      out.push([a[0] + (b[0] - a[0]) * t + (nx / l) * sag * k,
+        a[1] + (b[1] - a[1]) * t + (nz / l) * sag * k]);
+    }
   }
-  g.computeVertexNormals();
-  const m = mats().glass.clone();
-  m.color.setHex(0x0a0d11);
-  m.roughness = 0.26;
-  m.clearcoat = 1.0;
-  m.clearcoatRoughness = 0.16;
-  m.envMapIntensity = 0.70;
-  m.transparent = true;
-  m.opacity = 0.12;
-  m.depthWrite = false;
-  const mesh = new THREE.Mesh(g, m);
+  return out;
+}
+
+/**
+ * The specular layer over a card.
+ *
+ * Contract Addendum J: this was a hand-rolled cylindrical panel at roughness
+ * 0.26, which returned the front strip as a milky plateau across the whole
+ * upper half of the cutaway and washed the drawing under it out. It is now
+ * `GEO.instrumentGlass` — crowned, so the source sweeps as a band rather than
+ * sitting as a rectangle, and coated (reflectivity 0.34) rather than bare.
+ *
+ * Its default opacity of 0.30 is a tint that would take 30 % off everything
+ * behind it, which on a dark engineering drawing is the difference between
+ * legible and not; the coat still returns its own reflection at full strength,
+ * so dropping the tint costs nothing but the veil.
+ */
+function cardGlass(w, h, crown) {
+  // roughness 0.22 with the coat at 0.30, not the helper's 0.15/0.09. On a
+  // 300 mm panel facing the lens the sharper coat mirrors one softbox as a
+  // hard comet with the emitter's own outline legible in it — a lens flare
+  // across the drawing. Blurred, the same source becomes the soft diagonal
+  // band that says "there is glass in front of this".
+  const mesh = GEO.instrumentGlass(w, h, { crown, roughness: 0.22 });
+  mesh.material.clearcoatRoughness = 0.30;
+  mesh.material.opacity = 0.12;
+  mesh.material.envMapIntensity = 0.32;
   mesh.renderOrder = 40;
   return mesh;
 }
@@ -427,8 +478,8 @@ function makeDriver(o) {
   surrMat.specularIntensity = 0.10;
   // The dust cap sits a value ABOVE the cone, not below it: darker than the
   // cone it reads as a hole punched through the middle of the diaphragm.
-  const dustMat = hw().cone.clone();
-  dustMat.color.setHex(0x3a4048); dustMat.roughness = 0.70;
+  const dustMat = (o.coneMat || hw().cone).clone();
+  dustMat.color.multiplyScalar(1.18); dustMat.roughness = 0.70;
   dustMat.sheen = 0.24; dustMat.sheenColor = new THREE.Color(0x333a42);
   dustMat.clearcoat = 0.10; dustMat.clearcoatRoughness = 0.50;
   dustMat.envMapIntensity = 0.30; dustMat.specularIntensity = 0.12;
@@ -522,7 +573,7 @@ function makeTweeter(faceR = 0.052, domeR = 0.0125) {
   // dome + half-roll surround. A 25 mm convex mirror collapses the whole studio
   // into one point, so the dome is the single most clip-prone surface in the
   // frame; it keeps its bright glint from a clearcoat rather than from F0.
-  const domeM = satin(0x8e8a7d, 0.30, 0.90, 0.70, 0.55);
+  const domeM = satin(0x767468, 0.38, 0.75, 0.58, 0.45);
   const dm = new THREE.Mesh(new THREE.SphereGeometry(domeR, 40, 20, 0, TAU, 0, Math.PI * 0.52), domeM);
   dm.position.y = -0.0031;
   dm.castShadow = true;
@@ -571,7 +622,9 @@ const HEAD_Y0 = 0.841, HEAD_H = 0.411;
 const T_BB = 0.024, T_HB = 0.020;                    // machined baffle thickness
 const W_BB = 0.315, W_HB = 0.248;                    // baffle widths
 // Bodies are recessed by one baffle thickness; the holed baffle plate sits on top.
-const PLAN_BASS = [[-W_BB / 2, 0.200 - T_BB], [W_BB / 2, 0.200 - T_BB], [0.126, -0.245], [-0.126, -0.245]];
+const PLAN_BASS = bowEdges(
+  [[-W_BB / 2, 0.200 - T_BB], [W_BB / 2, 0.200 - T_BB], [0.126, -0.245], [-0.126, -0.245]],
+  [1, 3], 0.007);
 /**
  * The gantry is the bass module's machined top plate, not a shelf. Its plan is
  * the bass plan carried up through the module's own rake (the prism shears z by
@@ -581,8 +634,11 @@ const PLAN_BASS = [[-W_BB / 2, 0.200 - T_BB], [W_BB / 2, 0.200 - T_BB], [0.126, 
  * object with a joint rather than as three stacked boxes.
  */
 const GSHEAR = BASS_H * Math.tan(RAKE_BASS);
-const PLAN_GANT = PLAN_BASS.map(([x, z]) => [x * 1.026, z - GSHEAR + (z > 0 ? 0.004 : -0.004)]);
-const PLAN_HEAD = [[-W_HB / 2, 0.155 - T_HB], [W_HB / 2, 0.155 - T_HB], [0.104, -0.268], [-0.104, -0.268]];
+const ZC_BASS = (0.200 - T_BB - 0.245) / 2;
+const PLAN_GANT = PLAN_BASS.map(([x, z]) => [x * 1.026, (z - ZC_BASS) * 1.026 + ZC_BASS - GSHEAR]);
+const PLAN_HEAD = bowEdges(
+  [[-W_HB / 2, 0.155 - T_HB], [W_HB / 2, 0.155 - T_HB], [0.104, -0.268], [-0.104, -0.268]],
+  [1, 3], 0.0030);
 
 /** Flat baffle panel with driver cut-outs; front face at local z = 0. */
 function bafflePlate(w, h, T, holes, mat) {
@@ -662,18 +718,39 @@ function makeCabinet() {
   baffleMat.clearcoat = 0.10; baffleMat.clearcoatRoughness = 0.58;
   baffleMat.specularIntensity = 0.10;
   baffleMat.envMapIntensity = 0.18;
-  // The weave map on coneWeave multiplies down to near-black at this size; drop
-  // it and let the sheen carry the rim-to-apex value change on the cone wall.
+  /*
+   * THE WEAVE IS BACK, and the two things that made it fail are fixed.
+   *
+   * `clothWeave` is a dark map — mean luminance 0.17 sRGB — and it MULTIPLIES
+   * the base colour, so a cone tinted 0x272c32 with the map on rendered as
+   * black. And its default repeat of 26 puts ~2200 weave cells across a 200 px
+   * cone, i.e. well under a pixel each, which integrates back to flat grey and
+   * aliases while doing it.
+   *
+   * Repeat 0.7 around and 0.10 up the profile gives ~60 cells around the rim —
+   * about 10 px each at the size this driver is printed — and the base goes to
+   * near-white so the product of the two lands on the value the cone had. The
+   * result is a diaphragm that carries fibre at 1:1 instead of being a stamped
+   * disc.
+   */
+  const weave = hw().coneWeave.map ? hw().coneWeave.map.clone() : null;
+  if (weave) {
+    weave.wrapS = weave.wrapT = THREE.RepeatWrapping;
+    weave.repeat.set(1.50, 0.30);
+    weave.anisotropy = 8;
+    weave.needsUpdate = true;
+  }
   const bassCone = hw().coneWeave.clone();
-  bassCone.map = null;
-  bassCone.color.setHex(0x272c32);
+  bassCone.map = weave;
+  bassCone.color.setHex(0x878d95);
   bassCone.roughness = 0.76; bassCone.metalness = 0.0;
   bassCone.clearcoat = 0.09; bassCone.clearcoatRoughness = 0.52;
   bassCone.envMapIntensity = 0.32; bassCone.specularIntensity = 0.13;
   bassCone.sheen = 0.26; bassCone.sheenRoughness = 0.90;
   bassCone.sheenColor = new THREE.Color(0x333a42);
-  const midCone = hw().cone.clone();
-  midCone.color.setHex(0x2a2f35); midCone.envMapIntensity = 0.32;
+  const midCone = hw().coneWeave.clone();
+  midCone.map = weave;
+  midCone.color.setHex(0x81878f); midCone.envMapIntensity = 0.32;
   midCone.roughness = 0.76; midCone.specularIntensity = 0.13;
   midCone.clearcoat = 0.09; midCone.clearcoatRoughness = 0.52;
   midCone.sheen = 0.26; midCone.sheenRoughness = 0.90;
@@ -765,17 +842,55 @@ function makeCabinet() {
 // Overlay helpers
 // ===========================================================================
 
-/** Filled section block in the local (x = axial, y = radial) cut plane. */
-function slab(ax0, ax1, ay0, ay1, mat, d = 0.006) {
-  const x0 = Math.min(ax0, ax1), x1 = Math.max(ax0, ax1);
-  const y0 = Math.min(ay0, ay1), y1 = Math.max(ay0, ay1);
-  const g = new THREE.ExtrudeGeometry(roundedShape([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], 0.0013), {
-    depth: d, bevelEnabled: true, bevelSize: 0.0010, bevelThickness: 0.0009, bevelSegments: 3, curveSegments: 4, steps: 1,
+/** Filled section polygon in the local (x = axial, y = radial) cut plane. */
+function sect(pts, mat, d = 0.009, r = 0.0010, bev = 0.0009) {
+  /*
+   * The bevel has to scale with the part. At a fixed 0.9 mm it ate 40 % of a
+   * 2.2 mm cone wall from both sides and rounded what is left into a smooth
+   * sausage — the drawing's diaphragm read as a fat grey banana rather than as
+   * a wall of constant thickness.
+   */
+  const g = new THREE.ExtrudeGeometry(roundedShape(pts, r), {
+    depth: d, bevelEnabled: true, bevelSize: bev, bevelThickness: bev * 0.9,
+    bevelSegments: 3, curveSegments: 4, steps: 1,
   });
   g.translate(0, 0, -d / 2);
   const m = new THREE.Mesh(g, mat);
   m.renderOrder = 3;
+  m.castShadow = m.receiveShadow = false;
   return m;
+}
+
+/** Filled section block. */
+function slab(ax0, ax1, ay0, ay1, mat, d = 0.006) {
+  const x0 = Math.min(ax0, ax1), x1 = Math.max(ax0, ax1);
+  const y0 = Math.min(ay0, ay1), y1 = Math.max(ay0, ay1);
+  const b = Math.min(0.0009, (Math.min(x1 - x0, y1 - y0)) * 0.16);
+  return sect([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], mat, d, Math.min(0.0013, b * 1.4), b);
+}
+
+/**
+ * Section hatching, clipped to a rectangle.
+ *
+ * Filled greys alone do not say "this part is CUT" — hatching does, and it is
+ * the one convention every reader of an engineering drawing already knows. It
+ * goes on the ferrite only: hatching every part at the same angle turns a
+ * section into a texture, and the whole job here is to separate four parts.
+ */
+function hatch(x0, x1, y0, y1, step, color, opacity, z = 0.0080) {
+  const seg = [];
+  for (let c = Math.ceil((y0 - x1) / step) * step; c <= y1 - x0; c += step) {
+    const a = Math.max(x0, y0 - c), b = Math.min(x1, y1 - c);
+    if (b - a < step * 0.2) continue;
+    seg.push(a, a + c, z, b, b + c, z);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(seg, 3));
+  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+    color, transparent: true, opacity, depthWrite: false, toneMapped: false,
+  }));
+  l.renderOrder = 12;
+  return l;
 }
 
 /** Sampler for a polyline path. */
@@ -800,6 +915,14 @@ function polyPath(pts) {
 function polarityMark(r = 0.0058, color = PAL.am) {
   const g = new THREE.Group();
   const mk = (o) => { o.renderOrder = 18; return o; };
+  // A backing disc, because the symbol is drawn ON a conductor: the ⊗ is wider
+  // than the 2.1 mm winding it belongs to, so without one the former and the
+  // pole read straight through the middle of it and the whole mark turns to
+  // mush at the exact point the drawing is about.
+  const back = new THREE.Mesh(new THREE.CircleGeometry(r * 0.98, 24),
+    new THREE.MeshBasicMaterial({ color: 0x0e1218, toneMapped: false, transparent: true, opacity: 0.88 }));
+  back.renderOrder = 17;
+  g.add(back);
   const rim = mk(new THREE.Mesh(new THREE.TorusGeometry(r, r * 0.15, 8, 24),
     new THREE.MeshBasicMaterial({ color, toneMapped: false, transparent: true })));
   g.add(rim);
@@ -819,251 +942,298 @@ function polarityMark(r = 0.0058, color = PAL.am) {
 }
 
 // ===========================================================================
-// Motor section — an engineering cut in a plane that faces the stage camera.
-// Local frame: +x = the driver axis (front to the right), +y = radial.
-// Local units are METRES at 1 : 1, so the coil travel drawn here is the real
-// cone travel; only the charge carriers are magnified, and by a stated factor.
+// Motor section — a HALF SECTION about the driver axis, in a plane that faces
+// the stage camera.
+//
+// Local frame: +x = the driver axis (front to the right), +y = radial, y = 0 is
+// the axis. Only the half above the axis is cut, which is the standard drawing
+// for an axisymmetric part and is the whole reason this revision is legible:
+// the full symmetric section spent half the card on a mirror image, which left
+// the gap — the subject — 17 px wide. Cut in half, the same card carries the
+// motor at 1.58 : 1 and the 8.5 mm gap is 27 px across.
+//
+// Everything inside `mg` shares that one magnification, so the coil travel, the
+// excursion ruler and the carrier oscillation are all comparable to each other;
+// only the carriers are magnified further, and by a stated factor.
 // ===========================================================================
 
-const R_POLE = 0.0234, R_FIN = 0.0242, R_FOUT = 0.0247, R_WIND = 0.0268;
+const R_POLE = 0.0234, R_FIN = 0.0236, R_FOUT = 0.0247, R_WIND = 0.0268;
 const R_TIN = 0.0276, R_MAG = 0.0316, R_OUT = 0.075;
 const X_BACK0 = -0.0585, X_BACK1 = -0.0495, X_TOP0 = -0.0285, X_TOP1 = -0.0200;
 const X_GAPC = (X_TOP0 + X_TOP1) / 2;
 const R_COIL = (R_FOUT + R_WIND) / 2;
 
-const SEC_CARD_W = 0.140, SEC_CARD_H = 0.208, SEC_PAD = 0.007;
-const SEC_X0 = -0.0768, SEC_Y0 = -0.104;
+/** Cone wall: true half-angle, from the former to the 105 mm rim. */
+const CONE_SLOPE = (0.105 - R_FOUT) / 0.045;
+const CONE_BRK_R = 0.0720;                                  // where the wall is broken
+const CONE_BRK_X = (CONE_BRK_R - R_FOUT) / CONE_SLOPE;
+
+const SEC_CARD_W = 0.140, SEC_CARD_H = 0.204, SEC_PAD = 0.007;
+const SEC_X0 = -0.0768, SEC_Y0 = -0.102;
+
+/** Drawing scale and origin of the cut inside the card. */
+const K_SEC = 1.58, KX0 = 0.019, KY0 = -0.022;
+const KX = (x) => x * K_SEC + KX0;
+const KY = (y) => y * K_SEC + KY0;
+
+/**
+ * Schematic of the drive circuit, in the clear band below the axis.
+ * `xa`/`xb` are the two tinsel leads, 3 mm apart, running down the front of the
+ * pole from the winding; `x0`/`x1` are the far corners of the loop, which is
+ * stretched across the whole band so the drawing is not hung to one side.
+ */
+const SCH = { x0: -0.0560, x1: 0.0180, xa: -0.0135, xb: -0.0105, yTop: -0.0265, yMid: -0.0205, yBot: -0.0465 };
+const RULER_Y = -0.0110;
+const ARROW_Y = 0.0100;
 
 function buildSection() {
   const g = new THREE.Group();
 
   /*
-   * Section materials.
+   * Section materials — three parts, three values, and they must be values the
+   * eye can rank without hunting.
    *
-   * `steel` and `lamination` both carry roughnessMap = anodisedRough(512), and
-   * slab() is an ExtrudeGeometry whose WorldUVGenerator emits UVs in METRES —
-   * so a 21 mm magnet block samples ~2 % of the noise texture and magnifies a
-   * single blotch across the whole part. Null the map and let the geometry's
-   * broken edges and the section lamp do the work instead.
+   * The last revision built them from `steel` and `lamination`, i.e. metals at
+   * metalness 1. A metal has NO diffuse term: it returns only what its mirror
+   * direction happens to see, and a flat slab facing the camera in a dark room
+   * sees the dark end of the studio, so the back plate, the magnet and the top
+   * plate all came back at essentially the card's own value and the cutaway
+   * read as outlined boxes. These are dielectrics with a real albedo, so the
+   * ranking is carried by the paint and the modelling light only shapes it.
    */
-  /*
-   * Three parts, three values. A cutaway whose steel, ferrite and pole all
-   * return the same mid-grey is a blob: the reader has to be able to point at
-   * the back plate, the pole, the ring magnet and the top plate separately.
-   * Steel is bright and specular; the pole is deliberately a stop darker so it
-   * separates from the top plate it nearly touches; the ferrite is matte and
-   * darker again but still well clear of the card behind it.
-   */
-  const st = hw().steel.clone();                            // machined low-carbon steel
-  st.roughnessMap = null; st.normalMap = null;
-  st.color.setHex(0xa8b0ba); st.roughness = 0.34; st.metalness = 1.0; st.envMapIntensity = 0.55;
-  const po = st.clone();                                    // pole piece + back plate
-  po.color.setHex(0x474d55); po.roughness = 0.58; po.envMapIntensity = 0.28;
-  // Ferrite is a dielectric, but a dielectric in this rig returns almost no
-  // light at all and the ring magnets went black against a black card. Given a
-  // little metalness it picks the environment up at a mid value and the four
-  // parts of the circuit finally separate.
-  const mg = hw().lamination.clone();
-  mg.roughnessMap = null; mg.normalMap = null;
-  mg.color.setHex(0x22272d); mg.roughness = 0.78; mg.metalness = 0.68; mg.envMapIntensity = 0.40;
-  const cw = hw().magnetWire.clone();
-  cw.color.setHex(0xb2632f); cw.roughness = 0.24; cw.envMapIntensity = 1.0;
-  const pl = hw().plastic.clone(); pl.color.setHex(0x2a2f36); pl.envMapIntensity = 0.5;
-  const cn = hw().coneWeave.clone();
-  cn.map = null; cn.color.setHex(0x3a4048); cn.metalness = 0.0; cn.roughness = 0.62;
-  cn.clearcoat = 0.20; cn.clearcoatRoughness = 0.40; cn.envMapIntensity = 0.60;
+  const secMat = (hex, rough, metal, env, cc = 0) => {
+    const m = hw().plastic.clone();
+    m.color.setHex(hex);
+    m.metalness = metal; m.roughness = rough;
+    m.envMapIntensity = env;
+    m.clearcoat = cc; m.clearcoatRoughness = 0.34;
+    m.specularIntensity = 0.55;
+    return m;
+  };
+  const stTop = secMat(0x8d959f, 0.42, 0.28, 0.58, 0.16);   // top plate: machined steel
+  const stPole = secMat(0x3a414a, 0.54, 0.22, 0.34, 0.08);  // pole piece + back plate
+  const mgFer = secMat(0x1b1f25, 0.88, 0.10, 0.26);         // ferrite ring magnet
+  const cnMat = secMat(0x4c525b, 0.62, 0.06, 0.40, 0.14);   // cone wall + dust cap
+  const fmMat = secMat(0x474d56, 0.72, 0.00, 0.34);         // coil former
+  const cwMat = hw().magnetWire.clone();
+  cwMat.color.setHex(0xc2743a); cwMat.roughness = 0.26; cwMat.envMapIntensity = 1.0;
 
   /*
    * opacity 1.0, not 0.985. diagramCard is a TRANSPARENT plate, so it blends
    * over whatever the opaque pass already wrote — and 1.5 % of a near-white
    * subwoofer dust cap standing behind it printed as a grey sphere floating on
-   * the card with nothing to explain it. That is the art director's finding 7,
-   * and it is a compositing bug rather than a stray object.
+   * the card with nothing to explain it.
    */
   const card = DIAG.diagramCard(SEC_CARD_W, SEC_CARD_H, { opacity: 1.0, pad: SEC_PAD });
   card.position.set(SEC_X0, SEC_Y0, -0.018);
   g.add(card);
 
-  // --- the magnetic circuit, in section ---------------------------------------
-  g.add(slab(X_BACK0, X_BACK1, -R_OUT, R_OUT, po, 0.011));            // back plate
-  g.add(slab(X_BACK1, -0.0125, -R_POLE, R_POLE, po, 0.011));          // pole piece
-  for (const s of [1, -1]) {
-    g.add(slab(X_BACK1, X_TOP0, s * R_MAG, s * R_OUT, mg, 0.011));    // ring magnet
-    g.add(slab(X_TOP0, X_TOP1, s * R_TIN, s * R_OUT * 0.955, st, 0.011)); // top plate
-  }
+  const mg = new THREE.Group();
+  mg.position.set(KX0, KY0, 0);
+  mg.scale.setScalar(K_SEC);
+  g.add(mg);
+
+  // --- the magnetic circuit, cut ---------------------------------------------
+  // The back plate and the pole are ONE turned part — a T-yoke — so they are cut
+  // as one polygon with no line between them. Two blocks butted together with a
+  // hairline down the joint says "assembly" about a part that is not one.
+  const YOKE = [[X_BACK0, 0], [-0.0125, 0], [-0.0125, R_POLE], [X_BACK1, R_POLE],
+    [X_BACK1, R_OUT], [X_BACK0, R_OUT]];
+  mg.add(sect(YOKE, stPole, 0.011, 0.0013));
+  mg.add(slab(X_BACK1, X_TOP0, R_MAG, R_OUT, mgFer, 0.011));          // ring magnet
+  mg.add(slab(X_TOP0, X_TOP1, R_TIN, R_OUT * 0.955, stTop, 0.011));   // top plate
+  mg.add(hatch(X_BACK1, X_TOP0, R_MAG, R_OUT, 0.0050, 0x9aa4b0, 0.26));
 
   // hairline outlines: without them the gap slot vanishes at this scale
-  const OUT = 0xbcc4ce;
-  const box = (x0, x1, y0, y1, w = 1.2, o = 0.55, col = OUT) => {
+  const OUT = 0xc6cdd6;
+  const box = (x0, x1, y0, y1, w = 1.1, o = 0.42, col = OUT) => {
     const t = new DIAG.Trace(5, col, w, { opacity: o, renderOrder: 12 });
     const P = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
     t.write((i) => [P[i][0], P[i][1], 0.0075]);
-    g.add(t);
+    mg.add(t);
     return t;
   };
-  box(X_BACK0, X_BACK1, -R_OUT, R_OUT);
-  box(X_BACK1, -0.0125, -R_POLE, R_POLE);
-  for (const s of [1, -1]) {
-    box(X_BACK1, X_TOP0, s * R_MAG, s * R_OUT);
-    box(X_TOP0, X_TOP1, s * R_TIN, s * R_OUT * 0.955);
-    // The gap itself: the 8.5 mm slot between pole and top plate is the whole
-    // point of the section, so it is tinted and outlined in the signal colour.
-    const slot = new THREE.Mesh(new THREE.PlaneGeometry(X_TOP1 - X_TOP0, R_TIN - R_POLE),
-      new THREE.MeshBasicMaterial({ color: PAL.cy, transparent: true, opacity: 0.30, depthWrite: false, toneMapped: false }));
-    slot.position.set(X_GAPC, s * (R_POLE + R_TIN) / 2, 0.0068);
-    slot.renderOrder = 11;
-    g.add(slot);
-    box(X_TOP0, X_TOP1, s * R_POLE, s * R_TIN, 1.3, 0.9, PAL.cy);
+  box(X_BACK1, X_TOP0, R_MAG, R_OUT);
+  box(X_TOP0, X_TOP1, R_TIN, R_OUT * 0.955);
+  {
+    const t = new DIAG.Trace(YOKE.length + 1, OUT, 1.1, { opacity: 0.42, renderOrder: 12 });
+    t.write((i) => [YOKE[i % YOKE.length][0], YOKE[i % YOKE.length][1], 0.0075]);
+    mg.add(t);
   }
 
-  // --- moving assembly: former, winding, cone neck -----------------------------
-  const mov = new THREE.Group();
-  for (const s of [1, -1]) {
-    mov.add(slab(X_GAPC - H_COIL / 2, X_GAPC + H_COIL / 2, s * R_FOUT, s * R_WIND, cw, 0.012));
-    mov.add(slab(X_GAPC - H_COIL / 2, 0.0020, s * R_FIN, s * R_FOUT, pl, 0.010));
-    const q = [[-0.0020, R_FOUT], [0.0024, R_FOUT], [0.0318, 0.0520], [0.0274, 0.0520]]
-      .map(([u, v]) => [u, s * v]);
-    if (s < 0) q.reverse();
-    const neck = new THREE.ExtrudeGeometry(roundedShape(q, 0.0009),
-      { depth: 0.009, bevelEnabled: true, bevelSize: 0.0006, bevelThickness: 0.0006, bevelSegments: 2, curveSegments: 3, steps: 1 });
-    neck.translate(0, 0, -0.0045);
-    const nm = new THREE.Mesh(neck, cn);
-    nm.renderOrder = 3;
-    mov.add(nm);
+  // The gap: an 8.5 mm slot with 4.2 mm of clearance, and the whole point of
+  // the drawing, so it is tinted and outlined in the signal colour.
+  const slot = new THREE.Mesh(new THREE.PlaneGeometry(X_TOP1 - X_TOP0, R_TIN - R_POLE),
+    new THREE.MeshBasicMaterial({ color: PAL.cy, transparent: true, opacity: 0.40, depthWrite: false, toneMapped: false }));
+  slot.position.set(X_GAPC, (R_POLE + R_TIN) / 2, 0.0068);
+  slot.renderOrder = 11;
+  mg.add(slot);
+  box(X_TOP0, X_TOP1, R_POLE, R_TIN, 1.3, 0.9, PAL.cy);
+
+  // The axis. A centre line is what tells the reader this is half of a
+  // rotationally symmetric part rather than a slice through a rectangular one.
+  const axis = new DIAG.Trace(2, 0x8e97a2, 1.1,
+    { opacity: 0.55, dashed: true, dashSize: 0.0055, gapSize: 0.0030, renderOrder: 12 });
+  axis.write((i) => [i ? 0.0125 : -0.0645, 0, 0.0080]);
+  mg.add(axis);
+
+  // --- the magnetic circuit is a closed loop too -------------------------------
+  // Through the back plate, up the magnet, across the top plate, INWARD across
+  // the gap — through the winding, which is why F is axial — and home along the
+  // pole. Drawn inside the iron it sits in, so it is a flux path and not a
+  // decoration floating beside one.
+  {
+    const K = [[-0.0540, 0.0055], [-0.0540, 0.0500], [-0.0524, 0.0570], [-0.0470, 0.0612],
+      [-0.0390, 0.0625], [-0.0310, 0.0612], [-0.0258, 0.0570], [-0.0243, 0.0500],
+      [-0.0243, 0.0300], [-0.0243, 0.0140], [-0.0268, 0.0090], [-0.0330, 0.0062],
+      [-0.0440, 0.0052], [-0.0510, 0.0052], [-0.0540, 0.0055]];
+    const t = new DIAG.Trace(K.length, PAL.cy, 1.5, { opacity: 0.46, renderOrder: 11 });
+    t.write((i) => [K[i][0], K[i][1], 0.0082]);
+    mg.add(t);
+    for (const [px, py, rz] of [[-0.0243, 0.0262, Math.PI], [-0.0355, 0.0620, -Math.PI / 2]]) {
+      const head = new THREE.Mesh(new THREE.ConeGeometry(0.0026, 0.0070, 10),
+        new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true, opacity: 0.55 }));
+      head.position.set(px, py, 0.0082);
+      head.rotation.z = rz;
+      head.renderOrder = 11;
+      mg.add(head);
+    }
   }
-  // bright outline on the two coil sections, so the coil is unmistakable
-  for (const s of [1, -1]) {
-    const t = new DIAG.Trace(5, PAL.am, 1.8, { opacity: 0.95, renderOrder: 15 });
-    const P = [[X_GAPC - H_COIL / 2, s * R_FOUT], [X_GAPC + H_COIL / 2, s * R_FOUT],
-      [X_GAPC + H_COIL / 2, s * R_WIND], [X_GAPC - H_COIL / 2, s * R_WIND], [X_GAPC - H_COIL / 2, s * R_FOUT]];
+
+  // --- moving assembly: coil, former, cone wall, dust cap ----------------------
+  const mov = new THREE.Group();
+  mov.add(slab(X_GAPC - H_COIL / 2, X_GAPC + H_COIL / 2, R_FOUT, R_WIND, cwMat, 0.012));
+  mov.add(slab(X_GAPC - H_COIL / 2, 0.0020, R_FIN, R_FOUT, fmMat, 0.010));
+  mov.add(sect([[-0.0026, R_FOUT], [0.0000, R_FOUT], [CONE_BRK_X, CONE_BRK_R],
+    [CONE_BRK_X - 0.0026, CONE_BRK_R]], cnMat, 0.009, 0.0004, 0.00035));
+  {
+    const cap = [];
+    for (let i = 0; i <= 14; i++) {
+      const a = (Math.PI / 2) * (i / 14);
+      cap.push([0.0060 * Math.cos(a), R_FOUT * Math.sin(a)]);
+    }
+    for (let i = 14; i >= 0; i--) {
+      const a = (Math.PI / 2) * (i / 14);
+      cap.push([0.0042 * Math.cos(a), (R_FOUT - 0.0020) * Math.sin(a)]);
+    }
+    mov.add(sect(cap, cnMat, 0.008, 0.0004, 0.00035));
+  }
+  // Bright outline on the winding: 181 turns of 0.32 mm wire is a 2.1 mm band,
+  // and a 2.1 mm band needs an edge to be found at all.
+  {
+    const t = new DIAG.Trace(5, PAL.am, 1.7, { opacity: 0.95, renderOrder: 15 });
+    const P = [[X_GAPC - H_COIL / 2, R_FOUT], [X_GAPC + H_COIL / 2, R_FOUT],
+      [X_GAPC + H_COIL / 2, R_WIND], [X_GAPC - H_COIL / 2, R_WIND], [X_GAPC - H_COIL / 2, R_FOUT]];
     t.write((i) => [P[i][0], P[i][1], 0.0090]);
     mov.add(t);
   }
-  /*
-   * A bracket across the whole moving assembly — coil, former, cone neck — with
-   * the force vector springing from its centre. Drawn free-floating beside the
-   * coil the arrow read as interface chrome; against a bracket that visibly
-   * spans the moving mass it reads as F = Bl·i acting on 49 g.
-   */
-  const brk = new DIAG.Trace(5, 0xc0c7d0, 1.3, { opacity: 0.55, renderOrder: 14 });
+  // Conventional break: the cone continues to a 105 mm rim, which is 66 mm off
+  // the card. Ending the wall on a plain edge would claim a 62 mm cone sitting
+  // on a 75 mm magnet, which is not a loudspeaker.
   {
-    const P = [[0.0272, -0.0524], [0.0300, -0.0524], [0.0300, 0.0524], [0.0272, 0.0524], [0.0300, 0.0524]];
-    brk.write((i) => [P[i][0], P[i][1], 0.011]);
+    const t = new DIAG.Trace(7, 0xaab2bd, 1.0, { opacity: 0.5, renderOrder: 15 });
+    const ux = 1 / Math.hypot(1, CONE_SLOPE), uy = CONE_SLOPE * ux;   // along the wall
+    const bx = CONE_BRK_X - 0.0011, by = CONE_BRK_R;                  // mid-thickness
+    t.write((i, u) => {
+      const s = (u - 0.5) * 0.0042;                                   // across the wall
+      const z = (i % 2 ? 0.0022 : -0.0022) * (i === 0 || i === 6 ? 0 : 1);
+      return [bx - uy * s + ux * z, by + ux * s + uy * z, 0.0095];
+    });
+    mov.add(t);
   }
-  mov.add(brk);
-  g.add(mov);
+  mg.add(mov);
 
-  // --- the magnetic circuit is a closed loop too -------------------------------
-  for (const s of [1, -1]) {
-    const K = [[-0.0535, s * 0.0110], [-0.0535, s * 0.0520], [-0.0400, s * 0.0560],
-      [-0.0243, s * 0.0520], [-0.0243, s * 0.0295], [-0.0243, s * 0.0180],
-      [-0.0330, s * 0.0110], [-0.0450, s * 0.0100], [-0.0535, s * 0.0110]];
-    const t = new DIAG.Trace(K.length, PAL.cy, 1.4, { opacity: 0.34, renderOrder: 11 });
-    t.write((i) => [K[i][0], K[i][1], 0.0082]);
-    g.add(t);
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.0026, 0.0068, 10),
-      new THREE.MeshBasicMaterial({ color: PAL.cy, toneMapped: false, transparent: true, opacity: 0.45 }));
-    head.position.set(-0.0243, s * 0.0255, 0.0082);
-    head.rotation.z = s > 0 ? Math.PI : 0;          // flux crosses the gap radially inward
-    g.add(head);
-  }
-
-  // The corrugated spider was drawn here. At this scale it read as two loose
-  // amber squiggles floating beside the coil and cost more legibility than the
-  // compliance argument gained; Cms is quoted numerically instead.
-
-  // --- the circuit, drawn as one closed loop -----------------------------------
+  // --- the drive circuit, as a closed loop ------------------------------------
+  /*
+   * Two tinsel leads run down the front of the pole to a source below. The loop
+   * is CLOSED and drawn closed: current leaves on one lead, crosses the page at
+   * the winding — marked ⊗ or ⊙, alternating, because it is alternating — and
+   * returns on the other. Nothing on it travels: the carriers oscillate about a
+   * fixed point, and they are drawn doing exactly that.
+   */
   const LOOP = [];
-  const yT = 0.078, xT = 0.031, xAmp = 0.045, zL = 0.015;
-  LOOP.push([xT, yT, zL], [0.006, yT, zL], [-0.024, 0.040, 0.008], [-0.024, R_COIL, 0.0]);
-  for (let i = 1; i <= 14; i++) {
-    const a = Math.PI * (i / 14);
-    LOOP.push([-0.024, R_COIL * Math.cos(a), R_COIL * Math.sin(a)]);
+  LOOP.push([SCH.xb, R_COIL], [SCH.xb, SCH.yMid], [SCH.x1, SCH.yMid], [SCH.x1, SCH.yBot],
+    [SCH.x0, SCH.yBot], [SCH.x0, SCH.yTop], [SCH.xa, SCH.yTop], [SCH.xa, R_COIL]);
+  for (let i = 1; i <= 10; i++) {                    // the turn, round the back
+    const a = Math.PI * (i / 10);
+    LOOP.push([(SCH.xa + SCH.xb) / 2 - Math.cos(a) * (SCH.xb - SCH.xa) / 2, R_COIL,
+      Math.sin(a) * (SCH.xb - SCH.xa) * 0.9]);
   }
-  LOOP.push([-0.024, -0.040, 0.008], [0.006, -yT, zL], [xT, -yT, zL],
-    [xAmp, -yT, zL], [xAmp, yT, zL], [xT, yT, zL]);
   const path = polyPath(LOOP);
-  const wire = new DIAG.Trace(LOOP.length, PAL.amDim, 2.0, { opacity: 0.75 });
+  const wire = new DIAG.Trace(LOOP.length, PAL.amDim, 1.9, { opacity: 0.8 });
   wire.write((i) => LOOP[i]);
-  g.add(wire);
+  mg.add(wire);
 
-  const carriers = new DIAG.Swarm(76, { color: PAL.am, size: 0.0021 });
-  g.add(carriers);
+  const carriers = new DIAG.Swarm(64, { color: PAL.am, size: 0.0019 });
+  mg.add(carriers);
 
-  for (const sy of [1, -1]) {
-    const post = new THREE.Mesh(new THREE.CircleGeometry(0.0032, 18),
-      new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true, opacity: 0.9 }));
-    post.position.set(xT, sy * yT, zL + 0.001);
-    post.renderOrder = 15;
-    g.add(post);
-  }
   const flow = [];
-  for (const sAt of [0.14, 0.40, 0.62, 0.88]) {
-    const h = new THREE.Mesh(new THREE.ConeGeometry(0.0030, 0.0080, 10),
+  for (const sAt of [0.10, 0.33, 0.56, 0.80]) {
+    const h = new THREE.Mesh(new THREE.ConeGeometry(0.0025, 0.0066, 10),
       new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true, opacity: 0.9 }));
     h.renderOrder = 16;
     h.userData.s = sAt * path.total;
-    g.add(h);
+    mg.add(h);
     flow.push(h);
   }
+
+  // the amplifier, on the bottom rail
+  const src = new THREE.Mesh(new THREE.TorusGeometry(0.0062, 0.0008, 8, 28),
+    new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true, opacity: 0.85 }));
+  src.position.set((SCH.x0 + SCH.x1) / 2, SCH.yBot, 0.0010);
+  src.renderOrder = 16;
+  mg.add(src);
+  const sine = new DIAG.Trace(17, PAL.am, 1.3, { opacity: 0.85, renderOrder: 17 });
+  sine.write((i, u) => [(SCH.x0 + SCH.x1) / 2 + (u - 0.5) * 0.0082,
+    SCH.yBot + Math.sin(u * TAU) * 0.0022, 0.0020]);
+  mg.add(sine);
 
   // Textbook convention: the dot/cross goes IN the conductor cross-section. The
   // winding runs circumferentially, so at this cut it is exactly perpendicular
   // to the page — which is the whole reason F = Bl·i is axial.
-  const src = new THREE.Mesh(new THREE.TorusGeometry(0.0072, 0.0009, 8, 28),
-    new THREE.MeshBasicMaterial({ color: PAL.am, toneMapped: false, transparent: true, opacity: 0.85 }));
-  src.position.set(xAmp, 0, zL + 0.001);
-  src.renderOrder = 16;
-  g.add(src);
-  const sine = new DIAG.Trace(17, PAL.am, 1.4, { opacity: 0.85, renderOrder: 17 });
-  sine.write((i, u) => [xAmp + (u - 0.5) * 0.0092, Math.sin(u * TAU) * 0.0026, zL + 0.002]);
-  g.add(sine);
-
-  const markT = polarityMark(0.0042); const markB = polarityMark(0.0042);
-  markT.position.set(X_GAPC, R_COIL, 0.013);
-  markB.position.set(X_GAPC, -R_COIL, 0.013);
-  g.add(markT, markB);
+  const markT = polarityMark(0.0040);
+  markT.position.set(X_GAPC + 0.0092, R_COIL, 0.013);
+  mg.add(markT);
 
   /*
-   * Force vector. It is drawn FROM the coil — origin at X_GAPC + x(t), just
-   * clear of the winding — so it reads as F = Bl·i acting on the moving
-   * assembly, not as free-floating interface chrome.
+   * Force vector, in the cone's mouth and springing from the dust cap, so it
+   * reads as F = Bl·i acting on the moving assembly rather than as free-
+   * floating interface chrome. Its tail travels with the cone.
    */
-  const ARR = 0xaeb6c1;
-  const fArrow = new DIAG.Trace(2, ARR, 2.6, { opacity: 0.95, renderOrder: 16 });
-  const fHead = new THREE.Mesh(new THREE.ConeGeometry(0.0038, 0.0098, 14),
+  const ARR = 0xc3cad4;
+  const fArrow = new DIAG.Trace(2, ARR, 2.4, { opacity: 0.95, renderOrder: 16 });
+  const fHead = new THREE.Mesh(new THREE.ConeGeometry(0.0032, 0.0084, 14),
     new THREE.MeshBasicMaterial({ color: ARR, toneMapped: false, transparent: true }));
   fHead.renderOrder = 16;
-  g.add(fArrow, fHead);
+  mg.add(fArrow, fHead);
 
   /*
-   * The travel ruler. BOTH rulers are centred on X_GAPC — the coil's own axial
-   * centre — so the live excursion dimension and the Xmax gate share an origin
-   * and can actually be compared. Centring the live one on x = 0 while the gate
-   * sat on X_GAPC put a 24 mm offset between two scales the reader is being
-   * asked to read against each other.
+   * The travel ruler, on the coil's own axial centre, just below the axis so it
+   * measures the coil directly under it. The Xmax gate shares that origin — the
+   * live excursion and the limit are the two things the reader is being asked
+   * to compare, and they were 24 mm apart on two different scales.
    */
-  const RY = -0.092;
-  const dim = DIAG.dimension([X_GAPC - X30, RY, 0.006], [X_GAPC + X30, RY, 0.006], { color: PAL.cy, head: 0.010 });
-  g.add(dim);
+  const dim = DIAG.dimension([X_GAPC - X30, RULER_Y, 0.006], [X_GAPC + X30, RULER_Y, 0.006],
+    { color: PAL.cy, head: 0.0028 });
+  mg.add(dim);
   for (const s of [1, -1]) {
-    const t = new DIAG.Trace(2, PAL.am, 1.3, { opacity: 0.85, renderOrder: 13 });
-    t.write((i) => [X_GAPC + s * TS.Xmax, RY + 0.004 - i * 0.015, 0.006]);
-    g.add(t);
+    const t = new DIAG.Trace(2, PAL.am, 1.2, { opacity: 0.85, renderOrder: 13 });
+    t.write((i) => [X_GAPC + s * TS.Xmax, RULER_Y + 0.0035 - i * 0.0090, 0.006]);
+    mg.add(t);
   }
-  const rule = new DIAG.Trace(2, PAL.am, 1.1, { opacity: 0.6, renderOrder: 13 });
-  rule.write((i) => [X_GAPC + (i ? 1 : -1) * TS.Xmax, RY - 0.0105, 0.006]);
-  g.add(rule);
+  const rule = new DIAG.Trace(2, PAL.am, 1.0, { opacity: 0.55, renderOrder: 13 });
+  rule.write((i) => [X_GAPC + (i ? 1 : -1) * TS.Xmax, RULER_Y - 0.0055, 0.006]);
+  mg.add(rule);
 
   // --- the specular layer -------------------------------------------------------
-  // A convex clear panel in front of the whole cut. The widened front strip
-  // sweeps across it as a soft band, so the card reads as glass over an
+  // Crowned cover glass in front of the whole cut, so the widened front strip
+  // sweeps across it as a soft band and the card reads as glass over an
   // instrument rather than as a decal printed on the render.
-  const gp = glassPanel(SEC_CARD_W + SEC_PAD * 2, SEC_CARD_H + SEC_PAD * 2, 0.0038);
+  const gp = cardGlass(SEC_CARD_W + SEC_PAD * 2, SEC_CARD_H + SEC_PAD * 2, 0.0022);
   gp.position.set(SEC_X0 + SEC_CARD_W / 2, SEC_Y0 + SEC_CARD_H / 2, 0.024);
   g.add(gp);
 
-  g.userData = { mov, carriers, path, markT, markB, fArrow, fHead, dim, wire, flow };
+  g.userData = { mov, carriers, path, markT, fArrow, fHead, dim, wire, flow };
   return g;
 }
 
@@ -1071,8 +1241,8 @@ function buildSection() {
 // Framing
 //
 // The clear stage is 960 x 840 px inside a 1600 x 1000 canvas, with the camera
-// axis landing at x = 670. The cabinet is the hero: full height, ~600 px tall,
-// on the left. The camera is NOT trucked sideways — the look-at point is panned
+// axis landing at x = 670. The cabinet is the hero: ~670 px tall, x 200…545, on
+// the left. The camera is NOT trucked sideways — the look-at point is panned
 // right instead, so the cabinet is seen from exactly the chosen three-quarter
 // angle and simply sits left of the optical axis. Two cards share the column on
 // its right and neither crosses the safe box.
@@ -1117,17 +1287,24 @@ function screenPt(dx, dy, dist) {
     .addScaledVector(UPV, -dy * k);
 }
 
+/*
+ * The two cards, in one column right of the hero, with clear background
+ * between them.
+ *
+ * They used to abut: the cutaway ran to y 537 and the graph card began at 514,
+ * so they fused into one black slab carrying more visual mass than the
+ * loudspeaker, and the cutaway's right edge sat exactly on the 1120 px safe
+ * limit. The cutaway is now 400 px tall centred at (952, 300) — y 100…500 — and
+ * the graph card 357 px at (916, 730) — y 551…908. Fifty-one pixels of room
+ * between them, 8 px of margin at the top, and neither crosses x 1120.
+ */
 const SEC_D = 2.90, GRA_D = 2.60;
-const SEC_C = screenPt(300, -180, SEC_D);        // motor cutaway card, screen ~(954, 320)
-// The graph card sits FLUSH under the cutaway card. At a 45 px gap the
-// subwoofer's dust cap showed through between them as an unexplained grey
-// sphere — the art director's finding 7 — and a gap that small reads as a
-// misalignment rather than as space anyway.
-const GRA_C = screenPt(248, 192, GRA_D);         // graph card,         screen ~(888, 692)
+const SEC_C = screenPt(282, -200, SEC_D);        // motor cutaway card, screen ~(952, 300)
+const GRA_C = screenPt(246, 230, GRA_D);         // graph card,         screen ~(916, 730)
 // A flat card square to the lens still projects ~5 % wider than the on-axis
 // arithmetic says, because its corners are further off axis than its centre.
 // These two constants are the measured request, not the nominal size.
-const SEC_S = (435 * mPerPx(SEC_D)) / (SEC_CARD_H + SEC_PAD * 2);   // → ~435 px tall
+const SEC_S = (400 * mPerPx(SEC_D)) / (SEC_CARD_H + SEC_PAD * 2);   // → ~400 px tall
 
 // Graph card: plot box 0.60 wide, a wide left margin for the y-axis numerals.
 // The two plots are pushed 0.13 apart — 72 px on screen — because at the old
@@ -1207,7 +1384,7 @@ export default {
     // A low, far-off-axis practical. At 2.4 it printed the whole section as one
     // near-white blob against a black card; the parts only separate when the
     // lamp is a modelling light, not a key.
-    const secLamp = new T3.PointLight(0xfff2e2, 1.7, 3.2, 2);
+    const secLamp = new T3.PointLight(0xfff2e2, 1.15, 3.2, 2);
     secLamp.position.copy(SEC_C).addScaledVector(RIGHTV, -0.52).addScaledVector(UPV, 0.34)
       .addScaledVector(FWD, -0.30);
     ov.add(secLamp);
@@ -1271,20 +1448,22 @@ export default {
     });
     gX.position.set(0, 0.105, 0.001);
     inner.add(gX);
-    gX.addBand(TS.Xmax * 1000, 12, PAL.am, 0.13);
+    // Beyond Xmax. At 0.13 this shaded third of the plot was the largest warm
+    // area in the frame and read as a tan block rather than as a limit.
+    gX.addBand(TS.Xmax * 1000, 12, PAL.am, 0.055);
     gX.addTrace(() => TS.Xmax * 1000, { color: PAL.am, width: 1.3, dashed: true, n: 2 });
     gX.addTrace((f) => DSP.excursionForSpl(SPL_REF, f, TS.Sd) * 1000, { color: PAL.am, width: 2.8 });
     gX.addMarker(F_XMAX, { color: PAL.am, opacity: 0.5 });
     gX.addMarker(XOVER.fLow, { color: PAL.cy, opacity: 0.75, dashed: false, width: 1.6 });
     const dotX = gX.addDot(PAL.cy, 0.006);
     gX.tickLabels(ctx.labels, {
-      xVals: [24, XOVER.fLow, 200], yVals: [0, 8, 12],
+      xVals: [24, XOVER.fLow, 200], yVals: [0, 4, 8, 12],
       xFmt: fTick, yFmt: (v) => v.toFixed(0),
       xOffset: [0, 12], yOffset: [-22, 0], priority: 5,
     });
 
     // the specular layer over the plots, matching the one over the cutaway
-    const gGlass = glassPanel(GCW, GCH, 0.020);
+    const gGlass = cardGlass(GCW, GCH, 0.008);
     gGlass.position.set(GX0 + GCW / 2, GY0 + GCH / 2, 0.030);
     inner.add(gGlass);
 
@@ -1318,20 +1497,20 @@ export default {
      * is one line, and the third line belongs in the panel.
      */
     const L = ctx.labels;
-    const LEAD_COL = 68;                        // px right of the camera axis
+    const LEAD_COL = 30;                        // px right of the camera axis
     /**
      * Anchor a label at a fixed screen position and rule a leader from its right
      * edge to a point in the section's own local frame.
      * @param dy   px below the camera axis
-     * @param lx,ly  the part, in section-local metres
+     * @param lx,ly  the part, in CARD metres (use KX()/KY() for cut coordinates)
      */
     const call = (dy, lx, ly, opts) => {
       const a = new T3.Object3D();
       a.position.copy(screenPt(LEAD_COL, dy, SEC_D));
       ov.add(a);
       const part = new T3.Vector3(lx, ly, 0.012).applyMatrix4(sec.matrixWorld);
-      const from = screenPt(LEAD_COL + 118, dy, SEC_D);
-      const t = new DIAG.Trace(3, 0xa7b0bb, 1.2, { opacity: 0.50, renderOrder: 9 });
+      const from = screenPt(LEAD_COL + 98, dy, SEC_D);
+      const t = new DIAG.Trace(3, 0xa7b0bb, 1.1, { opacity: 0.34, renderOrder: 9 });
       t.write((i) => (i === 0 ? [from.x, from.y, from.z]
         : i === 1 ? [from.x + (part.x - from.x) * 0.34, from.y, from.z]
           : [part.x, part.y, part.z]));
@@ -1346,22 +1525,22 @@ export default {
     };
     sec.updateMatrixWorld(true);
 
-    const lC = call(-330, 0.016, 0.078, {
-      kicker: 'CHARGE CARRIERS', text: 'they oscillate; they never arrive',
-      value: `±0 µm · shown ×${EXAG}`, cls: 'am', priority: 3,
-    });
-    const lI = call(-232, X_GAPC, R_COIL, {
-      kicker: 'VOICE COIL', text: `${L_IN_GAP.toFixed(1)} m of wire in ${B_GAP.toFixed(2)} T`,
+    const lI = call(-250, KX(X_GAPC + 0.0092), KY(R_COIL), {
+      kicker: 'VOICE COIL', text: `${N_TURNS.toFixed(0)} turns · ${L_IN_GAP.toFixed(1)} m in ${B_GAP.toFixed(2)} T`,
       value: 'i = 0.00 A', cls: 'am', priority: 3,
     });
-    const lF = call(-134, 0.029, 0.0, {
-      kicker: 'MOTOR FORCE', text: 'F = Bl · i, on 49 g of moving mass',
+    const lF = call(-184, KX(0.0155), KY(ARROW_Y), {
+      kicker: 'MOTOR FORCE', text: 'F = Bl · i on 49 g of cone',
       value: '0.0 N', cls: 'am', priority: 4,
     });
-    const lX = call(-32, X_GAPC, -0.092, {
+    const lX = call(-118, KX(X_GAPC), KY(RULER_Y), {
       kicker: 'CONE TRAVEL',
       text: `Xmax ${(TS.Xmax * 1000).toFixed(1)} mm in an ${(H_GAP * 1000).toFixed(1)} mm gap`,
-      value: '±0.00 mm at 30.0 Hz · one of four', cls: 'acc', priority: 4,
+      value: '±0.00 mm at 30 Hz', cls: 'acc', priority: 4,
+    });
+    const lC = call(-52, KX(SCH.x0 + 0.014), KY(SCH.yBot), {
+      kicker: 'CHARGE CARRIERS', text: 'they oscillate, never arrive',
+      value: `±0 µm · ×${EXAG}`, cls: 'am', priority: 3,
     });
     const lR = L.add(aR, {
       kicker: `SEALED ${(Vb * 1000).toFixed(0)} L · −12 dB/octave`,
@@ -1422,29 +1601,25 @@ export default {
     // --- real cones move at true 1 : 1 world scale ------------------------------
     for (const d of S.woofers) d.userData.moving.position.y = d.userData.baseY + S.x;
 
-    // --- the section (the same motion, drawn at the section's 1 : 1 scale) ------
+    // --- the section (the same motion, at the cut's own magnification) ----------
     const U = S.sec;
     U.mov.position.x = S.x;
-    const into = S.i >= 0;
-    U.markT.userData.setInto(into);
-    U.markB.userData.setInto(!into);
-    // Force vector, drawn from the coil itself, just clear of the winding.
-    // The arrow lives in the empty axial corridor between the pole piece and
-    // the cone neck. Sprung from x = 0.031 it reached 0.077 at full swing and
-    // drove its head straight through the source symbol at x = 0.045.
-    const fl = DSP.clamp(Math.abs(S.F) / 45, 0, 1) * 0.019 + 0.003;
+    U.markT.userData.setInto(S.i >= 0);
+    // Force vector, in the cone's mouth, its tail travelling with the dust cap.
+    // The x budget between the cap and the card's right edge is 19 mm of cut,
+    // and the tail alone eats 7.6 mm of it at full swing.
+    const fl = DSP.clamp(Math.abs(S.F) / 45, 0, 1) * 0.0070 + 0.0022;
     const dir = S.F >= 0 ? 1 : -1;
-    const x0 = 0.003 + S.x, yA = 0.0;
-    U.fArrow.write((i) => [i === 0 ? x0 : x0 + dir * fl, yA, 0.012]);
-    U.fHead.position.set(x0 + dir * (fl + 0.005), yA, 0.012);
+    const x0 = 0.0082 + S.x;
+    U.fArrow.write((i) => [i === 0 ? x0 : x0 + dir * fl, ARROW_Y, 0.012]);
+    U.fHead.position.set(x0 + dir * (fl + 0.0038), ARROW_Y, 0.012);
     U.fHead.rotation.z = dir > 0 ? -Math.PI / 2 : Math.PI / 2;
 
     // excursion dimension, redrawn to the live peak, on the coil's own centre
-    const RY = -0.092;
     const dm = U.dim.children;
-    dm[0].write((i) => [X_GAPC + (i === 0 ? -1 : 1) * xp, RY, 0.006]);
-    dm[1].position.x = X_GAPC - xp + 0.005;
-    dm[2].position.x = X_GAPC + xp - 0.005;
+    dm[0].write((i) => [X_GAPC + (i === 0 ? -1 : 1) * xp, RULER_Y, 0.006]);
+    dm[1].position.x = X_GAPC - xp + 0.0014;
+    dm[2].position.x = X_GAPC + xp - 0.0014;
 
     // --- carriers: true drift, magnified by a stated factor ---------------------
     const amp = S.dr * EXAG * sn;
@@ -1477,7 +1652,7 @@ export default {
 
   setReveal(k) {
     if (!S) return;
-    S.lamp.intensity = 1.7 * k;
+    S.lamp.intensity = 1.15 * k;
   },
 
   /*
@@ -1489,14 +1664,13 @@ export default {
   content() {
     return `
 <h3>The motor</h3>
-<p><span class="num">Bl</span> = <span class="num">${TS.Bl.toFixed(1)} T·m</span>: of the coil's
-${WIRE_LEN.toFixed(1)} m of 0.32 mm copper, <span class="num">${L_IN_GAP.toFixed(1)} m</span> lies in
-an ${(H_GAP * 1000).toFixed(1)} mm gap at ${B_GAP.toFixed(2)} T.</p>
+<p><span class="num">Bl</span> = <span class="num">${TS.Bl.toFixed(1)} T·m</span>:
+<span class="num">${L_IN_GAP.toFixed(1)} m</span> of the winding lies in an
+${(H_GAP * 1000).toFixed(1)} mm gap at ${B_GAP.toFixed(2)} T.</p>
 <div class="eq">F = Bl·i = <span class="hl">${F30.toFixed(1)} N</span> at ${F_LO} Hz, ${SPL_REF} dB
 i = F/Bl = <span class="hl">${I30.toFixed(2)} A</span>   coil fills in ${(T_FILL * 1e9).toFixed(0)} ns</div>
-<p>Current is a <b>loop</b> — in on one tinsel lead, ${N_TURNS.toFixed(0)} turns, out on the
-other — and nothing travels down it: carriers oscillate
-<span class="num">${(DR30 * 1e6).toFixed(1)} µm</span>, the cone moves
+<p>Current is a <b>loop</b> — in on one tinsel lead, out on the other. Carriers
+oscillate <span class="num">${(DR30 * 1e6).toFixed(1)} µm</span>; the cone moves
 <span class="num">${(X30 * 1000).toFixed(2)} mm</span>.</p>
 
 <h3>The cabinet</h3>
@@ -1505,9 +1679,9 @@ other — and nothing travels down it: carriers oscillate
 <div class="eq">α = Vas/Vb = ${(Vas * 1000).toFixed(0)}/${(Vb * 1000).toFixed(0)} = ${AL.alpha.toFixed(2)}
 fc = fs·√(α+1) = <span class="hl">${AL.fc.toFixed(1)} Hz</span>    Qtc ${AL.Qtc.toFixed(3)}
 f₃ ${F3.toFixed(1)} Hz  η₀ ${(ETA0 * 100).toFixed(2)} %  ${SENS.toFixed(1)} dB at 2.83 V</div>
-<p>Each woofer has its own sealed ${(Vb * 1000).toFixed(0)} L chamber. Every figure is
-<b>per driver</b>: four are 12 dB louder. Travel runs out below
-<span class="num">${F_XMAX.toFixed(1)} Hz</span>, which the LR4 at
+<p>Each woofer has its own sealed ${(Vb * 1000).toFixed(0)} L chamber; every figure
+here is <b>per driver</b>. At ${SPL_REF} dB travel runs out below
+<span class="num">${F_XMAX.toFixed(1)} Hz</span> — which the LR4 at
 <span class="num">${XOVER.fLow} Hz</span> never asks for.</p>`;
   },
 
@@ -1531,8 +1705,8 @@ f₃ ${F3.toFixed(1)} Hz  η₀ ${(ETA0 * 100).toFixed(2)} %  ${SENS.toFixed(1)}
     const L = s.labels;
     L.lF.setValue(`${sgn(d.F, 1)} N`);
     L.lI.setValue(`i = ${sgn(d.i, 2)} A`);
-    L.lC.setValue(`±${(d.dr * 1e6).toFixed(1)} µm · shown ×${EXAG}`);
-    L.lX.setValue(`±${(d.xp * 1000).toFixed(2)} mm at ${d.f.toFixed(1)} Hz · one of four`);
+    L.lC.setValue(`±${(d.dr * 1e6).toFixed(1)} µm · ×${EXAG}`);
+    L.lX.setValue(`±${(d.xp * 1000).toFixed(2)} mm at ${d.f.toFixed(0)} Hz`);
     L.lXg.setValue(`${(d.xp * 1000).toFixed(2)} mm at ${d.f.toFixed(0)} Hz · LR4 hands over at ${XOVER.fLow} Hz`);
     const sg = sgn;
     return [

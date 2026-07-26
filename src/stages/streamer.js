@@ -37,11 +37,14 @@ const TJ = 50e-12, JF = 1e4;
 const SNR_TJ = DSP.jitterSnrDb(JF, TJ);            // 110.06 dB rms, 0–fs/2
 const SNR_24 = DSP.quantSnrDb(NBITS);              // 146.26 dB
 const TJ_24 = 1 / (DSP.TAU * JF * DSP.undB(SNR_24)); // 0.7746 ps
-const SNR_20K = SNR_TJ + 10 * Math.log10((FS / 2) / 20000); // 110.48 dB in 20 kHz
+/* An earlier revision also re-banded the jitter noise into 0–20 kHz, which at
+   44.1 kHz is +0.42 dB. Quoting that to one decimal implies a precision the
+   premise — a white jitter spectrum across the Nyquist band — does not carry,
+   so the line is gone rather than hedged. */
 
 /* Time. The packet layer runs at the stage timeScale; the bit layer is four
    orders of magnitude faster, so it is derived from t with its own multiplier.
-   Both ratios are declared on the card, multiplied out, because a reader
+   Both ratios are multiplied out and declared on the card, because a reader
    looking at the picture must not have to find the prose to know what the
    ribbon's speed means. */
 const TS = 0.02;                                   // 1 simulated s per 50 real s
@@ -66,7 +69,7 @@ const RTT = 0.0045;                                // fast-retransmit round trip
 const TONE_F = 997, TONE_A = DSP.undB(-3), FULL24 = Math.pow(2, NBITS - 1) - 1;
 
 const C_LIT = 0x5cc0f2, C_DIM = 0x17384a, C_AUX = 0x6b7783, C_AUXD = 0x1d2229;
-const C_PRE = 0x93a7b6, C_NOW = 0xe6f6ff, C_AM = 0xf0b35a;
+const C_PRE = 0x93a7b6, C_NOW = 0xe6f6ff;
 
 /* ---------- helpers ------------------------------------------------------ */
 const _p3 = [0, 0, 0];
@@ -92,34 +95,30 @@ function anchor(parent, x, y, z = 0) {
 }
 
 /**
- * A CONVEX clear panel. This is the specular layer: a flat pane facing the
- * camera mirrors whatever sits at the reflection angle, and in this room that
- * is the dark floor. Curving it sweeps the surface normal through ~13°, which
- * drags the reflected image of the wide front strip across the panel as a soft
- * band with a real gradient either side of it.
+ * THE SPECULAR LAYER. Every lit surface on this stage — the display, the clock
+ * window, the diagram plate — carries a real cover glass in front of it, from
+ * the shared helper.
  *
- * rx, ry are the radii of curvature in metres; the sag is (w/2)²/2rx + (h/2)²/2ry.
+ * An earlier pass rolled its own: a crowned pane on the library glass at
+ * roughness 0.070. On a panel that wide, roughness that low returns essentially
+ * the whole front strip as one plateau, and it clipped to a white flare with a
+ * bloom halo over the middle of the display — the brightest thing in the frame,
+ * on the hero's own face. `GEO.instrumentGlass` is crowned so the source sweeps
+ * across as a band, and its reflectivity is 0.34 (a coated cover returns ~1.7 %
+ * at normal incidence, not the uncoated 4 %).
  */
-function curvedPane(w, h, rx, ry, sx = 26, sy = 16) {
-  const g = new THREE.PlaneGeometry(w, h, sx, sy);
-  const p = g.attributes.position;
-  const sag = (w * w) / (8 * rx) + (h * h) / (8 * ry);
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i);
-    p.setZ(i, sag - (x * x) / (2 * rx) - (y * y) / (2 * ry));
-  }
-  p.needsUpdate = true;
-  g.computeVertexNormals();
+function glassOver(w, h, opts = {}) {
+  const { opacity = null, env = null, ...rest } = opts;
+  const g = GEO.instrumentGlass(w, h, rest);
+  // The helper's own defaults are a compromise across twelve stages. Alpha
+  // scales the specular as well as the tint, so a cover that has to SHOW a
+  // sweep — the display, which is the one lit surface the reader looks at —
+  // needs a little more of both than a cover that only has to stop a card front
+  // reading as printed matter.
+  if (opacity !== null) g.material.opacity = opacity;
+  if (env !== null) g.material.envMapIntensity = env;
+  g.castShadow = g.receiveShadow = false;
   return g;
-}
-
-/** The one glass recipe this stage uses, so every specular layer matches. */
-function coverGlass(opacity, env) {
-  const m = mats().glass.clone();
-  m.transparent = true; m.opacity = opacity;
-  m.roughness = 0.070; m.clearcoatRoughness = 0.045;
-  m.depthWrite = false; m.envMapIntensity = env;
-  return m;
 }
 
 /* ---------- real 24-bit sample words ------------------------------------ */
@@ -181,17 +180,18 @@ function oled() {
     g.fillStyle = '#03060a'; g.fillRect(0, 0, 640, 128);
     g.fillStyle = 'rgba(120,200,240,0.030)';
     for (let y = 0; y < 128; y += 3) g.fillRect(0, y, 640, 1);
-    // Panel emissives are no longer competing with clipped white highlights, so
-    // the display runs at a real OLED level rather than at paper white.
-    g.fillStyle = '#63aecd'; g.font = mono(48); g.fillText('44.1', 16, 58);
-    g.font = mono(24, 500); g.fillStyle = '#3d7590'; g.fillText('kHz', 130, 57);
-    g.fillStyle = '#63aecd'; g.font = mono(48); g.fillText('24', 206, 58);
-    g.font = mono(24, 500); g.fillStyle = '#3d7590'; g.fillText('bit', 264, 57);
-    g.fillStyle = '#63aecd'; g.font = mono(28); g.fillText('AES · LOCK', 380, 55);
-    g.font = mono(19, 500); g.fillStyle = '#3d7590'; g.fillText('BUF', 16, 105);
+    // A real cover glass now sits over this, and glass costs about a third of
+    // the emissive. The levels below are set so the panel reads as an OLED
+    // THROUGH that glass rather than at paper white in front of it.
+    g.fillStyle = '#94d3ec'; g.font = mono(48); g.fillText('44.1', 16, 58);
+    g.font = mono(24, 500); g.fillStyle = '#5d9cb6'; g.fillText('kHz', 130, 57);
+    g.fillStyle = '#94d3ec'; g.font = mono(48); g.fillText('24', 206, 58);
+    g.font = mono(24, 500); g.fillStyle = '#5d9cb6'; g.fillText('bit', 264, 57);
+    g.fillStyle = '#94d3ec'; g.font = mono(28); g.fillText('AES · LOCK', 380, 55);
+    g.font = mono(19, 500); g.fillStyle = '#5d9cb6'; g.fillText('BUF', 16, 105);
     g.fillStyle = '#0e2733'; g.fillRect(62, 87, 392, 18);
-    g.fillStyle = '#4a9cc4'; g.fillRect(62, 87, 392 * Math.min(1, occ / BUF_FULL), 18);
-    g.fillStyle = '#63aecd'; g.font = mono(23); g.fillText(`${occ.toFixed(0)} ms`, 474, 106);
+    g.fillStyle = '#6cc0e4'; g.fillRect(62, 87, 392 * Math.min(1, occ / BUF_FULL), 18);
+    g.fillStyle = '#94d3ec'; g.font = mono(23); g.fillText(`${occ.toFixed(0)} ms`, 474, 106);
     t.needsUpdate = true;
   };
   draw(BUF_TARGET);
@@ -242,7 +242,7 @@ function clockIsland() {
   const g = new THREE.Group();
   const steel = mats().steel, gold = mats().gold;
   const m = mats().pcb.clone();
-  m.color.setHex(0x3b464e);             // stop the sub-board blowing out under the key
+  m.color.setHex(0x47535c);             // lift the sub-board out of the cavity's shade
   const b = new THREE.Mesh(GEO.bevelBox(0.098, 0.0016, 0.072, 0.0006, 2), m);
   b.position.y = -0.0008; g.add(b);
   for (const [dx, dz, w, d] of [[0, -0.031, 0.086, 0.0022],
@@ -331,14 +331,16 @@ function buildHardware() {
   const wallT = 0.0035, lidT = 0.0045, faceT = 0.013;
   /* The fascia runs on its own brushed aluminium. A vertical panel photographed
      from slightly above mirrors the floor, which is the darkest thing in the
-     room, so on the library brush at roughness 0.26 the face fell to near
-     charcoal while its bevels clipped. Rougher and with a stronger env term the
-     face lifts into a readable mid grey and the bevel highlight ramps instead
-     of clipping — the long top-to-bottom gradient a machined front should
-     have. */
+     room; on the library brush (roughness 0.26) the face fell to charcoal while
+     its bevels clipped to white hairlines — a black slab drawn in white line,
+     which is the opposite of a machined front. Rougher, the panel integrates a
+     wider cone of the room instead of mirroring one dark patch of it, so the
+     face lifts into a real mid grey and the bevel highlight ramps. */
   const alu = mats().alu.clone();
-  alu.roughness = 0.31; alu.envMapIntensity = 1.20;
-  const aluV = mats().aluV, blk = mats().anodBlack;
+  alu.roughness = 0.56; alu.envMapIntensity = 1.85; alu.color.setHex(0xcbcfd2);
+  const aluV = mats().aluV.clone();
+  aluV.roughness = 0.52; aluV.envMapIntensity = 1.60; aluV.color.setHex(0xb8bcc0);
+  const blk = mats().anodBlack;
 
   const floorP = new THREE.Mesh(GEO.bevelBox(W, 0.004, D, 0.0012, 3), blk);
   floorP.position.y = -H / 2 + 0.002; g.add(floorP);
@@ -355,7 +357,7 @@ function buildHardware() {
      An earlier pass dissolved the middle fascia panel and the lid. A front
      panel that vanishes does not read as a cutaway — it reads as a missing
      part, which is the one thing a product render must never look like. Every
-     panel now stays; the window simply clears. */
+     panel stays; the window simply clears. */
   const cut = new THREE.Group();
   g.add(cut);
   const fz = D / 2 + 0.0002;
@@ -407,58 +409,49 @@ function buildHardware() {
     new THREE.MeshBasicMaterial({ map: ol.tex, toneMapped: false }));
   disp.position.set(DISP_X, DISP_Y, fz + 0.0009); g.add(disp);
 
-  /* A trim ring around the display, proud of the bezel. It is what tells the
-     eye there is a physical window here and not a printed panel, and it gives
-     the glass an edge to sit in.
+  /* A trim ring around the display, proud of the bezel, with the cover glass
+     seated inside it. It is what tells the eye there is a physical window here
+     and not a printed panel.
 
-     It runs on its OWN aluminium, rougher and with a weaker env term than the
-     library brush. A 2.4 mm bar with a 0.7 mm fillet sweeps its mirror
-     direction through the whole front strip over a couple of pixels, so on
-     M.alu (roughness 0.26) it clipped to a 100 % white hairline with visible
-     lateral CA. At 0.40 the same bar carries a grey ramp with a bright core —
-     which is what a machined bezel actually does. */
-  const trimM = mats().alu.clone();
-  trimM.roughness = 0.40; trimM.envMapIntensity = 0.62; trimM.color.setHex(0xa9aeb4);
+     It runs on the library's TRIM alloy, not its mirror brush: a 2.4 mm bar is
+     narrower than the reflected image of the front strip, so a polished section
+     sweeps its whole mirror direction across two pixels and clips to a white
+     hairline. `aluTrim` is satin — the section keeps a grey ramp with a bright
+     core, which is what a machined bezel actually does. */
+  const trimM = mats().aluTrim;
   for (const [w, h, dx, dy] of [
     [DISP_W + 0.0132, 0.0024, 0, DISP_H / 2 + 0.0054],
     [DISP_W + 0.0132, 0.0024, 0, -DISP_H / 2 - 0.0054],
     [0.0024, DISP_H + 0.0036, -DISP_W / 2 - 0.0054, 0],
     [0.0024, DISP_H + 0.0036, DISP_W / 2 + 0.0054, 0]]) {
-    const t = new THREE.Mesh(GEO.bevelBox(w, h, 0.0026, 0.0007, 3), trimM);
-    t.position.set(DISP_X + dx, DISP_Y + dy, fz + 0.0004); g.add(t);
+    const t = new THREE.Mesh(GEO.bevelBox(w, h, 0.0034, 0.0007, 3), trimM);
+    t.position.set(DISP_X + dx, DISP_Y + dy, fz + 0.0012); g.add(t);
   }
 
-  /* THE SPECULAR LAYER, twice. Without it a lit panel is a decal: the emissive
-     is the only thing the surface does. Both covers are real dielectrics with
-     their own reflection — almost flat across the width so the wide front strip
-     lands as one long horizontal band, and curved top-to-bottom so that band
-     has a gradient either side of it instead of mirroring the dark floor
-     straight back at the lens. Both are raked back 6°, because with the glass
-     vertical the mirror direction points at the floor, which is the darkest
-     thing in the room. */
-  const cover = new THREE.Mesh(
-    curvedPane(DISP_W + 0.007, DISP_H + 0.008, 12.0, 0.150, 30, 20), coverGlass(0.36, 1.5));
-  cover.position.set(DISP_X, DISP_Y, fz + 0.0012);
-  cover.rotation.x = -0.105;
-  cover.renderOrder = 4;
+  /* The specular layer, twice: over the display, and over the clock window.
+     Both are `GEO.instrumentGlass` — crowned, so the widened front strip
+     crosses each as a soft band with a gradient either side of it, and coated,
+     so it never returns enough to clip. Each sits ~2 mm in front of what it
+     covers, inside its own bezel. */
+  const cover = glassOver(DISP_W + 0.0072, DISP_H + 0.0072,
+    { crown: 0.0017, roughness: 0.16, opacity: 0.40, env: 1.30 });
+  cover.position.set(DISP_X, DISP_Y, fz + 0.0022);
   g.add(cover);
 
-  const win = new THREE.Mesh(
-    curvedPane(AP_W + 0.002, AP_H + 0.002, 30.0, 1.20, 26, 18), coverGlass(0.135, 0.85));
-  win.position.set(AP_CX, AP_CY, faceZ + faceT / 2 - 0.0016);
-  win.rotation.x = -0.130;
-  win.renderOrder = 5;
+  const win = glassOver(AP_W + 0.0016, AP_H + 0.0016,
+    { crown: 0.0017, roughness: 0.14, opacity: 0.34, env: 1.15 });
+  win.position.set(AP_CX, AP_CY, faceZ + faceT / 2 - 0.0022);
   g.add(win);
 
   // The smoked infill behind that glass. This is what dissolves: closed, the
   // window is a dark pane; open, it is a view of the oven.
   const smoke = new THREE.Mesh(new THREE.PlaneGeometry(AP_W, AP_H), mats().anodBlack.clone());
-  smoke.position.set(AP_CX, AP_CY, faceZ + faceT / 2 - 0.0042);
+  smoke.position.set(AP_CX, AP_CY, faceZ + faceT / 2 - 0.0048);
   cut.add(smoke);
 
   const kn = GEO.knob(0.0185, 0.013, { flutes: 64 });
   kn.rotation.x = Math.PI / 2; kn.position.set(0.222, 0.002, fz + 0.0055); g.add(kn);
-  const kRing = new THREE.Mesh(new THREE.TorusGeometry(0.0206, 0.0009, 10, 44), mats().chrome);
+  const kRing = new THREE.Mesh(new THREE.TorusGeometry(0.0206, 0.0009, 10, 44), mats().aluTrim);
   kRing.position.set(0.222, 0.002, fz + 0.0006); g.add(kRing);
   // Transport buttons, on the solid fascia below the display — they used to sit
   // inside the window aperture, where they had nothing to be milled into.
@@ -491,14 +484,10 @@ function buildHardware() {
   g.add(lid);
 
   /* The lid STAYS ON, and so does every panel. The reveal is the window
-     clearing, nothing more.
-
-     An earlier pass dissolved the lid so the key light could reach the board.
-     It turns out not to be needed: image-based lighting is not occluded by
-     geometry, so the interior seen through the aperture is lit by the studio
-     environment whether the lid is there or not — and a box with its lid
-     missing reads as a broken product, which is a much larger cost than the
-     one direct-light bounce it buys.
+     clearing, nothing more. Image-based lighting is not occluded by geometry,
+     so the interior seen through the aperture is lit by the studio environment
+     whether the lid is there or not — and a box with its lid missing reads as a
+     broken product.
 
      Clone every material in `cut` first: the library ones are shared with every
      other stage, and fadeTree writes opacity onto whatever it is given. */
@@ -533,41 +522,57 @@ function buildHardware() {
 }
 
 /* =========================================================================
-   OVERLAY — one card, three plot regions, sitting above the chassis.
+   OVERLAY — ONE card, THREE plot regions, sitting above the chassis.
    Local origin = bottom-left of the content area.
 
-   The card is deliberately narrower than the chassis (500 mm against 555 mm):
-   the hardware is the subject and the diagram is its caption, not the reverse.
+   The card used to be 500 mm wide against a 555 mm chassis, stacked directly
+   over the rack, and the shot framed the two together: the picture was an
+   opaque black plate with the hardware as a band beneath it. It is now 378 mm
+   over that same 555 mm chassis, it carries three regions rather than four (the
+   packet-arrival strip said what the buffer trace already says), and the shot
+   is framed on the CHASSIS. The diagram is the caption; the machine is the
+   subject.
    ========================================================================= */
-const PW = 0.446, PH = 0.160, PAD = 0.022;
-const CARD_HALF = PH / 2 + PAD;
-/** Chassis top is at 0.382; the card's outer edge clears it by 40 mm. */
-const CARD_C = [-0.024, 0.382 + 0.040 + CARD_HALF, -3.020];
+const PW = 0.340, PH = 0.134, PAD = 0.019;
+/** Plate half-height, including the pad and the machined bezel around it. */
+const CARD_HALF = PH / 2 + PAD + 0.006;
+/** Chassis top is at 0.382; the plate's outer edge clears it by 46 mm, which is
+ *  what it takes for a sliver of the converter's own fascia to show between the
+ *  two — without it, the plate's bottom edge lands flush on the lid and the
+ *  thing reads as a monitor bolted into the rack rather than an annotation
+ *  standing 125 mm in front of it. */
+/* z matters more than it looks. The plate is yawed ~19° to face the lens, so
+   its right edge swings 63 mm further from the camera than its centre; at
+   z = −3.020 that edge fell BEHIND the front lip of the shelf above (−3.050)
+   and the shelf sliced the corner off the eye diagram. The plate now stands
+   95 mm clear of that lip, which also reads better: it is plainly an annotation
+   floating in front of the rack rather than something bolted to it. */
+const CARD_C = [-0.005, 0.382 + 0.046 + CARD_HALF, -2.955];
 const P_OP = 1.0;      // fully opaque: at 0.93 the rack's specular highlights
                        // punch through in linear space and read as ghosts.
 
 /* ribbon */
-const RIB_X0 = 0.005, RIB_W = 0.436, RIB_H = 0.013, RIB_Y = 0.138;
-const CELL_P = RIB_W / 32, CELL_W = CELL_P - 0.0024;
-const HALF_P = CELL_P / 2, HALF_W = HALF_P - 0.0015;
+const RIB_X0 = 0.004, RIB_W = 0.332, RIB_H = 0.0105, RIB_Y = 0.0865;
+const CELL_P = RIB_W / 32, CELL_W = CELL_P - 0.0018;
+const HALF_P = CELL_P / 2, HALF_W = HALF_P - 0.0011;
 const cellX = (i) => RIB_X0 + (i + 0.5) * CELL_P;
 const halfX = (i) => RIB_X0 + (i + 0.5) * HALF_P;
-const TITLE_Y = 0.157;
+const TITLE_Y = 0.1215;
 
-/* the two plots, and the arrival strip that shares the left one's time axis */
-const GH = 0.062, GY = 0.024;
-const SGY = 0.006, SGH = 0.013;
-const OGX = 0.029, GW = 0.162;
-/** The edge plot runs the full depth of the card: the left column spends its
- *  lower band on the arrival strip, and the punchline should not sit above
- *  100 px of dead plate. */
-const EGH = GY + GH - SGY;
-const EGX = 0.252, EGW = 0.163;
-const CAP_Y = 0.104;
+/* The two plots, side by side, under one caption row.
+   A two-line caption is 51 px tall — 35 mm at this scale — and on a 134 mm card
+   that also carries a ribbon and two plots there is no such room: the captions
+   sat straight on the ribbon's bracket. Each region now gets ONE mono line, in
+   its own accent, and the live numbers stay in the pinned footer where they
+   belong. */
+const GY = 0.011, GH = 0.047;
+const OGX = 0.030, GW = 0.140;
+const EGX = 0.196, EGW = 0.140;
+const CAP_Y = 0.0695;
 
 /** 48 edges out of a 50 ps rms population: enough for the ±1σ band the caption
  *  names to bound something visible. */
-const N_EDGE = 48, N_SAMP = 110;
+const N_EDGE = 48, N_SAMP = 96;
 
 function buildOverlay(ctx, shot) {
   const ov = new THREE.Group();
@@ -589,14 +594,11 @@ function buildOverlay(ctx, shot) {
   C.position.set(-PW / 2, -PH / 2, 0);
   P.add(C);
 
-  /* The card is a MACHINED PLATE, not a pasted PNG. A PlaneGeometry with a
-     1 px border has no thickness, so it has no edge for the room to light and
-     no shadow to drop on what is behind it — which is the single loudest CGI
-     tell in a still. This is a real 12 mm slab with a bevelled fillet standing
-     4 mm proud of the plate all round: the front strip catches that fillet as a
-     thin bright rim, and the slab drops a soft shadow onto the converter behind
-     it. The material is cloned because fadeTree writes opacity onto whatever it
-     finds, and the library materials are shared with every other stage. */
+  /* The card is a MACHINED PLATE, not a pasted PNG: a real 12 mm slab with a
+     bevelled fillet standing proud of the plate all round, so the front strip
+     catches that fillet as a thin bright rim and the slab drops a soft shadow
+     onto what is behind it. The material is cloned because fadeTree writes
+     opacity onto whatever it finds. */
   const slabM = mats().anodBlack.clone();
   slabM.color.setHex(0x14171b);
   const slab = new THREE.Mesh(
@@ -621,50 +623,35 @@ function buildOverlay(ctx, shot) {
   });
   C.add(S.dat);
   {
-    const y = RIB_Y - RIB_H / 2 - 0.005;
+    const y = RIB_Y - RIB_H / 2 - 0.0028;
     const pb = new DIAG.Trace(4, C_AUX, 1.0, { opacity: 0.55 });
-    poly(pb, [[RIB_X0, y + 0.005], [RIB_X0, y], [RIB_X0 + 4 * CELL_P - 0.0024, y],
-      [RIB_X0 + 4 * CELL_P - 0.0024, y + 0.005]]);
+    poly(pb, [[RIB_X0, y + 0.003], [RIB_X0, y], [RIB_X0 + 4 * CELL_P - 0.0018, y],
+      [RIB_X0 + 4 * CELL_P - 0.0018, y + 0.003]]);
     C.add(pb);
     const ab = new DIAG.Trace(4, PAL.cy, 1.1, { opacity: 0.55 });
-    poly(ab, [[cellX(4) - CELL_W / 2, y + 0.005], [cellX(4) - CELL_W / 2, y],
-      [cellX(27) + CELL_W / 2, y], [cellX(27) + CELL_W / 2, y + 0.005]]);
+    poly(ab, [[cellX(4) - CELL_W / 2, y + 0.003], [cellX(4) - CELL_W / 2, y],
+      [cellX(27) + CELL_W / 2, y], [cellX(27) + CELL_W / 2, y + 0.003]]);
     C.add(ab);
   }
 
-  /* ---------- region 2: buffer occupancy, over its own arrival strip ------
-     The arrival ticks used to live inside the occupancy plot box, sharing a
-     0–140 ms axis they have nothing to do with. They now have their own strip
-     below it, sharing only the time axis — which they DO share — and that
-     shared axis carries the one set of numerals. */
+  /* ---------- region 2: buffer occupancy ---------------------------------
+     The packet-arrival strip that used to sit under this plot is gone. It was a
+     fourth region drawing the same event twice: every tooth in this trace IS an
+     arrival gap, and the arrival rate is in the pinned footer. */
   const og = new DIAG.Graph({
     w: GW, h: GH, xRange: [-WIN, 0], yRange: [BUF_LO, BUF_HI],
     xTicks: [-0.36, -0.27, -0.18, -0.09, 0], yTicks: [70, 90, 110, 130],
   });
   og.position.set(OGX, GY, 0.0006); C.add(og); S.og = og;
-  const tgt = new DIAG.Trace(2, PAL.am, 1.2, { opacity: 0.6, dashed: true, dashSize: 0.006, gapSize: 0.005 });
+  const tgt = new DIAG.Trace(2, PAL.am, 1.2, { opacity: 0.6, dashed: true, dashSize: 0.005, gapSize: 0.004 });
   poly(tgt, [[0, og.y(BUF_TARGET), 0.0008], [GW, og.y(BUF_TARGET), 0.0008]]);
   og.add(tgt);
   og.addTrace((x) => S.occAt(-x), { color: PAL.cy, width: 2.0, n: 150 });
   og.tickLabels(ctx.labels, {
-    yVals: [70, 100, 130], yFmt: (v) => v.toFixed(0), yOffset: [-15, 0],
-  });
-
-  const ag = new DIAG.Graph({
-    w: GW, h: SGH, xRange: [-WIN, 0], yRange: [0, 1],
-    xTicks: [-0.36, -0.27, -0.18, -0.09, 0], yTicks: [], grid: false,
-  });
-  ag.position.set(OGX, SGY, 0.0006); C.add(ag); S.ag = ag;
-  S.pk = new DIAG.Swarm(96, {
-    color: 0xffffff, additive: false, geometry: new THREE.PlaneGeometry(0.0010, SGH * 0.78),
-  });
-  S.pk.position.z = 0.0010;
-  ag.add(S.pk);
-  S.tickY = SGH / 2;
-  ag.tickLabels(ctx.labels, {
-    xVals: [-0.36, -0.18, 0],
+    xVals: [-0.36, 0], yVals: [70, 100, 130],
     xFmt: (v) => (v * 1000).toFixed(0).replace('-', '−'),
-    xOffset: [0, 12],
+    yFmt: (v) => v.toFixed(0),
+    xOffset: [0, 12], yOffset: [-14, 0],
   });
 
   /* ---------- region 3: the clock edge, as a population ------------------
@@ -673,26 +660,33 @@ function buildOverlay(ctx, shot) {
      scatter, so the ±50 ps band the caption names is visibly the ±1σ envelope
      of the population it bounds — and so the crossing has a real width. */
   const eg = new DIAG.Graph({
-    w: EGW, h: EGH, xRange: [-500, 500], yRange: [-0.08, 1.12],
+    w: EGW, h: GH, xRange: [-500, 500], yRange: [-0.08, 1.12],
     xTicks: [-400, -200, 0, 200, 400], yTicks: [0, 0.5, 1], zeroLine: 0.5,
   });
-  eg.position.set(EGX, SGY, 0.0006); C.add(eg); S.eg = eg;
+  eg.position.set(EGX, GY, 0.0006); C.add(eg); S.eg = eg;
   const TE = 400 / (2 * Math.atanh(0.6));           // 20–80 % edge = 400 ps
   const edge = (x, sh) => 0.5 * (1 + Math.tanh((x - sh) / TE));
 
-  const bandM = new THREE.Mesh(new THREE.PlaneGeometry(eg.x(50) - eg.x(-50), EGH),
-    new THREE.MeshBasicMaterial({ color: PAL.am, transparent: true, opacity: 0.035, depthWrite: false, toneMapped: false }));
-  bandM.position.set(eg.x(0), EGH / 2, -0.0003); bandM.renderOrder = 6; eg.add(bandM);
+  // ±1σ, marked by ADDING light rather than laying a tinted film over the plot.
+  // At 3.5 % normal blending the amber sat below the plate's own env-lit value
+  // and the band read as a dark bar — a stripe of shadow where the argument
+  // wants a stripe of emphasis.
+  const bandM = new THREE.Mesh(new THREE.PlaneGeometry(eg.x(50) - eg.x(-50), GH),
+    new THREE.MeshBasicMaterial({
+      color: PAL.am, transparent: true, opacity: 0.10, depthWrite: false,
+      blending: THREE.AdditiveBlending, toneMapped: false,
+    }));
+  bandM.position.set(eg.x(0), GH / 2, -0.0003); bandM.renderOrder = 6; eg.add(bandM);
 
   {
     const rndE = mulberry32(51413);
     const off = new Float64Array(N_EDGE);
     for (let j = 0; j < N_EDGE; j++) off[j] = gauss(rndE) * (TJ * 1e12);
-    // One instanced mesh, one draw call. The per-dot colour is a twelfth of the
-    // accent, so density — not opacity — is what builds the band; that is what
-    // an edge population actually looks like on a scope.
+    // One instanced mesh, one draw call. The per-dot colour is a twentieth of
+    // the accent, so density — not opacity — is what builds the band; that is
+    // what an edge population actually looks like on a scope.
     const pop = new DIAG.Swarm(N_EDGE * N_SAMP, {
-      color: 0xffffff, additive: true, geometry: new THREE.PlaneGeometry(0.0016, 0.0016),
+      color: 0xffffff, additive: true, geometry: new THREE.PlaneGeometry(0.0014, 0.0014),
     });
     pop.renderOrder = 7;
     const dim = new THREE.Color(PAL.am).multiplyScalar(0.052);
@@ -704,46 +698,52 @@ function buildOverlay(ctx, shot) {
     eg.add(pop);
   }
 
-  eg.addTrace((x) => edge(x, 0), { color: PAL.cy, width: 1.5, n: 80, dashed: true, z: 0.0010 });
-  S.edgeT = eg.addTrace((x) => edge(x, S.dt || 0), { color: 0xffe3b4, width: 2.6, n: 80, z: 0.0012 });
-  S.edgeDot = eg.addDot(PAL.am, 0.0036);
+  eg.addTrace((x) => edge(x, 0), { color: PAL.cy, width: 1.4, n: 80, dashed: true, z: 0.0010 });
+  S.edgeT = eg.addTrace((x) => edge(x, S.dt || 0), { color: 0xffe3b4, width: 2.4, n: 80, z: 0.0012 });
+  S.edgeDot = eg.addDot(PAL.am, 0.0034);
   eg.tickLabels(ctx.labels, {
     xVals: [-400, 0, 400], yVals: [0, 1],
     xFmt: (v) => v.toFixed(0).replace('-', '−'),
     yFmt: (v) => v.toFixed(0),
-    xOffset: [0, 12], yOffset: [-12, 0],
+    xOffset: [0, 12], yOffset: [-11, 0],
   });
 
   /* ---------- the specular layer over the card ---------------------------
-     The card is a physical pane in the room, not a screen-space overlay, so it
-     has to carry a reflection. Curved, so the front strip crosses it as a soft
-     band with a gradient rather than sitting on it as a flat value. */
-  const pane = new THREE.Mesh(
-    curvedPane(PW + PAD * 2, PH + PAD * 2, 22.0, 0.95, 26, 20), coverGlass(0.100, 1.70));
+     The plate is a physical pane in the room, not a screen-space overlay, so it
+     has to carry a reflection. Same helper as the display and the window: a
+     shallow crown, so the front strip crosses it as a soft band with a gradient
+     rather than sitting on it as a flat rectangle. */
+  const pane = glassOver(PW + PAD * 2, PH + PAD * 2,
+    { crown: 0.0011, roughness: 0.23, opacity: 0.13, env: 1.05 });
   pane.position.set(PW / 2, PH / 2, 0.0016);
-  pane.renderOrder = 26;
-  pane.castShadow = pane.receiveShadow = false;
   C.add(pane);
 
-  /* ---------- callout: the real oscillator, in the box ------------------- */
+  /* ---------- callout: the real oscillator, in the box -------------------
+     The label sits clear to the right of the plate, over the chassis's own
+     right third, with a leader that comes out through the window and runs up
+     and across. It is the only annotation that touches the hardware. */
   const canW = new THREE.Vector3();
   HW.userData.can.getWorldPosition(canW);
-  // The label lives in the clear band between the chassis lid and the card, so
-  // it sits over its OWN chassis and nothing else, with a leader that comes out
-  // through the window and up the front.
-  const CO = [canW.x, 0.406, -3.038];
-  const lead = new DIAG.Trace(5, 0x7c8894, 1.1, { opacity: 0.7, dashed: true, dashSize: 0.005, gapSize: 0.004 });
+  /* The run has to stay BELOW the plate on screen, not merely below it in
+     world y: the plate stands 90 mm nearer the lens, and with the camera 10°
+     above, a line that clears its bottom edge in metres still emerges from
+     behind it in pixels. So the leader runs out of the window, along the fascia
+     under the volume knob, and turns up at the chassis's right end — where
+     there is nothing in front of it at all. */
+  const CO = [0.270, 0.468, -3.012];
+  const lead = new DIAG.Trace(5, 0x7c8894, 1.1, { opacity: 0.62, dashed: true, dashSize: 0.005, gapSize: 0.004 });
   poly(lead, [[canW.x, canW.y + 0.006, canW.z],
-    [canW.x, canW.y + 0.010, -3.044],
-    [CO[0], CO[1] - 0.006, CO[2] - 0.006],
-    [CO[0], CO[1] - 0.002, CO[2] - 0.006]]);
+    [canW.x, canW.y + 0.006, -3.070],       // out through the window
+    [CO[0], 0.3085, -3.052],                // right along the fascia, under the knob
+    [CO[0], 0.452, -3.036],                 // up the right end, clear of the plate
+    [CO[0], CO[1] - 0.014, CO[2] - 0.004]]);
   ov.add(lead);
   S.coAnchor = anchor(ov, CO[0], CO[1], CO[2]);
 
   /* ============ labels ===============================================
-     Two lines each wherever possible: a kicker that names the thing and a value
-     line that delivers the number. The argument belongs in the panel; a
-     product-render callout is a caption, not a paragraph. */
+     Terse. The live numbers belong in the pinned footer — it is the instrument
+     cluster and it is always visible — so a caption here names its region and
+     gives the one figure the picture cannot show. */
   const L = ctx.labels;
   S.lab = {};
   S.lab.bits = L.add(anchor(C, RIB_X0 + RIB_W / 2, TITLE_Y), {
@@ -752,16 +752,12 @@ function buildOverlay(ctx, shot) {
     cls: 'acc', occlude: false, priority: 4, offset: [0, -4],
   });
   S.lab.buf = L.add(anchor(C, OGX + GW / 2, CAP_Y), {
-    kicker: 'BUFFER FILL · ms',
-    text: 'strip below: packet arrivals',
-    value: '120 ms', cls: 'acc', occlude: false, priority: 3, offset: [0, -4],
+    value: `BUFFER FILL ms · target ${BUF_TARGET}`,
+    cls: 'acc', occlude: false, priority: 3, offset: [0, -2],
   });
-  // Kickers are capped at 34ch by CSS, but `ch` does not include the 0.13em
-  // letterspacing, so anything past ~27 characters wraps and orphans its units.
   S.lab.edge = L.add(anchor(C, EGX + EGW / 2, CAP_Y), {
-    kicker: `CLOCK EDGE · 1σ = ${(TJ * 1e12).toFixed(0)} ps`,
-    text: `${N_EDGE} draws · peak at 10 kHz`,
-    value: 'Δt = +0 ps', cls: 'am', occlude: false, priority: 3, offset: [0, -4],
+    value: `CLOCK EDGE ps · 1σ = ${(TJ * 1e12).toFixed(0)} ps`,
+    cls: 'am', occlude: false, priority: 3, offset: [0, -2],
   });
   S.lab.ocxo = L.add(S.coAnchor, {
     kicker: `OCXO · ${(MCLK / 1e6).toFixed(4)} MHz = 128 f_s`,
@@ -788,9 +784,9 @@ function makeModel() {
   const RING = 512, DTS = 0.0008;
   const ring = new Float32Array(RING).fill(BUF_TARGET);
   const AR = 4096;
-  const arT = new Float64Array(AR), arK = new Uint8Array(AR);
+  const arT = new Float64Array(AR);
   const m = {
-    t: 0, occ: BUF_TARGET, n: 0, free: 0, stallEnd: 0, stallKind: 0,
+    t: 0, occ: BUF_TARGET, n: 0, free: 0, stallEnd: 0,
     head: 0, ringHead: 0, ringAcc: 0, nStall: 0, nRetx: 0,
   };
   m.step = (dt) => {
@@ -806,15 +802,14 @@ function makeModel() {
       m.occ += PKT_AUDIO * 1000;
       const late = rel > nom + 1e-12;
       arT[m.head % AR] = rel;
-      arK[m.head % AR] = late ? (m.stallKind === 1 ? 1 : 2) : 0;
       m.head++;
       if (!late) {                                  // only a caught-up sender stalls
         if (rnd() < (1 / PKT_RATE) / STALL_MEAN) {  // a switch queues behind other traffic
           m.stallEnd = rel + 0.010 + rnd() * 0.032;
-          m.stallKind = 0; m.nStall++;
+          m.nStall++;
         } else if (rnd() < 1 / RETX_ONE_IN) {       // a segment is lost and re-sent
           m.stallEnd = rel + RTT;
-          m.stallKind = 1; m.nRetx++;
+          m.nRetx++;
         }
       }
     }
@@ -827,14 +822,12 @@ function makeModel() {
       ring[m.ringHead] = m.occ;
     }
   };
-  /** Walk the arrival ring back over `win` seconds, newest first. */
-  m.recent = (win, cb) => {
+  /** How many segments arrived in the last `win` seconds. */
+  m.recent = (win) => {
     const cut = m.t - win;
     let n = 0;
     for (let i = m.head - 1; i >= 0 && i > m.head - AR; i--) {
-      const j = ((i % AR) + AR) % AR;
-      if (arT[j] < cut) break;
-      if (cb) cb(arT[j], arK[j], n);
+      if (arT[((i % AR) + AR) % AR] < cut) break;
       n++;
     }
     return n;
@@ -849,16 +842,24 @@ function makeModel() {
 const M = makeModel();
 
 /**
- * Framing. The subject is a 555 × 92 mm rack unit with a 500 mm diagram card
- * stacked above it; radius is HALF THE STACK, not the chassis's bounding
- * sphere, so `fill` means what it says. At fill 0.60 the fascia is about
- * 127 px tall and 767 px wide inside the 960 × 840 safe box: the hardware is
- * the largest object in the frame, which is the point.
+ * Framing. THE CHASSIS IS THE SUBJECT.
+ *
+ * The previous shot framed shelf-line to card-top as one stack at fill 0.65,
+ * which made the diagram plate the largest object in the picture and left the
+ * hardware as a band across the bottom. The subject is now the 555 mm unit
+ * itself, seen three-quarter from the right so the fascia has depth and the
+ * lid, the cheek and the machined front each return a different value; the
+ * plate rides above it, 378 mm wide against 555 mm, and reads as its caption.
+ *
+ * At fov 30, az 0.30, el 0.17 the chassis lands 880 px wide and 295 px tall
+ * inside the 960 x 840 safe box, and the plate 566 x 267 above it — checked by
+ * projecting all eight corners of each through the shifted principal point, not
+ * by eye.
  */
 const STACK_LO = 0.290;                                   // shelf line
-const STACK_HI = CARD_C[1] + CARD_HALF;                   // card outer top
-const SHOT = frameShot([-0.015, (STACK_LO + STACK_HI) / 2 + 0.050, -3.040],
-  (STACK_HI - STACK_LO) / 2, { fill: 0.65, az: -0.15, el: 0.115, fov: 26 });
+const STACK_HI = CARD_C[1] + CARD_HALF;                   // plate outer top
+const SHOT = frameShot([0.074, (STACK_LO + STACK_HI) / 2, -3.050],
+  (STACK_HI - STACK_LO) / 2, { fill: 0.58, az: 0.30, el: 0.17, fov: 30 });
 
 /**
  * ONE LATCHED INSTANT.
@@ -868,8 +869,8 @@ const SHOT = frameShot([-0.015, (STACK_LO + STACK_HI) / 2 + 0.050, -3.040],
  * 108 ms in the footer. Latching in update() is not enough either: the two
  * cadences still land on different ticks. So the snapshot is taken inside
  * readouts(), which the app calls at exactly the moment it rewrites the
- * footer — the card labels, the eye trace, the front-panel display and the
- * footer therefore all carry the SAME instant, always.
+ * footer — the eye trace, the front-panel display and the footer therefore all
+ * carry the SAME instant, always.
  *
  * It re-latches only when the model has actually advanced, so pausing freezes
  * every number rather than letting the jitter draw keep running.
@@ -890,9 +891,6 @@ function latch() {
   S.dt = DISP.dt;
   S.eg._fill(S.edgeT);
   S.edgeDot.userData.setData(DISP.dt, 0.5);
-  S.lab.buf.setValue(`${DISP.occ.toFixed(0)} ms`);
-  S.lab.edge.setValue(
-    `Δt ${DISP.dt >= 0 ? '+' : '−'}${Math.abs(DISP.dt).toFixed(0)} ps → ${DISP.errDb.toFixed(1)} dBFS`);
   HW.userData.oled.draw(DISP.occ);
 }
 
@@ -959,38 +957,21 @@ export default {
     S.lab.bits.setValue('0x' + sf.val.toString(16).toUpperCase().padStart(6, '0')
       + ` · drawn 1 : ${group(REAL_RATIO)} of real time`);
 
-    /* ---- packet layer -------------------------------------------------- */
-    const g = S.ag, ph = S.pk;
-    let k = 0;
-    M.recent(WIN, (ta, kind) => {
-      if (k >= ph.count) return;
-      ph.setColorAt(k, _col.set(kind === 1 ? C_AM : (kind === 2 ? 0x9ad9f7 : C_LIT)));
-      _m4.compose(_pv.set(g.x(ta - M.t), S.tickY, 0), _q, _s1);
-      ph.setMatrixAt(k, _m4);
-      k++;
-    });
-    for (let i = k; i < ph.count; i++) {
-      _m4.compose(_pv.set(0, 0, 0), _q, _s0);
-      ph.setMatrixAt(i, _m4);
-    }
-    ph.instanceMatrix.needsUpdate = true;
-    if (ph.instanceColor) ph.instanceColor.needsUpdate = true;
     S.og.refresh();
   },
 
   content() {
     return `
-<div class="myth"><span class="lab">Commonly got wrong</span><p>That "bit-perfect" settles the question. It settles the numbers — not the instants at which they are converted, and only the numbers crossed the network.</p></div>
+<div class="myth"><span class="lab">Commonly got wrong</span><p>That "bit-perfect" settles it. It settles the numbers — not the instants at which they are converted, and only the numbers crossed the network.</p></div>
 
 <h3>What arrives</h3>
-<p>Two channels of 24-bit samples at 44.1 kHz is <span class="num">2.1168 Mbit/s</span>. A 1460 B segment carries whole 6 B frames only — 243 of them, <span class="num">1458 B</span>, 5.5102 ms — so <span class="num">181.5 packet/s</span>, and they do not arrive on that beat: the model stalls the switch every <span class="num">90 ms</span> and re-sends one segment in <span class="num">380</span>, into a <span class="num">120 ms</span> buffer. TCP repairs every loss; <b>when</b> is the one thing it cannot supply.</p>
+<p>Two channels of 24-bit samples at 44.1 kHz is <span class="num">2.1168 Mbit/s</span>. A 1460 B segment carries whole 6 B frames only — 243 of them, <span class="num">1458 B</span>, 5.5102 ms — so <span class="num">181.5 packet/s</span>, and not on that beat: the model stalls the switch every <span class="num">90 ms</span> and re-sends one segment in <span class="num">380</span>, premises rather than measurements, into a <span class="num">120 ms</span> buffer. TCP repairs every loss; <b>when</b> is the one thing it cannot supply.</p>
 
 <h3>What leaves</h3>
 <p>Biphase-mark coding halves every AES3 bit, so the line runs at 128 f<sub>s</sub> = <span class="num">5.6448 MHz</span> — the oven's own frequency. A sample converted Δt early on a tone f errs by A·2πf·Δt:</p>
 <div class="eq">SNR = −20 log₁₀(2π f t_j)
     = <span class="hl">${SNR_TJ.toFixed(1)} dB</span>   f 10 kHz, t_j 50 ps rms
-<span class="c">over 0–${(FS / 2000).toFixed(2)} kHz; ${SNR_20K.toFixed(1)} dB counted to 20 kHz</span>
-<span class="c">24-bit floor ${SNR_24.toFixed(1)} dB, which ${(TJ_24 * 1e12).toFixed(2)} ps rms reaches</span></div>`;
+<span class="c">24-bit floor ${SNR_24.toFixed(1)} dB → ${(TJ_24 * 1e12).toFixed(2)} ps rms</span></div>`;
   },
 
   readouts() {
@@ -999,17 +980,13 @@ export default {
       { k: 'PAYLOAD', v: (PAYLOAD_BPS / 1e6).toFixed(4), u: 'Mbit/s', cls: 'acc' },
       { k: 'BIT CLOCK', v: (BCLK / 1e6).toFixed(4), u: 'MHz', cls: 'acc' },
       { k: 'BUFFER', v: DISP.occ.toFixed(0), u: 'ms', bar: DISP.occ / BUF_FULL },
-      { k: 'ARRIVAL 0.36 s', v: DISP.rate.toFixed(0), u: 'pkt/s', cls: '' },
-      { k: 'CLOCK Δt', v: (DISP.dt >= 0 ? '+' : '−') + Math.abs(DISP.dt).toFixed(0), u: 'ps', cls: 'am' },
-      { k: 'ERROR 10 kHz', v: DISP.errDb.toFixed(1), u: 'dBFS', cls: 'am' },
+      // Readout KEYS are uppercased by the panel's own CSS, whatever Addendum F
+      // says about labels, so no key here may carry a unit: 'ERROR 10 kHz' came
+      // back as 'ERROR 10 KHZ' and 'ARRIVAL 0.36 s' as '… 0.36 S'. The unit
+      // field is not transformed, so every unit lives there.
+      { k: 'ARRIVAL RATE', v: DISP.rate.toFixed(0), u: 'pkt/s', cls: '' },
+      { k: 'EDGE OFFSET', v: (DISP.dt >= 0 ? '+' : '−') + Math.abs(DISP.dt).toFixed(0), u: 'ps', cls: 'am' },
+      { k: 'JITTER ERROR', v: DISP.errDb.toFixed(1), u: 'dBFS at 10 kHz', cls: 'am' },
     ];
   },
 };
-
-/* scratch objects for the arrival ticks */
-const _col = new THREE.Color();
-const _m4 = new THREE.Matrix4();
-const _q = new THREE.Quaternion();
-const _pv = new THREE.Vector3();
-const _s1 = new THREE.Vector3(1, 1, 1);
-const _s0 = new THREE.Vector3(0, 0, 0);

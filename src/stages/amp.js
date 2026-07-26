@@ -74,6 +74,11 @@ const X_DRIFT   = DSP.driftDisplacement(V_DRIFT, F_SIG);     // 40.5 nm peak
 const T_CABLE   = CAB_LEN / V_FIELD;                         // 15.2 ns
 const SPEED_RAT = V_FIELD / V_DRIFT;                         // 7.8e11
 
+/** Programme mean, dB relative to the rated swing. CHOSEN to sit where loud
+ *  domestic listening on a 300 W amplifier actually sits: peaks at the rating,
+ *  mean ~19 W, quiet passages ~1.5 W. */
+const ENV_MEAN_DB = -12.0;
+
 const TS        = 0.002;                      // timeScale: 1 kHz → 2 Hz on screen
 const F_SCREEN  = F_SIG * TS;                 // 2 Hz as drawn
 
@@ -105,11 +110,31 @@ for (let k = 1; k <= 600; k++) {
 }
 const P_AT_PEAK = pOut(M_PEAK);                // delivered while burning P_D_PEAK
 
-// meter law: logarithmic, 30 dB of scale ending at the rated power
-const MET_DB   = 30;
-const MET_FS   = P_RATED;
+/**
+ * METER LAW — logarithmic, and it does NOT end at the rated power.
+ *
+ * A scale whose last graduation is the rating puts the normal operating point
+ * hard against the end stop: at the programme mean used here the needle sat on
+ * "300" and read as pinned rather than as −1 dB. Real power meters carry
+ * several decibels of overhead past the rating, marked in red, precisely so the
+ * reader can see how much is left. The scale therefore runs −30 dB to +4 dB
+ * relative to the rated MET_FS, with the top 4 dB a red overload sector.
+ */
+const MET_FS   = P_RATED;                      // 0 dB ≡ 300 W into 8 Ω
+const MET_END  = 400;                          // CHOSEN: end of scale, a round
+                                               // number above both the rating
+                                               // and the rail-limited ceiling
+/** The most this amplifier can deliver into 8 Ω before the rails run out —
+ *  the mark that actually matters, and it is derived, not drawn where it
+ *  looks good: V_rail²/2R = 351.6 W, which is +0.69 dB over the rating. */
+const P_CLIP   = pOut(1);
+const MET_LO   = 30;                           // dB below rated at full left
+const MET_HI   = 10 * Math.log10(MET_END / P_RATED);        // +1.25 dB
+const MET_SPAN = MET_LO + MET_HI;              // 31.25 dB across the arc
 const MET_SWEEP = 0.87266;                     // ±50° in radians
-const meterFrac = (p) => DSP.clamp((10 * Math.log10(Math.max(p, 1e-9) / MET_FS) + MET_DB) / MET_DB, 0, 1);
+const meterFrac = (p) => DSP.clamp((10 * Math.log10(Math.max(p, 1e-9) / MET_FS) + MET_LO) / MET_SPAN, 0, 1);
+/** inverse: needle deflection 0..1 → dB relative to the rating */
+const meterDb = (f) => f * MET_SPAN - MET_LO;
 
 // ---------------------------------------------------------------------------
 // THE SHOT — one monoblock as the hero, instrument plate beside it
@@ -125,13 +150,17 @@ const meterFrac = (p) => DSP.clamp((10 * Math.log10(Math.max(p, 1e-9) / MET_FS) 
 // own lit displays — which render after a diagram card — would print through
 // it. Trucking the other way pushes the rack past x = 1450 px, off the safe
 // box entirely, and leaves the plate against bare floor and backdrop.
-const AZ = 0.46, EL = 0.155, FOV = 30, FILL = 0.55;
+const AZ = 0.46, EL = 0.175, FOV = 30, FILL = 0.55;
 const MONO_R = 0.2765;                          // half the amp's overall height
 const MONO_C = [LAYOUT.monoL.x, 0.315, LAYOUT.monoL.z];
 const TAN_H = Math.tan((FOV * Math.PI) / 360);
 const D_CAM = MONO_R / (FILL * 0.84 * TAN_H);   // 2.234 m
 const PX_PER_M = 500 / (D_CAM * TAN_H);         // 835 px per metre at the subject
-const TRUCK_PX = -132;                          // −ve slides the subject RIGHT
+// ADDENDUM §A forbids geometry past x = 1120 px, and at −132 the equipment rack
+// still ran to the right frame edge under the explanation panel. −196 carries it
+// clear off the plate while leaving the monoblock's own right-hand heatsink
+// inside 1120.
+const TRUCK_PX = -232;                          // −ve slides the subject RIGHT
 const TRUCK = TRUCK_PX / PX_PER_M;
 
 const _base = frameShot(MONO_C, MONO_R, { fill: FILL, az: AZ, el: EL, fov: FOV });
@@ -194,64 +223,6 @@ function remapUV(geo, w, h) {
   return geo;
 }
 /**
- * A domed instrument glass — a lens, not a flat decal. The sag has to be a real
- * fraction of the pane: at 0.4 mm across a 115 mm window the surface normal
- * never turns far enough to sweep a source across it, and a mirror-smooth flat
- * pane at this camera angle simply reflects the dark shell.
- *
- * Geometry of the band, worked out rather than fiddled. The lens sits at world
- * y = 0.411 and the camera axis looks DOWN at it by 7.2°, so a flat vertical
- * pane reflects 7.2° BELOW the horizon — the near-black floor of the
- * environment shell, which is why the old pane returned nothing at all.
- *
- * Raking the pane back by `rake` turns the reflection up by 2·rake, and the
- * dome turns it a further ±2·atan(4·sag/h) from top edge to bottom, with the
- * TOP of a convex pane reflecting upward. The front strip (18 × 2.6 m at
- * z = +4.2) subtends 5.3°…24.8° from the meter. With rake 5.7° and 5 mm of sag
- * across the 116 mm window the reflected ray runs +23° at the top of the pane
- * to −16° at the bottom, so the strip lands as a band across the upper half —
- * over the scale, which is exactly where cover glass veils a real meter.
- */
-function domedPane(w, h, sag, sagX = 0, sx = 28, sy = 22) {
-  const g = new THREE.PlaneGeometry(w, h, sx, sy);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const u = (2 * p.getY(i)) / h, v = (2 * p.getX(i)) / w;
-    p.setZ(i, sag * (1 - u * u) + sagX * (1 - v * v));
-  }
-  p.needsUpdate = true;
-  g.computeVertexNormals();
-  return g;
-}
-
-/**
- * A pure specular layer: a black dielectric with a clearcoat, blended
- * additively, so ONLY its reflection of the room is added over whatever is
- * underneath. An emissive dial without one is a decal, whatever else is right.
- *
- * It must be a CLONE OF A LIBRARY MATERIAL: `applyEnv()` only walks the shared
- * library, so an ad-hoc `new MeshPhysicalMaterial` never receives the
- * environment map and reflects an empty scene.
- */
-function specularLayer(M, rough = 0.14, strength = 0.9, envI = 1.9) {
-  const m = M.glass.clone();
-  m.userData.ampOwned = true;
-  m.color.setHex(0x000000);
-  m.roughness = rough;
-  m.clearcoat = 1.0;
-  // The clearcoat lobe has its own roughness, and at the library's 0.02 it is a
-  // mirror that returns a knife-edged rectangle whatever the base roughness is.
-  // Both lobes have to be broad or the band has no rolloff.
-  m.clearcoatRoughness = rough * 0.85;
-  m.envMapIntensity = envI;
-  m.transparent = true;
-  m.opacity = strength;
-  m.depthWrite = false;
-  m.blending = THREE.AdditiveBlending;
-  m.toneMapped = true;
-  return m;
-}
-/**
  * The material library is shared by every stage, and a stage that puts a
  * library material into its *overlay* has its opacity driven to zero by the
  * global fade. Hardware must not be at the mercy of that, so every material on
@@ -309,7 +280,7 @@ const MET_W = 0.184, MET_H = 0.122;
 // bunching into the upper half and leaving dead face at the corners.
 const PIVOT_DY = 0.083;
 const PIVOT_Y = Y_MET - PIVOT_DY;
-const R_TICK = 0.116, R_NUM = 0.0985, NEEDLE_L = 0.1125;
+const R_TICK = 0.116, R_NUM = 0.0930, NEEDLE_L = 0.1122;
 
 // ---------------------------------------------------------------------------
 // The meter dial — silkscreen on a backlit face, drawn once into a canvas
@@ -322,81 +293,122 @@ function dialTexture(renderer) {
   c.width = W; c.height = H;
   const g = c.getContext('2d');
 
-  // Backlit face. A moving-coil power meter is lit by lamps in a trough behind a
-  // diffuser, so the face is a broad even cobalt with a soft falloff to the
-  // frame — NOT a lightbox, and not a radial hotspot either.
+  // BACKLIT FACE, DARK, WITH PALE SILKSCREEN.
   //
-  // It is deliberately held a stop and a half below the value a lit panel could
-  // take, because the cover glass's reflection band (see the lens, below) lands
-  // across the UPPER half of the window and has to be the brightest thing in it.
-  // A face driven to the top of the scale buries the one cue that says "this is
-  // under glass" and the meter goes back to reading as a decal.
+  // The previous face was a pale cobalt carrying dark legends. Two things
+  // killed it. First, at the delivered size the legend strokes were three or
+  // four pixels of near-black on a light ground that the cover glass's own
+  // reflection band then washed straight over — "POWER OUTPUT" was unreadable
+  // at 1:1. Second, a face driven that bright IS the brightest thing in the
+  // window, which is the definition of a decal: nothing sits in front of it.
+  //
+  // A lamp trough behind a diffuser lights the face from below and behind, so
+  // the pool is broad, slightly low, and dark at the corners. Holding the whole
+  // face two stops down and putting the ink in PALE means the ink has 4:1
+  // contrast against its ground and the glass reflection can still be the
+  // brightest event in the window.
   const bg = g.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0.00, '#154a70');
-  bg.addColorStop(0.42, '#1d6491');
-  bg.addColorStop(0.78, '#16527c');
-  bg.addColorStop(1.00, '#0b3153');
+  bg.addColorStop(0.00, '#071a2b');
+  bg.addColorStop(0.34, '#0c2c48');
+  bg.addColorStop(0.72, '#0e3252');
+  bg.addColorStop(1.00, '#061626');
   g.fillStyle = bg;
   g.fillRect(0, 0, W, H);
+  // the lamp pool itself: an ellipse low and central, never reaching the frame
+  const pool = g.createRadialGradient(W / 2, H * 0.54, W * 0.06, W / 2, H * 0.54, W * 0.62);
+  pool.addColorStop(0.00, 'rgba(46,116,170,0.26)');
+  pool.addColorStop(0.55, 'rgba(28,80,124,0.14)');
+  pool.addColorStop(1.00, 'rgba(6,20,34,0.00)');
+  g.fillStyle = pool; g.fillRect(0, 0, W, H);
   // corner falloff — no lit panel is even corner to corner
-  const vg = g.createRadialGradient(W / 2, H * 0.46, W * 0.18, W / 2, H * 0.46, W * 0.64);
-  vg.addColorStop(0.00, 'rgba(2,11,22,0.00)');
-  vg.addColorStop(1.00, 'rgba(2,11,22,0.58)');
+  const vg = g.createRadialGradient(W / 2, H * 0.52, W * 0.16, W / 2, H * 0.52, W * 0.66);
+  vg.addColorStop(0.00, 'rgba(2,8,15,0.00)');
+  vg.addColorStop(1.00, 'rgba(2,8,15,0.72)');
   g.fillStyle = vg; g.fillRect(0, 0, W, H);
 
   const PX = W / MET_W;                    // pixels per metre
   const cx = W / 2, cy = H / 2 + PIVOT_DY * PX;   // needle pivot, in canvas pixels
   const rTick = R_TICK * PX, rNum = R_NUM * PX;
-  const ink = 'rgba(4,16,29,1.00)';
-  const inkS = 'rgba(4,16,29,0.78)';
+  const ink = 'rgba(226,240,251,1.00)';
+  const inkS = 'rgba(196,216,234,0.72)';
+  const red = '#d6472f';
+  const at = (d) => -MET_SWEEP + (d / MET_SPAN) * 2 * MET_SWEEP;   // dB index → angle
+  const polar = (a, r) => [cx + Math.sin(a) * r, cy - Math.cos(a) * r];
 
-  // 1 dB ticks across 30 dB, majors every 5 dB
-  for (let d = 0; d <= MET_DB; d++) {
-    const a = -MET_SWEEP + (d / MET_DB) * 2 * MET_SWEEP;
+  // THE OVERLOAD SECTOR. Everything above the rating — the last MET_HI dB — is
+  // red, on the arc and on its ticks, and that is the whole reason the scale
+  // runs past 300 W at all. It is narrow because a 30 dB logarithmic arc gives
+  // 3.4° per decibel and the rails only allow 0.69 dB over the rating: a wide
+  // red band on a log power meter is a drawing, not a measurement.
+  g.lineCap = 'butt';
+  g.strokeStyle = red; g.lineWidth = 34;
+  g.beginPath();
+  g.arc(cx, cy, rTick + 24, -Math.PI / 2 + at(MET_LO), -Math.PI / 2 + at(MET_SPAN));
+  g.stroke();
+  // and the mark that actually matters: where ±75 V rails run out, at 351.6 W
+  const aClip = at(10 * Math.log10(P_CLIP / MET_FS) + MET_LO);
+  g.strokeStyle = red; g.lineWidth = 11;
+  g.beginPath(); g.moveTo(...polar(aClip, rTick + 42)); g.lineTo(...polar(aClip, rTick - 120)); g.stroke();
+
+  // TICK HIERARCHY, three deep: 1 dB hairlines, 5 dB mediums, a heavy tick at
+  // every printed numeral. A meter with one tick weight reads as a chart.
+  for (let d = 0; d <= MET_SPAN; d++) {
+    const a = at(d);
     const major = d % 5 === 0;
-    const len = major ? 74 : 33;
-    g.strokeStyle = major ? ink : inkS;
-    g.lineWidth = major ? 14 : 6.5;
-    g.lineCap = 'butt';
+    const over = d >= MET_LO;
+    const len = major ? 76 : 34;
+    g.strokeStyle = over ? red : (major ? ink : inkS);
+    g.lineWidth = major ? 13 : 6;
     g.beginPath();
-    g.moveTo(cx + Math.sin(a) * rTick, cy - Math.cos(a) * rTick);
-    g.lineTo(cx + Math.sin(a) * (rTick - len), cy - Math.cos(a) * (rTick - len));
+    g.moveTo(...polar(a, rTick));
+    g.lineTo(...polar(a, rTick - len));
     g.stroke();
   }
-  g.strokeStyle = 'rgba(4,16,29,0.62)'; g.lineWidth = 4.5;
-  g.beginPath(); g.arc(cx, cy, rTick, -Math.PI / 2 - MET_SWEEP, -Math.PI / 2 + MET_SWEEP); g.stroke();
+  // the arc itself, in two colours, so the red sector is unmistakable
+  g.lineWidth = 5;
+  g.strokeStyle = 'rgba(206,226,242,0.66)';
+  g.beginPath(); g.arc(cx, cy, rTick, -Math.PI / 2 - MET_SWEEP, -Math.PI / 2 + at(MET_LO)); g.stroke();
+  g.strokeStyle = red;
+  g.beginPath(); g.arc(cx, cy, rTick, -Math.PI / 2 + at(MET_LO), -Math.PI / 2 + MET_SWEEP); g.stroke();
 
-  // numerals: 0.3 1 3 10 30 100 300 W — five decibels apart, so evenly spaced.
-  // UPRIGHT. A 100-degree sweep is short enough that upright numerals stay
-  // square to the reader all the way round; the old `rotate(a * 0.6)` was
-  // neither upright nor radial, which is the one thing real meter silkscreen
-  // never is.
-  const labels = ['0.3', '1', '3', '10', '30', '100', '300'];
-  g.fillStyle = ink;
+  // Numerals at their TRUE positions. 0.3 1 3 10 30 100 300 are not evenly
+  // spaced in decibels — the 1:3 steps alternate 4.77 dB and 5.23 dB — so
+  // spacing them evenly, as the previous version did, silently mis-sites five
+  // of the seven. Each is placed at 10·log10(W/300) on the same law the needle
+  // obeys, so a reader taking a value off the dial gets the right one.
+  const labels = [[0.3, '0.3'], [1, '1'], [3, '3'], [10, '10'], [30, '30'], [100, '100'], [300, '300']];
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.font = '700 78px ui-sans-serif, -apple-system, Helvetica, Arial';
-  for (let i = 0; i < labels.length; i++) {
-    const a = -MET_SWEEP + (i / (labels.length - 1)) * 2 * MET_SWEEP;
-    const x = cx + Math.sin(a) * rNum, y = cy - Math.cos(a) * rNum;
-    g.fillText(labels[i], x, y);
+  g.font = '700 76px ui-sans-serif, -apple-system, Helvetica, Arial';
+  // a heavy graduation under each numeral
+  for (const [w] of labels) {
+    const a = at(10 * Math.log10(w / MET_FS) + MET_LO);
+    g.strokeStyle = w >= MET_FS ? red : ink;
+    g.lineWidth = 15;
+    g.beginPath(); g.moveTo(...polar(a, rTick)); g.lineTo(...polar(a, rTick - 80)); g.stroke();
+  }
+  for (const [w, s] of labels) {
+    const a = at(10 * Math.log10(w / MET_FS) + MET_LO);
+    g.fillStyle = w >= MET_FS ? red : ink;
+    g.fillText(s, ...polar(a, rNum));
   }
 
-  // Silkscreen. On a 2048 px canvas at this window size the legend lands at
-  // roughly 26 screen px in the delivered 3200 px frame, so it is read, not
-  // guessed at.
-  g.font = '700 56px ui-sans-serif, -apple-system, Helvetica, Arial';
-  g.fillStyle = 'rgba(4,16,29,0.94)';
-  g.letterSpacing = '16px';
-  g.fillText('POWER OUTPUT', cx + 8, H * 0.105);
-  g.font = '600 40px ui-sans-serif, -apple-system, Helvetica, Arial';
-  g.fillStyle = 'rgba(4,16,29,0.82)';
-  g.letterSpacing = '9px';
-  g.fillText('WATTS INTO 8 Ω', cx + 4, H * 0.205);
+  // Silkscreen, pale on the dark face. On a 2048 px canvas at this window size
+  // the legend lands at roughly 26 screen px in the delivered 3200 px frame, so
+  // it is read, not guessed at.
+  g.font = '700 58px ui-sans-serif, -apple-system, Helvetica, Arial';
+  g.fillStyle = 'rgba(224,238,250,0.96)';
+  g.letterSpacing = '17px';
+  g.fillText('POWER OUTPUT', cx + 8, H * 0.100);
+  g.font = '600 42px ui-sans-serif, -apple-system, Helvetica, Arial';
+  g.fillStyle = 'rgba(178,204,226,0.88)';
+  g.letterSpacing = '10px';
+  g.fillText('WATTS INTO 8 Ω', cx + 5, H * 0.200);
   g.letterSpacing = '0px';
-  g.font = '600 34px ui-sans-serif, -apple-system, Helvetica, Arial';
-  g.fillStyle = 'rgba(4,16,29,0.60)';
-  g.fillText('−30 dB', W * 0.088, H * 0.905);
-  g.fillText('0 dB', W * 0.916, H * 0.905);
+  g.font = '600 46px ui-sans-serif, -apple-system, Helvetica, Arial';
+  g.fillStyle = 'rgba(176,200,222,0.74)';
+  g.fillText(`−${MET_LO} dB`, W * 0.102, H * 0.905);
+  g.fillStyle = 'rgba(214,71,47,0.94)';
+  g.fillText('CLIP', W * 0.900, H * 0.905);
 
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -419,31 +431,37 @@ function ampMetals() {
     return m;
   };
   return {
-    top: mk(M.alu, { roughness: 0.42, envMapIntensity: 0.88, anisotropy: 0 }),
+    top: mk(M.alu, { roughness: 0.42, envMapIntensity: 0.88, anisotropy: 0, normalScale: new THREE.Vector2(0.15, 0.15) }),
     // ROUGHNESS IS THE MID-TONE LEVER, not envMapIntensity. Every frontal source
     // in the rig sits at y = 2.3…4.1 m while this fascia is at y = 0.4 m with the
     // lens looking 7° DOWN at it, so a smooth mirror reflects the black floor of
     // the shell and multiplying that by a bigger envMapIntensity just scales
     // darkness. Widening the lobe averages the strip in and gives the panel the
     // long top-to-bottom ramp instead of one flat value.
-    fascia: mk(M.alu, { roughness: 0.36, envMapIntensity: 1.25, anisotropy: 0 }),
+    fascia: mk(M.alu, { roughness: 0.36, envMapIntensity: 1.25, anisotropy: 0, normalScale: new THREE.Vector2(0.13, 0.13) }),
     // The handles are the widest specular on the front. A hair rougher than a
     // mirror so the widened front strip lands as a soft vertical ramp down the
     // rail rather than a clipped white edge line.
-    handle: mk(M.alu, { roughness: 0.24, envMapIntensity: 1.20, anisotropy: 0 }),
+    handle: mk(M.alu, { roughness: 0.24, envMapIntensity: 1.20, anisotropy: 0, normalScale: new THREE.Vector2(0.12, 0.12) }),
     bezel: mk(M.chrome, { roughness: 0.15, envMapIntensity: 0.95 }),
     // A lacquered panel under the meter: clearcoat 1.0 at 0.028 roughness gives
     // the front strip a bright, soft, moving band over a near-black base — the
     // specular layer the fascia otherwise has nowhere to put.
     gloss: mk(M.pianoBlack, { envMapIntensity: 1.20 }),
-    // Fin tips are 3 mm of rounded metal seen almost edge-on. They only read if
-    // they are glossy enough to carry a specular line off the front strip; the
-    // stock heatsink material renders the whole stack as a black void.
-    fin: mk(M.anodGrey, { roughness: 0.33, envMapIntensity: 1.80, anisotropy: 0 }),
+    // THE FIN STACK IS TWO MATERIALS, NOT ONE. A black-anodised extrusion is a
+    // dark body with a machined tip, and the repetition of that bright tip line
+    // thirty times over is most of what says "300 W class-AB monoblock". One
+    // material for the whole comb renders it as a single dark textured plate,
+    // which is exactly what the frame showed.
+    fin: mk(M.anodBlack, { color: new THREE.Color(0x1f2226), roughness: 0.40, envMapIntensity: 1.05, anisotropy: 0 }),
+    // The 1.6 mm radiused cap along each fin tip. Kept well off mirror: a
+    // section this narrow at chrome roughness clips to a white line and blooms,
+    // which is the failure mode `aluTrim` exists to avoid.
+    finTip: mk(M.anodGrey, { color: new THREE.Color(0x767c85), roughness: 0.24, envMapIntensity: 1.15, anisotropy: 0 }),
     finBase: mk(M.anodGrey, { roughness: 0.55, envMapIntensity: 0.72, anisotropy: 0 }),
     // The cheeks. Same argument as the fascia: a wider lobe is what puts a
     // gradient down a black flank instead of one value.
-    shell: mk(M.anodBlack, { roughness: 0.40, envMapIntensity: 1.25, anisotropy: 0 }),
+    shell: mk(M.anodBlack, { roughness: 0.40, envMapIntensity: 1.25, anisotropy: 0, normalScale: new THREE.Vector2(0.20, 0.20) }),
     // the rolled edge of the cover glass — polished, but narrow, so it is kept
     // a long way off mirror to stop the section clipping to a white line
     lensRim: mk(M.chrome, { color: new THREE.Color(0x8d949c), roughness: 0.20, envMapIntensity: 0.85 }),
@@ -455,24 +473,36 @@ function ampMetals() {
 }
 
 /**
- * Fin stack with a generous tip break. `GEO.heatsink` uses a 0.6 mm bevel on a
- * 2.2 mm fin, which is not enough radius to hold a highlight; 1.2 mm on a 3 mm
- * fin makes each tip a half-round that catches the light.
+ * Fin stack with a machined tip cap.
+ *
+ * `GEO.heatsink` uses a 0.6 mm bevel on a 2.2 mm fin, which is not enough
+ * radius to hold a highlight, and one material for base and fins renders the
+ * whole comb as a flat black plate. A real extrusion is skimmed on the tips, so
+ * each fin carries a bright line along its outer edge — and the eye counts
+ * those lines to get the scale of the object.
+ *
+ * The cap is a separate 1.6 mm half-round in a lighter alloy running the full
+ * height of every fin, so the line exists as GEOMETRY and moves correctly as
+ * the camera does, rather than being painted on.
  */
 function finStack(span, h, out, n, A) {
   const g = new THREE.Group();
-  const baseT = 0.008, finT = 0.0030;
+  const baseT = 0.008, finT = 0.0030, tipR = 0.0016;
   const base = new THREE.Mesh(GEO.bevelBox(span, h, baseT, 0.0012, 3), A.finBase);
   base.position.z = -out / 2 + baseT / 2;
   g.add(base);
-  const im = new THREE.InstancedMesh(GEO.bevelBox(finT, h, out - baseT, 0.0012, 3), A.fin, n);
-  const m = new THREE.Matrix4();
   const pitch = span / n;
+  const im = new THREE.InstancedMesh(GEO.bevelBox(finT, h, out - baseT, 0.0012, 3), A.fin, n);
+  const cap = new THREE.InstancedMesh(GEO.bevelCyl(tipR, tipR, h, 14, 0.0004), A.finTip, n);
+  const m = new THREE.Matrix4();
   for (let i = 0; i < n; i++) {
-    m.makeTranslation(-span / 2 + pitch * (i + 0.5), 0, baseT / 2);
+    const x = -span / 2 + pitch * (i + 0.5);
+    m.makeTranslation(x, 0, baseT / 2);
     im.setMatrixAt(i, m);
+    m.makeTranslation(x, 0, out / 2 - tipR * 0.42);
+    cap.setMatrixAt(i, m);
   }
-  g.add(im);
+  g.add(im, cap);
   GEO.shadowed(g);
   return g;
 }
@@ -529,13 +559,42 @@ function buildMono(renderer) {
     }
   }
 
-  // ---- top plate + venting -------------------------------------------------
-  const top = new THREE.Mesh(GEO.bevelBox(0.264, 0.014, 0.402, 0.0026, 4), A.top);
-  top.position.y = Y_BASE + H_BODY + 0.007;
+  // ---- top plate: vent field, fasteners, badge -----------------------------
+  // 199 W has to leave through this plate. The old panel was three 290 mm slots
+  // reading as shallow grooves; a real convection outlet over the output
+  // devices is a dense field of short slots, and the fasteners that hold the
+  // plate down are what give the eye the scale of the whole chassis.
+  // The aperture is CUT, not painted: the plate is an extruded panel with a
+  // real rectangular hole, and the louvres sit 6 mm down inside it on a dark
+  // floor. Dark slot boxes laid on a solid plate sink into it and vanish — the
+  // previous version put them 0.5 mm below the surface of an opaque slab, which
+  // is why the frame showed a bare polished lid.
+  const Y_TOP = Y_BASE + H_BODY + 0.014;      // top surface of the plate
+  const TP_W = 0.264, TP_D = 0.402, TP_T = 0.014;
+  const VW = 0.184, VD = 0.286;
+  const tShape = roundRect(TP_W, TP_D, 0.009);
+  tShape.holes.push(roundRect(VW, VD, 0.005, 0, 0.020, THREE.Path));
+  const top = extrudePanel(tShape, TP_T, TP_W, TP_D, A.top, 0.0016);
+  top.rotation.x = -Math.PI / 2;              // shape's local +z becomes world +y
+  top.position.y = Y_TOP - TP_T;
   g.add(top);
-  const vents = GEO.ventSlots(0.150, 0.290, 3, 13, { mat: M.plastic, sw: 0.0055, sd: 0.016 });
-  vents.position.set(0, Y_BASE + H_BODY + 0.0135, -0.01);
-  g.add(vents);
+  const trough = new THREE.Mesh(GEO.bevelBox(VW + 0.010, 0.004, VD + 0.010, 0.001, 2), M.anodBlack);
+  trough.position.set(0, Y_TOP - 0.0085, -0.020);
+  g.add(trough);
+  const louvre = GEO.ventSlots(VW - 0.014, VD - 0.010, 11, 1,
+    { mat: A.top, sw: 0.0058, sd: VD - 0.014 });
+  louvre.position.set(0, Y_TOP - 0.0016, -0.020);
+  g.add(louvre);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const s = GEO.screw(0.0032);
+    s.rotation.x = 0;                          // GEO.screw defaults to a front panel
+    s.position.set(sx * 0.1215, Y_TOP + 0.0002, sz * 0.1905);
+    g.add(s);
+  }
+  // machined badge on the top plate, forward of the aperture
+  const tbadge = new THREE.Mesh(GEO.bevelBox(0.064, 0.0016, 0.014, 0.0006, 2), A.bezel);
+  tbadge.position.set(0, Y_TOP + 0.0004, 0.163);
+  g.add(tbadge);
 
   // ---- fascia: a real aperture cut for the meter ---------------------------
   const FW = 0.250, FH = 0.408;
@@ -593,20 +652,23 @@ function buildMono(renderer) {
   // pointer standing proud of a lit dial always casts one, and its absence is
   // exactly what makes a meter look printed. It is a second, softer copy on its
   // own pivot, offset in the direction of the lamp trough above the window.
-  const needleMat = new THREE.MeshBasicMaterial({ color: 0x061321 });
+  //
+  // The face is now dark, so the pointer is pale: a dark needle on a dark dial
+  // is not a pointer. Held below white so it never crosses the bloom threshold.
+  const needleMat = new THREE.MeshBasicMaterial({ color: 0xc9d4df });
   needleMat.userData.ampOwned = true;
   const shadowMat = new THREE.MeshBasicMaterial({
-    color: 0x04101c, transparent: true, opacity: 0.30, depthWrite: false,
+    color: 0x020a12, transparent: true, opacity: 0.55, depthWrite: false,
   });
   shadowMat.userData.ampOwned = true;
   const mkNeedle = (mat, z, name) => {
     const p = new THREE.Group();
     p.name = name;
     p.position.set(0, PIVOT_Y, z);
-    const nd = new THREE.Mesh(GEO.bevelBox(0.0026, NEEDLE_L, 0.0018, 0.0005, 2), mat);
+    const nd = new THREE.Mesh(GEO.bevelBox(0.0019, NEEDLE_L, 0.0016, 0.0004, 2), mat);
     nd.position.y = NEEDLE_L / 2;
     p.add(nd);
-    const nb = new THREE.Mesh(GEO.bevelBox(0.0062, 0.030, 0.0020, 0.0008, 2), mat);
+    const nb = new THREE.Mesh(GEO.bevelBox(0.0050, 0.030, 0.0018, 0.0007, 2), mat);
     nb.position.y = 0.013;
     p.add(nb);
     g.add(p);
@@ -626,37 +688,48 @@ function buildMono(renderer) {
     [-0.0935, Y_MET - 0.0625], [0.0935, Y_MET - 0.0625]], Z_FACE + 0.0224, 0.0013);
 
   // ---- the meter lens ------------------------------------------------------
-  // THE COVER GLASS. Three layers, in this order, because the order is the
-  // whole point: the reflection must sit IN FRONT of the glow, not be
-  // multiplied into it.
+  // THE COVER GLASS — Addendum §J. Both panes come from `GEO.instrumentGlass`;
+  // the hand-rolled near-mirror that used to sit here is gone. The helper is
+  // crowned, so the front strip sweeps across the window as a BAND rather than
+  // sitting on it as a rectangle, and its reflectivity 0.34 is a coated cover
+  // glass returning ~1.7 % at normal incidence, not an uncoated 4 %.
   //
-  //   1. a smoked tint, which gives the glass a body and sinks the dial back;
-  //   2. the specular layer — an additive, env-only clearcoat on a domed pane,
-  //      raked 4.3°, so the front strip sweeps across the lower half of the
-  //      window as a soft band that partly veils the ticks;
-  //   3. the pane's own edge highlight where the dome meets the bezel.
+  // Two instances, because on a MeshPhysicalMaterial `opacity` scales the whole
+  // shaded result — specular included — so a single 30 %-opaque pane multiplies
+  // its own reflection down to a third of what the glass really returns:
   //
-  // On a MeshPhysicalMaterial `opacity` scales the whole shaded result,
-  // specular included, so a single 20 %-opaque pane multiplies its own
-  // reflection down to nothing. Layers 1 and 2 have to be separate meshes.
+  //   1. the VEIL: the helper as it ships, at low opacity. It gives the glass a
+  //      body and sinks the dial back behind it.
+  //   2. the SHEEN: the same crowned surface with a black tint and additive
+  //      blending, so only what the glass REFLECTS is added over the dial. This
+  //      is the specular layer sitting in front of the emissive, which is the
+  //      thing the art director said nothing in the piece had.
+  //
+  // Raked back 5.7°: the lens sits at y = 0.411 with the lens looking 7.2° DOWN
+  // at it, so an unraked pane reflects below the horizon — the near-black floor
+  // of the shell. The rake turns the reflected ray up by twice itself and the
+  // crown swings it a further ±2·atan(4·sag/h), putting the front strip across
+  // the upper half of the window, where cover glass veils a real meter.
   const RAKE = -0.100;                        // rad = 5.7°; top back, bottom forward
-  const smoked = M.glass.clone();
-  smoked.userData.ampOwned = true;
-  smoked.transparent = true;
-  smoked.opacity = 0.16;
-  smoked.depthWrite = false;
-  const glass = new THREE.Mesh(domedPane(MET_W - 0.005, MET_H - 0.005, 0.0050, 0.0022, 14, 10), smoked);
-  glass.position.set(0, Y_MET, Z_FACE + 0.0170);
-  glass.rotation.x = RAKE;
-  glass.renderOrder = 2;
-  g.add(glass);
+  const veil = GEO.instrumentGlass(MET_W - 0.005, MET_H - 0.005, { crown: 0.0052, segs: 22 });
+  veil.material.userData.ampOwned = true;
+  veil.material.opacity = 0.22;
+  veil.position.set(0, Y_MET, Z_FACE + 0.0170);
+  veil.rotation.x = RAKE;
+  veil.renderOrder = 2;
+  g.add(veil);
 
-  const spec = new THREE.Mesh(domedPane(MET_W - 0.006, MET_H - 0.006, 0.0050, 0.0022),
-    specularLayer(M, 0.155, 0.95, 2.45));
-  spec.position.set(0, Y_MET, Z_FACE + 0.0178);
-  spec.rotation.x = RAKE;
-  spec.renderOrder = 3;
-  g.add(spec);
+  const sheenLens = GEO.instrumentGlass(MET_W - 0.006, MET_H - 0.006, { crown: 0.0076, tint: 0x000000, segs: 24 });
+  const sm = sheenLens.material;
+  sm.userData.ampOwned = true;
+  sm.opacity = 1.0;
+  sm.envMapIntensity = 4.60;
+  sm.blending = THREE.AdditiveBlending;
+  sheenLens.position.set(0, Y_MET, Z_FACE + 0.0178);
+  sheenLens.rotation.x = RAKE;
+  sheenLens.renderOrder = 3;
+  g.add(sheenLens);
+  const glass = veil, spec = sheenLens;
 
   // The glass has a thickness, and the light that grazes its rolled edge is what
   // tells the eye the pane is proud of the dial rather than printed on it.
@@ -763,11 +836,26 @@ function seg(parent, pts, color, width, opts = {}) {
  * it writes depth before any transparent object is considered.
  *
  * `fadeTree` descends into the card group even when the group carries a
- * setOpacity hook, so the hook has to live on the PLATE, not on the group.
+ * setOpacity hook — `traverse` visits every descendant whatever the callback
+ * returns — so the hook has to live on the PLATE, not on the group.
+ *
+ * AND THAT HAS A BITE. With the group's hook deleted, `fadeTree` reaches the
+ * helper's four bezel bars, which are drawn with the SHARED `mats().aluTrim`.
+ * This overlay is faded to zero for every frame the amplifier chapter is not
+ * active, so it was writing `aluTrim.opacity = 0` into the shared library and
+ * taking the trim off the rack, the plinth and every other stage's card with
+ * it. Every material inside this card is therefore cloned to a private copy
+ * first, and only the copies get faded.
  */
 function opaquePlate(card) {
   const plate = card.userData.plate;
   delete card.userData.setOpacity;
+  card.traverse((o) => {
+    if (!o.material || o.material.userData.ampOwned) return;
+    const c = o.material.clone();
+    c.userData.ampOwned = true;
+    o.material = c;
+  });
   plate.material.transparent = false;
   plate.material.opacity = 1;
   plate.material.color.setHex(0x0a0d12);
@@ -789,28 +877,15 @@ function anchor(parent, x, y) {
 function buildOverlay(ctx) {
   const root = new THREE.Group();
   const P = new THREE.Group();
-  const A = ampMetals();
 
-  // BACKGROUND SEPARATION. The cyclorama behind the monoblock is one value with
-  // no falloff, so a black chassis is cut out against flat card. A real set puts
-  // a shaped light on the background BEHIND the subject and slightly to one
-  // side, and the pool it makes — bright at the shoulder, dark at the frame — is
-  // what separates a dark object without a rim light. It lives in the overlay so
-  // it belongs to this chapter and is gone from the wide shot.
-  // A Sprite, not a quad on the wall: the cove curves and a flat plane laid on it
-  // shows its own edge where the two part company.
-  const wash = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: radialSprite(256, 'rgba(152,180,210,1)', 'rgba(152,180,210,0)', 1.9),
-    transparent: true, opacity: 0.15, depthWrite: false,
-    blending: THREE.AdditiveBlending, toneMapped: false,
-  }));
-  wash.scale.set(2.0, 1.45, 1);
-  // Placed off the LENS, not off the world axes: the pool has to sit behind the
-  // monoblock's shoulder in the frame, and this camera looks across the room at
-  // an angle where "behind the amp in world x" is well to one side on screen.
-  wash.position.copy(rayPoint(778, 372, 3.7));
-  wash.renderOrder = -2;
-  root.add(wash);
+  // NO BACKGROUND WASH. There used to be an additive radial sprite floated on
+  // the cove here, to separate a black chassis from flat card. It was read as
+  // exactly what it was: "a soft grey blob that reads as a lens smudge", and an
+  // unidentified circular object cut by the frame edge. An additive sprite is
+  // not a light — it does not fall off with the surface it lands on, it does not
+  // move with the camera, and it has a hard elliptical boundary of its own. The
+  // separation now comes from the rig's horizon band, which is a real
+  // reflection and bends with the cove.
 
   // plate centre on the ray through (CARD_CX, CARD_CY), then back off to the
   // group origin, which sits at local (0.50, H_CARD/2)
@@ -822,41 +897,25 @@ function buildOverlay(ctx) {
   P.scale.setScalar(CARD_S);
   root.add(P);
 
-  // THE CARD AS AN OBJECT, not a pasted PNG. A square-cornered plane with a
-  // 1 px border has no thickness, no edge, and nothing of the room's light on
-  // it, which is the second-loudest CGI signal in the piece after blown
-  // highlights. Give it a real slab with a machined trim frame: yawed off the
-  // lens axis, the trim's top and left edges catch the front strip and its
-  // right edge falls away, so the plate reads as a lit object in the room.
-  const SLAB_T = 0.026;                       // card units ≈ 8 mm at this scale
-  const SW = 1.060, SH = H_CARD + 0.060, TR = 0.032;
-  const x0 = 0.5 - SW / 2, x1 = 0.5 + SW / 2;
-  const y0 = H_CARD / 2 - SH / 2, y1 = H_CARD / 2 + SH / 2;
-  const slab = new THREE.Mesh(GEO.bevelBox(SW, SH, SLAB_T, 0.004, 3), A.finBase);
-  slab.position.set(0.5, H_CARD / 2, -SLAB_T / 2 - 0.004);
-  slab.castShadow = slab.receiveShadow = true;
-  P.add(slab);
-  for (const [w, h, x, y] of [
-    [SW + 2 * TR, TR, 0.5, y1 + TR / 2],
-    [SW + 2 * TR, TR, 0.5, y0 - TR / 2],
-    [TR, SH + 2 * TR, x0 - TR / 2, H_CARD / 2],
-    [TR, SH + 2 * TR, x1 + TR / 2, H_CARD / 2],
-  ]) {
-    const t = new THREE.Mesh(GEO.bevelBox(w, h, SLAB_T + 0.016, 0.006, 4), A.handle);
-    t.position.set(x, y, -SLAB_T / 2 + 0.004);
-    t.castShadow = t.receiveShadow = true;
-    P.add(t);
-  }
+  // THE CARD AS AN OBJECT, not a pasted PNG. `DIAG.diagramCard` is now a lit
+  // dielectric slab with a machined trim frame of its own, so the second slab
+  // and the four trim bars this stage used to build around it were a duplicate
+  // bezel sitting a few millimetres in front of the core one. They are gone;
+  // the depth is asked of the helper instead.
+  P.add(opaquePlate(DIAG.diagramCard(1.0, H_CARD, { opacity: 1, depth: 0.032, pad: 0.026 })));
 
-  P.add(opaquePlate(DIAG.diagramCard(1.0, H_CARD, { opacity: 1 })));
-
-  // The same specular layer the meter gets, over the plate. A diagram card with
-  // nothing in front of it is a pasted PNG however good its frame is; a very
-  // faint domed sheen means the room's front strip crosses it as a soft band and
-  // the plate belongs to the same light as the amplifier beside it. Kept at
-  // renderOrder 4 so the traces still draw over it.
-  const sheen = new THREE.Mesh(domedPane(1.03, H_CARD + 0.03, 0.030, 0.016, 20, 16),
-    specularLayer(mats(), 0.30, 0.52, 0.80));
+  // The same cover glass the meter gets, over the plate — Addendum §J names a
+  // card front as one of the four things that needs one. A diagram card with
+  // nothing in front of it is a pasted PNG however good its frame is; a crowned
+  // pane means the room's front strip crosses it as a soft band and the plate
+  // belongs to the same light as the amplifier beside it. Black-tinted and
+  // additive so it adds only what it reflects, and at renderOrder 4 so the
+  // traces still draw over it.
+  const sheen = GEO.instrumentGlass(1.05, H_CARD + 0.05, { crown: 0.030, roughness: 0.26, tint: 0x000000, segs: 20 });
+  sheen.material.blending = THREE.AdditiveBlending;
+  sheen.material.opacity = 0.62;
+  sheen.material.envMapIntensity = 0.75;
+  sheen.material.userData.ampOwned = true;
   sheen.position.set(0.5, H_CARD / 2, 0.004);
   sheen.renderOrder = 4;
   P.add(sheen);
@@ -960,6 +1019,10 @@ const SEEN_FRONT = (X_C1 - X_C0) / FRONT_RUN;
 const SEEN_CARR  = CAR_AMP * DSP.TAU * F_SCREEN;
 const SEEN_RATIO = SEEN_FRONT / SEEN_CARR;           // ≈ 5.6 : 1
 
+/** Scratch colours for the carrier swarm — allocated once, not per frame. */
+const _cAmber = new THREE.Color(PAL.am);
+const _cScratch = new THREE.Color();
+
 /** Non-breaking spaces throughout: a label that wraps between "2.55 ×" and
  *  "10⁻⁴" has split a single number across two lines. */
 const exp10 = (v, d = 1) => {
@@ -1016,8 +1079,8 @@ export default {
     // in `.v`, which never wraps.
     S.L = {
       meter: L.add(metAnchor, {
-        kicker: 'Meter · 180 ms ballistic', cls: 'acc', priority: 4, offset: [30, -24],
-        text: `log, ${MET_DB} dB to ${MET_FS} W into 8 Ω`, value: '—',
+        kicker: 'Meter · 180 ms ballistic', cls: 'acc', priority: 4, offset: [12, -26],
+        text: `log, −${MET_LO} to +${MET_HI.toFixed(1)} dB re ${MET_FS} W`, value: '—',
       }),
       cable: L.add(anchor(P, 0.50, Y_HOT), {
         kicker: `Inside the cable · ±${(X_DRIFT * 1e9).toFixed(1)} nm`,
@@ -1043,7 +1106,7 @@ export default {
       diss: L.add(anchor(P, G_X + G_W * 0.58, 0.434), {
         kicker: 'Watts vs swing V̂/V rail', cls: 'plain am', priority: 3, occlude: false, offset: [0, 0],
         text: '<b style="color:#f0b35a">amber</b> heat · <b style="color:#5cc0f2">cyan</b> into 8 Ω',
-        value: `peak ${P_D_PEAK.toFixed(0)} W at m = ${M_PEAK.toFixed(2)}`,
+        value: `peak ${P_D_PEAK.toFixed(0)} W at m = ${M_PEAK.toFixed(3)}`,
       }),
     };
 
@@ -1058,13 +1121,21 @@ export default {
     const tp = t / TS;                 // real seconds — the programme timescale
     const dtp = dt / TS;
 
-    // Slow programme envelope, as a fraction of the 300 W peak swing. The two
-    // monoblocks are fed the same programme a third of a second apart, which is
-    // where the difference between the two meters comes from.
-    const envelope = (u) => DSP.clamp(
-      0.50 + 0.30 * Math.sin(DSP.TAU * 0.085 * u)
-           + 0.17 * Math.sin(DSP.TAU * 0.031 * u + 2.1)
-           + 0.06 * Math.sin(DSP.TAU * 0.210 * u + 0.7), 0.02, 1);
+    // Slow programme envelope. It is summed IN DECIBELS, not in volts, and
+    // that is the whole difference: the old version was a linear sum centred on
+    // half the rated swing, so the mean output was 78 % of full power and the
+    // needle sat on the last graduation for most of the take. Real programme
+    // has a crest factor of 15–20 dB — the peaks touch the rating, the mean
+    // lives two decades below it — which is precisely what a 30 dB logarithmic
+    // meter exists to show. Peaks reach −1.1 dB (233 W), the mean sits near
+    // −12 dB (19 W) and the quiet passages fall to −23 dB (1.5 W), so the
+    // needle sweeps the dial instead of resting on the end stop.
+    // The two monoblocks are fed the same programme a third of a second apart,
+    // which is where the difference between the two meters comes from.
+    const envelope = (u) => DSP.clamp(DSP.undB(
+      ENV_MEAN_DB + 6.2 * Math.sin(DSP.TAU * 0.085 * u)
+                  + 3.4 * Math.sin(DSP.TAU * 0.031 * u + 2.1)
+                  + 1.3 * Math.sin(DSP.TAU * 0.210 * u + 0.7)), 0.004, 1);
     const env = envelope(tp);
     const envR = envelope(tp - 0.33);
     const vpk = V_PK * env;
@@ -1097,7 +1168,7 @@ export default {
     // error. The needle's own position is a different quantity by construction:
     // it lags the mean through the 180 ms ballistic, exactly as a real moving-
     // coil movement does, and the text says so.
-    S.L.meter.setValue(`needle at ${(MET_DB * (S.deflect[0] - 1)).toFixed(0)} dB`);
+    S.L.meter.setValue(`needle at ${meterDb(S.deflect[0]).toFixed(1)} dB`);
 
     if (ctx.stage.reveal < 0.004) return;        // overlay is invisible — stop here
 
@@ -1106,26 +1177,40 @@ export default {
     S.opOut.userData.setData(mm, pOut(mm));
     // per device, not total — the footer carries the total, and the per-device
     // figure is the one the safe-operating-area argument turns on
-    S.L.diss.setValue(`peak ${P_D_PEAK.toFixed(0)} W at m = ${M_PEAK.toFixed(2)}`
+    S.L.diss.setValue(`peak ${P_D_PEAK.toFixed(0)} W at m = ${M_PEAK.toFixed(3)}`
       + ` · now ${(pd / (2 * NPAIR)).toFixed(0)} W/device`);
 
     // --- inside the cable ---------------------------------------------------
-    // Displacement is the integral of current, so it goes as −cos, and the two
-    // conductors move in antiphase: that is the return path, drawn.
-    const disp = -Math.cos(ph) * CAR_AMP * env;
-    const N = S.marks.length;
-    S.carriers.update((n) => {
-      const lane = n < N ? 0 : 1;
-      const x = S.marks[n % N] + (lane === 0 ? disp : -disp);
-      return { p: [x, lane === 0 ? Y_HOT : Y_RTN, 0.007], s: 1, c: PAL.am };
-    });
-    const duty = 0.45 + 0.55 * Math.abs(i) / I_PK;
-    for (const cd of S.cond) cd._baseOpacity = 0.72 + 0.23 * duty;
-
     // field front: its own clock, and the label states both ratios
     const u = (tp % (FRONT_RUN + FRONT_GAP)) / FRONT_RUN;
     const fx = X_C0 + DSP.clamp(u, 0, 1) * (X_C1 - X_C0);
     const fade = u <= 1 ? Math.min(1, (1 - u) * 5) : 0;
+
+    // Displacement is the integral of current, so it goes as −cos, and the two
+    // conductors move in antiphase: that is the return path, drawn.
+    //
+    // A CARRIER DOES NOT MOVE UNTIL THE FIELD REACHES IT. The whole point of
+    // this panel is that the energy arrives as a field front at 0.66 c while
+    // the charge itself barely stirs, and the earlier version had every carrier
+    // along the whole run oscillating from the first frame — including the ones
+    // metres ahead of the front, which have no field on them yet and cannot be
+    // moving. Each carrier is now armed as the front passes it, so the turn-on
+    // transient is the picture. Once the front has run out, the whole line is
+    // in steady state and everything oscillates.
+    const disp = -Math.cos(ph) * CAR_AMP * env;
+    const N = S.marks.length;
+    S.carriers.update((n) => {
+      const lane = n < N ? 0 : 1;
+      const x0 = S.marks[n % N];
+      const arm = u <= 1 ? DSP.clamp((fx - x0) / 0.030, 0, 1) : 1;
+      const x = x0 + arm * (lane === 0 ? disp : -disp);
+      return {
+        p: [x, lane === 0 ? Y_HOT : Y_RTN, 0.007], s: 0.55 + 0.45 * arm,
+        c: _cScratch.copy(_cAmber).multiplyScalar(0.26 + 0.74 * arm),
+      };
+    });
+    const duty = 0.45 + 0.55 * Math.abs(i) / I_PK;
+    for (const cd of S.cond) cd._baseOpacity = 0.72 + 0.23 * duty;
     S.frontBar.position.x = fx - X_C0;
     S.frontBar._baseOpacity = fade;
     for (const o of S.front) {
@@ -1142,15 +1227,16 @@ export default {
 
   content() {
     return `
-<div class="key"><span class="lab">The idea</span><p>The input carries almost no energy. The monoblock uses it to <b>modulate a current drawn from the supply</b> — a loop: out of the red terminal, back through the black.</p></div>
+<div class="key"><span class="lab">The idea</span><p>The input carries almost no energy. The monoblock <b>modulates a current drawn from the supply</b> — a loop: out of the red terminal, back through the black.</p></div>
 
 <h3>300 W into 8 Ω, and the heat</h3>
 <div class="eq">V<sub>rms</sub> = √(300 × 8) = ${V_RMS.toFixed(1)} V → V<sub>pk</sub> <span class="hl">${V_PK.toFixed(1)} V</span>
 I<sub>pk</sub> = <span class="hl">${I_PK.toFixed(2)} A</span>;  mean rail draw I<sub>pk</sub>/π = ${I_DC_FULL.toFixed(2)} A
-±${RAIL} V rails → ${HEADROOM.toFixed(1)} V headroom, ${V_RIPPLE.toFixed(2)} V ripple</div>
-<p>Oliver's condition puts one thermal voltage, <span class="num">${(VT * 1000).toFixed(2)} mV</span>, across each <span class="num">${RE} Ω</span> emitter resistor: <span class="num">${(IQ * 1000).toFixed(0)} mA</span> per device, <span class="num">${P_QUIES.toFixed(1)} W</span> burnt idle. Heat peaks well short of full power — <span class="num">${P_D_PEAK.toFixed(0)} W</span>, <span class="num">${(P_D_PEAK / (2 * NPAIR)).toFixed(0)} W</span> per device, at <span class="num">m = ${M_PEAK.toFixed(2)}</span>, where the loudspeaker takes <span class="num">${P_AT_PEAK.toFixed(0)} W</span>.</p>
+±${RAIL} V rails → ${HEADROOM.toFixed(1)} V headroom, ${V_RIPPLE.toFixed(2)} V ripple
+clip at V²/2R = ${P_CLIP.toFixed(1)} W, +${(10 * Math.log10(P_CLIP / P_RATED)).toFixed(2)} dB</div>
+<p>Oliver's condition puts one thermal voltage, <span class="num">${(VT * 1000).toFixed(2)} mV</span>, across each <span class="num">${RE} Ω</span> emitter resistor: <span class="num">${(IQ * 1000).toFixed(0)} mA</span> per device, <span class="num">${P_QUIES.toFixed(1)} W</span> burnt idle. Heat peaks well short of full power — <span class="num">${P_D_PEAK.toFixed(0)} W</span>, <span class="num">${(P_D_PEAK / (2 * NPAIR)).toFixed(0)} W</span> per device, at <span class="num">m = ${M_PEAK.toFixed(3)}</span>, where the loudspeaker takes <span class="num">${P_AT_PEAK.toFixed(0)} W</span>. Peaks touch the rating; the mean runs <span class="num">${(-ENV_MEAN_DB).toFixed(0)} dB</span> down.</p>
 
-<div class="myth"><span class="lab">Commonly got wrong</span><p>That is the resistive worst case. A reactive load — 4 Ω at 60° — roughly doubles V<sub>ce</sub>·I<sub>c</sub> in the conducting device. Hence the safe-operating-area limiter.</p></div>`;
+<div class="myth"><span class="lab">Commonly got wrong</span><p>That is the resistive worst case. A reactive load — 4 Ω at 60° — roughly doubles V<sub>ce</sub>·I<sub>c</sub> in the conducting device: hence the safe-operating-area limiter.</p></div>`;
   },
 
   readouts() {
@@ -1160,7 +1246,10 @@ I<sub>pk</sub> = <span class="hl">${I_PK.toFixed(2)} A</span>;  mean rail draw I
       { k: 'Out I', v: s.i.toFixed(2), u: 'A', cls: 'am', bar: Math.abs(s.i) / I_PK },
       { k: 'P inst', v: s.p.toFixed(0), u: 'W', cls: 'am', bar: s.p / (V_PK * I_PK) },
       { k: 'P mean', v: s.mean < 10 ? s.mean.toFixed(2) : s.mean.toFixed(0), u: 'W', cls: 'acc', bar: meterFrac(s.mean) },
-      { k: 'Device heat', v: s.pd.toFixed(0), u: 'W', cls: 'am', bar: s.pd / P_D_PEAK },
+      // TOTAL output-stage dissipation, not per device — it was keyed "Device
+      // heat" while carrying the six-device sum, and the card beside it prints
+      // the per-device figure, so the two disagreed by a factor of six.
+      { k: 'Output heat', v: s.pd.toFixed(0), u: 'W', cls: 'am', bar: s.pd / P_D_PEAK },
       { k: 'Supply draw', v: s.dc.toFixed(0), u: 'W', cls: '', bar: s.dc / P_DC_FULL },
     ];
   },

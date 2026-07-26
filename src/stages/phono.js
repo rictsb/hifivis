@@ -85,7 +85,13 @@ const TOL_DB = (() => {
 // the excursion grow as 1/f.
 const V_REF = CART.vRef;                        // 0.05 m/s PEAK — spec.js
 const exc = (v, f) => v / (DSP.TAU * f);
-const A_50_FLAT = exc(V_REF, 50);               // 159.155 µm
+const A_50_FLAT = exc(V_REF, 50);               // 159.155 µm — UNCUT, see below
+// ...but that case is never cut. The record curve is 16.94 dB down at 50 Hz, so
+// the velocity actually in the groove is V_REF·10^(rec/20) and the excursion
+// with it. Quoting the flat figure alone tells the reader a real 50 Hz cut
+// overruns its neighbour, which is the opposite of what the curve is for.
+const REC_50 = DSP.riaaRecordDb(50);            // −16.94 dB
+const A_50_CUT = A_50_FLAT * DSP.undB(REC_50);  // 22.60 µm, inside the pitch
 
 // Average groove pitch: a 20-minute side at spec.js's 33⅓ rpm is 666.7
 // revolutions, spread across the recorded band from TT.rOuter to TT.rInner.
@@ -106,6 +112,12 @@ const G_REST_DB = PREAMP.gainDb + AMP.gainDb + CHAIN.volumeDb;   // +16.774 dB
 // 0.41007 V × 10^(16.7737/20) = 2.82843 V = 1.0000 W into 8 Ω, to 1e-12 dB.
 const V_TERM = V_OUT * DSP.undB(G_REST_DB);
 const W_TERM = (V_TERM * V_TERM) / SPEAKER.nominalZ;   // 1.0000 W
+// The overview chapter PRINTS this ladder, so this chapter does not — the panel
+// truncates and a figure quoted twice is a figure that can disagree twice. It is
+// still computed here, from the same spec.js primaries, because if this chapter
+// ever moved off them W_TERM would stop being 1.000 W and the discrepancy would
+// be visible in a single line of this file.
+if (Math.abs(W_TERM - 1) > 1e-9) throw new Error('phono: chain no longer lands 1 W');
 const AMP_RAW_DB = G_STAGE_DB - NET_LOSS_1K;    // 83.96 dB of raw amplification
 
 // --- noise -------------------------------------------------------------------
@@ -141,31 +153,40 @@ const S = { f: 1000, rec: 0, play: 0, sum: 0, vin: V_IN, vout: V_OUT, gain: G_ST
 const sgn = (v, d = 2) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d);
 
 // ---------------------------------------------------------------------------
-// FRAMING
+// FRAMING — derived, and the derivation is the reason it is not 0.52.
 //
-// The subject is a 555 × 112 × 440 mm box in bay 3 of six near-identical bays.
-// Two things follow. (1) `fill` is a fraction of the safe-box HEIGHT, so the
-// radius handed to frameShot must be the chassis' apparent HALF-HEIGHT, not its
-// bounding sphere — a bounding sphere is dominated by the 555 mm width and
-// leaves the chassis 85 px tall. (2) The camera is lifted so the top face is in
-// view: at 21° the silhouette is 217 mm tall rather than 112, which is what
-// makes a rack component read as an object instead of a strip.
+// The subject is a 555 × 112 × 440 mm box. Its silhouette on screen is
+//     width  = W·cos(az) + D·sin(az)
+//     height = H·cos(el) + D·sin(el)
+// so the WIDTH is the binding constraint, not the height, and `fill` — which
+// frameShot measures against the safe box's 840 px height — cannot be pushed to
+// a hero's 0.52 without taking the chassis through x = 160 / x = 1120. The two
+// levers that buy height are therefore used first:
 //
-// The 555 mm width is the binding constraint, not the height: at fill 0.33 the
-// chassis is 905 px wide inside a 960 px safe box, and any more fill pushes it
-// through x = 160 / x = 1120. So the hero is made to dominate by being the only
-// fully-lit chassis in frame (the flags below) rather than by being enlarged.
+//   · azimuth DOWN to 0.30 rad. Apparent width is W·cos(az)+D·sin(az), which for
+//     D < W falls as az → 0, so a shallower three-quarter is 3 % narrower than
+//     the old 0.40 rad while still showing a cheek.
+//   · elevation UP to 0.42 rad. The silhouette is then 282 mm tall instead of
+//     the fascia's bare 112, the vented top panel is in view, and the aspect
+//     ratio drops from 2.62 : 1 to 2.34 : 1.
 //
-// At 1600 × 1000 this lands the chassis at x 190…1090, y 188…372, and the card
-// at x 452…1112, y 435…915 — both inside the safe box (160…1120, 90…930).
+// MEASURED off the render at fill 0.43, not asserted: the chassis came out
+// 700 × 228 px, because the depth term of both formulae sits further from the
+// lens than the fascia does and projects smaller than the flat arithmetic says.
+// That left 260 px of unused width, so fill goes to 0.52 — the figure the audit
+// asked for, which the old 0.40 rad azimuth could not have carried — landing the
+// chassis at about 846 × 276 px with 57 px of margin each side of the safe box.
+// HERO_R is the apparent HALF-HEIGHT (a bounding sphere would be dominated by
+// the 555 mm width and leave the chassis 85 px tall).
 // ---------------------------------------------------------------------------
 const CH_H = 0.112, CH_FOOT = 0.008;
 const CH_D = LAYOUT.rack.d - 0.06;                          // 0.440
 const HERO_Y = LAYOUT.bayCentre(3, CH_H) + CH_FOOT;         // 0.678
 const HERO_Z = LAYOUT.rack.z + CH_D / 2;                    // fascia plane, −3.08
-const AZ = 0.40, EL = 0.36, FOV = 30;
-const HERO_R = 0.1103;          // chassis half-height + the top face in view
-const FILL = 0.33;
+const AZ = 0.30, EL = 0.42, FOV = 30;
+/** apparent half-height of the silhouette at this elevation, in metres */
+const HERO_R = (CH_H * Math.cos(EL) + CH_D * Math.sin(EL)) / 2;   // 0.1409
+const FILL = 0.52;
 const ASPECT = 1.6, TANH = Math.tan((FOV * Math.PI) / 360);
 
 const _b = frameShot([LAYOUT.rack.x, HERO_Y, HERO_Z], HERO_R,
@@ -179,7 +200,7 @@ const DIST = _cam0.distanceTo(_tgt0);
 
 // Where the hero should land, in GEOMETRIC ndc — the director's shift lens then
 // adds −0.1625 in x, which is what puts ndc 0 at screen x 640.
-const HX = -0.0375, HY = 0.44;
+const HX = -0.0375, HY = 0.42;
 const _shift = _rgt.clone().multiplyScalar(-HX * ASPECT * TANH * DIST)
   .addScaledVector(_up, -HY * TANH * DIST);
 const SHOT = {
@@ -201,12 +222,14 @@ function place(ndcX, ndcY, dist) {
     .addScaledVector(UPV, ndcY * TANH * dist);
 }
 
-// The card floats 0.17 m in front of the fascia plane. Fixing its distance as a
-// fraction of the camera distance keeps its size on screen invariant if the
-// framing is retuned.
-// One metre on the card's plane is 500/(CARD_DIST·tan(fov/2)) ≈ 1420 px at
-// 1600 × 1000, which is how every dimension on it below was chosen.
+// The card floats in front of the fascia plane at a fixed fraction of the camera
+// distance, so its size on screen is invariant if the framing is retuned.
 const CARD_DIST = 0.885 * DIST;
+/** Pixels per metre on the card's plane at 1600 × 1000. Every dimension on the
+ *  card is written in pixels and divided by this, because what has to be right
+ *  is the SCREEN size — the metres are an implementation detail that changes
+ *  whenever `fill` does. */
+const CARD_PX = 1000 / (2 * CARD_DIST * TANH);      // ≈ 1750 px/m
 
 // ---------------------------------------------------------------------------
 // local helpers
@@ -232,7 +255,7 @@ const V3 = (x, y, z = 0) => new THREE.Vector3(x, y, z);
  * neighbouring chassis is barely touched, while a hard line there would read as
  * a rectangle rather than as falloff.
  */
-function flagAlpha(size = 128) {
+function flagAlpha(size = 128, near = 0.08) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const g = c.getContext('2d');
@@ -241,7 +264,7 @@ function flagAlpha(size = 128) {
   const sm = (t) => { const u = t < 0 ? 0 : t > 1 ? 1 : t; return u * u * (3 - 2 * u); };
   for (let y = 0; y < size; y++) {
     const v = 1 - (y + 0.5) / size;             // ImageData row 0 is the TOP
-    const fv = sm(v / 0.08) * sm((1 - v) / 0.12);
+    const fv = sm(v / near) * sm((1 - v) / 0.12);
     for (let x = 0; x < size; x++) {
       const u = (x + 0.5) / size;
       const a = fv * sm(Math.min(u, 1 - u) / 0.13);
@@ -269,41 +292,105 @@ function buildHardware() {
   const FT = 0.020;              // a thick, properly machined fascia
   const fz = D / 2;
 
-  // Brushed alloy, one notch off the library's default. The 6.4 mm break on the
-  // fascia's top edge matters more than the colour does: at the previous 4.5 mm
-  // the reflected front strip clipped to white over the panel's whole width with
-  // no ramp either side of it, which is the single artefact that says "render".
+  // Brushed alloy — and the roughness is the whole argument.
+  //
+  // A VERTICAL METAL FASCIA SEEN FROM ABOVE MIRRORS THE FLOOR. Reflect the view
+  // vector about +Z and the y component keeps its sign, so a camera 24° up sends
+  // the specular ray 24° DOWN, into the set's floor card — which is the dimmest
+  // emitter in the rig. At roughness 0.30 the GGX lobe is ~17° wide and picks up
+  // nothing else, which is why this panel was rendering at 6 % grey: black, with
+  // one clipped white line where the top break happened to catch the front strip.
+  // A real brushed (not polished) fascia is nearer 0.45; that lobe is wide enough
+  // to reach the shell's horizon band 24° above the specular ray, so the panel
+  // fills with a ramp instead of resolving to two values.
+  // Measured: at roughness 0.46 / envMapIntensity 1.20 the panel read 14.1 %
+  // mean against a diagram card at 27.5 %, so the picture's brightest mass was
+  // still not the hero. A metal's output is albedo × the lobe average, and this
+  // lobe is pointed at the floor, so both terms have to come up: albedo to 0.70
+  // linear (still inside the library's 0.85 ceiling) and the lobe wide enough at
+  // 0.60 to average in the horizon band 24° above it. That is a bead-blasted
+  // fascia rather than a fine brush, which is what this class of chassis is.
   const face = M.alu.clone();
-  face.color.setHex(0xc0c5cb);
-  face.roughness = 0.300;
-  face.envMapIntensity = 0.82;
+  face.color.setHex(0xd6d9de);
+  face.roughness = 0.600;
+  face.envMapIntensity = 2.45;
+
+  // The knobs need their OWN alloy, not the fascia's. A knob's spun end face is
+  // perpendicular to the lens, so unlike the fascia it mirrors what is directly
+  // behind the camera — the beauty box, at about 8 in linear. At the fascia's
+  // 0.70 albedo that returns 5.6, and the two knobs measured 1.9 % of their own
+  // area above 95 % and were the brightest objects in the picture. A darker
+  // machined alloy at 0.33 returns about 2.0, just under the 2.30 bloom
+  // threshold: still the brightest thing on the chassis, but no longer clipped.
+  const knobMat = M.alu.clone();
+  knobMat.color.setHex(0x9aa0a8);
+  knobMat.roughness = 0.420;
+  knobMat.envMapIntensity = 0.75;
 
   // The hero's own shell is a shade above the black-anodised boxes either side of
   // it, so its top face reads as a surface rather than as a hole in the frame.
   const shellMat = M.anodBlack.clone();
-  shellMat.color.setHex(0x25282d);
-  shellMat.roughness = 0.38;
+  shellMat.color.setHex(0x31363d);
+  shellMat.roughness = 0.40;
+  shellMat.envMapIntensity = 1.45;
 
   // Satin trim, not mirror. A 2 mm bar is narrower than the reflected image of
   // the softbox, so a chrome finish makes the whole section clip and bloom.
   const trim = M.aluTrim.clone();
   trim.color.setHex(0xb4b9c0);
-  trim.roughness = 0.40;
-  trim.envMapIntensity = 0.62;
+  trim.roughness = 0.42;
+  trim.envMapIntensity = 0.78;
 
   const g = new THREE.Group();
   g.position.set(R.x, HERO_Y, R.z);
 
-  g.add(GEO.chassis(W, H, D, { r: 0.0040, seg: 4, faceThick: FT, body: shellMat, face }));
+  // The fascia's top break is a 45° facet between a vertical panel and a
+  // horizontal one, which is aimed straight between the front strip and the
+  // beauty box — the two largest emitters in the rig — so it is always the
+  // hottest thing on the chassis. Widening it made a blown BAR out of a blown
+  // line, which is worse: the contract wants a thin bright line on the edge, and
+  // bloom integrates area. 4.2 mm keeps the clipped run under three pixels at
+  // this framing while the 0.52 roughness holds the panel below it in the ramp.
+  g.add(GEO.chassis(W, H, D, { r: 0.0022, seg: 5, faceThick: FT, body: shellMat, face }));
+
+  // --- the applied top rail ----------------------------------------------------
+  // The 45° break between a vertical fascia and a horizontal top panel is aimed
+  // exactly between the front strip and the beauty box, the rig's two largest
+  // emitters. A METAL there has F0 = its albedo, so at 0.70 it returns 70 % of a
+  // source sitting at ~8 in linear: 5.6, far above the 2.30 bloom threshold, and
+  // it clipped to a hard white bar across the full 555 mm with a bloom halo
+  // twice its height. Measured over95 in that band: 0.567 %.
+  //
+  // The fix is a part, not a number. Real chassis of this class carry an applied
+  // chamfer rail, and a DIELECTRIC one reflects 4 % rather than 70 % — 0.32 in
+  // linear, inside the ramp, with Fresnel lifting it along the run so it still
+  // reads as a lit edge.
+  //
+  // It has to BURY the fillet, not sit level with it. The first attempt cleared
+  // it by 0.36 mm, which the bevelBox's own 0.6 mm corner rounding then ate, so
+  // the metal fillet went on printing through and the bar did not move at all
+  // between renders. A 19 mm face standing 3.5 mm proud of both planes covers
+  // the 3.5 mm fillet with 3.5 mm to spare at every point along it.
+  const railMat = M.plastic.clone();
+  railMat.color.setHex(0x363b42);
+  railMat.roughness = 0.40;
+  railMat.clearcoat = 0.38;
+  railMat.clearcoatRoughness = 0.28;
+  railMat.envMapIntensity = 0.70;
+  const rail = new THREE.Mesh(GEO.bevelBox(W - 0.0010, 0.0190, 0.0040, 0.0006, 3), railMat);
+  rail.rotation.x = -Math.PI / 4;
+  rail.position.set(0, 0.05462, D / 2 - 0.00138);
+  rail.castShadow = false; rail.receiveShadow = true;
+  g.add(rail);
 
   // --- fascia -----------------------------------------------------------------
   // Applied centre plate, standing 1.2 mm proud. It carries a clearcoat so the
   // wide front strip lays a bright-to-mid ramp across it instead of one value.
   const plateMat = M.anodBlack.clone();
-  plateMat.color.setHex(0x141619);
-  plateMat.roughness = 0.34;
-  plateMat.clearcoat = 0.72;
-  plateMat.clearcoatRoughness = 0.16;
+  plateMat.color.setHex(0x1e2228);
+  plateMat.roughness = 0.38;
+  plateMat.clearcoat = 0.70;
+  plateMat.clearcoatRoughness = 0.20;
   const plate = new THREE.Mesh(GEO.bevelBox(0.262, 0.072, 0.0040, 0.0011, 3), plateMat);
   plate.position.set(0, 0, fz + 0.0014);
   g.add(plate);
@@ -395,7 +482,7 @@ function buildHardware() {
     const kg = new THREE.Group();
     kg.rotation.x = Math.PI / 2;
     kg.position.z = 0.0030 + 0.0160 / 2;
-    const k = GEO.knob(r, 0.0160, { body: face, mark: trim, flutes: 60 });
+    const k = GEO.knob(r, 0.0160, { body: knobMat, mark: trim, flutes: 60 });
     k.rotation.y = pointer;
     kg.add(k);
     c.add(kg);
@@ -486,33 +573,19 @@ function buildHardware() {
   for (const m of lit) m.castShadow = false;
 
   // --- the specular layer ------------------------------------------------------
-  // A display without glass over it is a decal. This is a 3.7 mm-crowned clear
-  // panel across the indicator well: a cylindrical section, so the normal turns
-  // through 31° over the window height and the reflection of the wide front
-  // strip sweeps across it as a soft band rather than sitting as a flat patch.
-  //
-  // It is mats().glass with its albedo taken to black and its blending set to
-  // additive: a partly-reflecting dielectric ADDS its reflection to what it
-  // transmits, so the segments behind stay readable and only the specular and
-  // clearcoat terms survive. Ordinary alpha would dim the reflection too.
-  const LR = 0.105, LARC = 0.0545 / LR;
-  const lensMat = M.glass.clone();
-  lensMat.color.setHex(0x000000);
-  lensMat.roughness = 0.050;
-  lensMat.clearcoatRoughness = 0.024;
-  lensMat.envMapIntensity = 3.6;
-  lensMat.transparent = true;
-  lensMat.depthWrite = false;
-  lensMat.blending = THREE.AdditiveBlending;
-  lensMat.side = THREE.FrontSide;
-  const lens = new THREE.Mesh(
-    new THREE.CylinderGeometry(LR, LR, 0.2165, 64, 1, true, -LARC / 2, LARC), lensMat,
-  );
-  lens.rotation.z = Math.PI / 2;
-  lens.position.set(0, 0, fz + 0.0058 - LR);
+  // A display without glass over it is a decal. The previous answer here was a
+  // hand-rolled cylindrical panel at roughness 0.050 and envMapIntensity 3.6,
+  // additively blended — a near-mirror returning three and a half times the
+  // room, and measurably the brightest object in the frame. Contract Addendum J
+  // exists because of it. `GEO.instrumentGlass` is the shared part: crowned, so
+  // the source sweeps across as a band rather than sitting as a rectangle, and
+  // reflectivity 0.34 for a coated cover glass's ~1.7 % at normal incidence.
+  const lens = GEO.instrumentGlass(0.2130, 0.0510, {
+    crown: 0.0021, roughness: 0.16, tint: 0x05070b, segs: 28,
+  });
+  lens.material.opacity = 0.34;
+  lens.position.set(0, 0, fz + 0.0060);
   lens.castShadow = lens.receiveShadow = false;
-  lens.frustumCulled = false;
-  lens.renderOrder = 4;
   g.add(lens);
   // the lens sits in a machined rebate, so it gets a hairline surround
   const rim = new THREE.Mesh(GEO.bevelBox(0.2205, 0.0585, 0.0016, 0.0004, 2), trim);
@@ -542,39 +615,63 @@ function buildOverlay(ctx) {
   // aims the falloff at the hero from above, below, right and left. The gap
   // between one chassis and the next is only 56 mm, so the ramp has to reach
   // full density inside it.
-  const alpha = flagAlpha();
-  const flag = (w, h, cx, cy, rot, op = 0.80) => {
+  const alpha = flagAlpha(128, 0.080);
+  // The rack's own cove strips run up the uprights 15 mm outboard of the
+  // chassis' ends. A 56 mm ramp cannot get to full density in 15 mm, so those
+  // two verticals stayed the brightest thing in the picture through three
+  // rounds. The side flags get a 21 mm ramp starting exactly at the chassis edge.
+  const alphaTight = flagAlpha(128, 0.030);
+  const flag = (w, h, cx, cy, rot, op = 0.62, a = alpha) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({
-        color: 0x04050a, transparent: true, opacity: op, alphaMap: alpha,
+        color: 0x04050a, transparent: true, opacity: op, alphaMap: a,
         depthWrite: false, toneMapped: false,
       }));
-    m.position.set(cx, cy, HERO_Z + 0.045);
+    // 90 mm in front of the fascia plane, not 45. Neighbouring chapters put
+    // their own lens glass and knob fronts up to ~60 mm proud of the shelf, and
+    // anything in front of the flag plane fails the depth test and prints at
+    // full brightness — which is why the DAC's cyan readout went on competing
+    // with this chapter's hero through three rounds of raising the opacity.
+    // Moving the plane toward the lens also moves each flag's near edge AWAY
+    // from the hero in projection, because the hero sits behind it.
+    m.position.set(cx, cy, HERO_Z + 0.090);
     m.rotation.z = rot;
     m.renderOrder = 2;
     return m;
   };
+  //
+  // These are two stops LIGHTER than they were. At 0.80/0.70 they took 47 % of
+  // the safe box below 10 % luminance and left the left third of the frame a
+  // flat void, which is the same fault as a blown highlight seen from the other
+  // end. A flag is meant to make a ramp, not a hole; identification is now
+  // carried by the hero being the only alloy fascia among black ones.
   const H2 = Math.PI / 2;
-  root.add(flag(1.16, 0.600, 0, 1.040, 0));            // above: bays 4 and 5
-  // The bays BELOW are held a stop lighter than the rest: they are the only
-  // thing giving the lower-left quarter of the frame any structure at all, and
-  // at full density that quarter went to a single flat near-black.
-  root.add(flag(1.16, 0.568, 0, 0.324, Math.PI, 0.70));   // below: bays 2, 1, 0
+  root.add(flag(1.16, 0.600, 0, 1.040, 0, 0.86));         // above: bays 4 and 5
+  root.add(flag(1.16, 0.568, 0, 0.324, Math.PI, 0.74));   // below: bays 2, 1, 0
   // The side flags are deep in y as well as wide, because the rack's shelf edge
   // trim recedes diagonally out of the fascia plane and a narrow band left the
-  // far end of it as the brightest thing in the frame.
-  root.add(flag(0.640, 0.700, 0.640, 0.665, -H2));     // right of the fascia
-  root.add(flag(0.640, 0.700, -0.640, 0.665, H2));     // left of the fascia
+  // far end of it as the brightest thing in the frame. Their near edge is at
+  // ±0.6275 − 0.350 = ±0.2775 m, which is the chassis' own end.
+  root.add(flag(0.640, 0.700, 0.6275, 0.665, -H2, 0.80, alphaTight));
+  root.add(flag(0.640, 0.700, -0.6275, 0.665, H2, 0.80, alphaTight));
 
-  // --- one card, floating clear of the rack -----------------------------------
-  const CW = 0.4000, CH = 0.2760, PAD = 0.020;
+  // --- one card, directly under the hero, clear of it --------------------------
+  // Written in screen pixels and measured off the render, not asserted. The
+  // chassis lands y 138…414 and 846 px wide; the card is 760 × 422 px spanning
+  // y 478…900, so it is narrower than the hero, does not touch it, leaves a
+  // 64 px band between them for the identifying label, and is deep enough to
+  // cover both the DAC's readout above it and the power amplifier's meters
+  // below — neither of which belongs in this chapter's frame.
+  const PAD = 0.020;
+  const OW = 760 / CARD_PX, OH = 422 / CARD_PX;
+  const CW = OW - PAD * 2, CH = OH - PAD * 2;
   const holder = new THREE.Group();
-  holder.position.copy(place(0.145, -0.335, CARD_DIST));
+  holder.position.copy(place(HX, -0.378, CARD_DIST));
   holder.lookAt(CAM);
-  // A card square to the lens is a decal. Yawing it 9° off the axis gives the
-  // glass over it somewhere to sweep the front strip from, and gives the frame's
-  // left edge a visible thickness.
-  holder.rotateY(-0.157);
+  // A card square to the lens is a decal. 5° of yaw gives the glass over it
+  // somewhere to sweep the front strip from and gives the frame's left edge a
+  // visible thickness, without skewing the type (9° did).
+  holder.rotateY(-0.090);
   root.add(holder);
 
   // The card is an object in the room, not a pasted PNG: a 12 mm machined plate
@@ -588,12 +685,11 @@ function buildOverlay(ctx) {
   // far above 1.0 in linear — the card's top edge was the second-largest blown
   // area in the frame. A satin dark polymer bezel reflects ~4 % and ramps.
   const bezMat = M.plastic.clone();
-  bezMat.color.setHex(0x474c54);
-  bezMat.roughness = 0.58;
-  bezMat.clearcoat = 0.25;
-  bezMat.clearcoatRoughness = 0.38;
-  bezMat.envMapIntensity = 0.55;
-  const OW = CW + PAD * 2, OH = CH + PAD * 2;
+  bezMat.color.setHex(0x1f2329);
+  bezMat.roughness = 0.62;
+  bezMat.clearcoat = 0.22;
+  bezMat.clearcoatRoughness = 0.42;
+  bezMat.envMapIntensity = 0.45;
   const bez = new THREE.Mesh(GEO.bevelBox(OW + 0.0050, OH + 0.0050, 0.0135, 0.0018, 3), bezMat);
   bez.position.z = -0.0090;
   bez.castShadow = bez.receiveShadow = true;
@@ -617,18 +713,51 @@ function buildOverlay(ctx) {
   // below 3 % luminance and hollowed out the mid-tone mass. This is still deep
   // enough for a 2 px trace to read against, and the glass over it now has a
   // value to lay its gradient onto.
-  plate.userData.plate.material.color.setHex(0x0f1318);
+  //
+  // MATTE, though, and this is the whole reason the card was printing at 54 %
+  // mean luminance against the hero's 17 %. The plate faces the lens, so its
+  // specular ray reflects straight back past the camera into the beauty box —
+  // the largest and brightest emitter in the rig — and the library card's
+  // clearcoat 0.60 returned it across the entire face as one flat wash. The
+  // specular event on this card belongs to the glass in front of it, which is
+  // crowned and therefore sweeps; the plate behind it is an eggshell panel.
+  //
+  // Three measurements to find this. Dropping the glass in front of the plate
+  // from 0.24 to 0.18 opacity moved the card by 0.1 points, so it was not the
+  // glass; dropping the plate's envMapIntensity from 0.26 to 0.05 moved it by
+  // 0.8, so it was not the image-based lighting either. It is DIFFUSE from the
+  // room's direct lights — a key at 2.10, a foreground spot at 6 and a pool spot
+  // at 9, through an exposure of 1.92 — and the only term a Lambert lobe under
+  // that has is its albedo. So the albedo is the control: 0x0c1016 is 0.0056 in
+  // linear, half of what was here, and that is what puts the card under the
+  // hero instead of a stop above it.
+  const pm = plate.userData.plate.material;
+  pm.color.setHex(0x0c1016);
+  pm.roughness = 0.90;
+  pm.clearcoat = 0.0;
+  pm.envMapIntensity = 0.05;
+  // ...and the other half of a Lambert panel under three hard sources is its
+  // Fresnel term, which at the default F0 of 4 % is worth more than the albedo
+  // is. An instrument card is anti-reflection coated — that is the whole point
+  // of a matte fascia behind glass — so F0 comes down to 1 %.
+  pm.specularIntensity = 0.25;
   card.add(plate);
 
   // ======================= 1. the RIAA curves ==============================
-  const GX = 0.034, GW = CW - GX - 0.008;
+  const GX = 0.030, GW = CW - GX - 0.008;
   const g = new DIAG.Graph({
-    w: GW, h: 0.1620, xLog: true, xRange: [20, 20000], yRange: [-25, 25],
+    w: GW, h: 0.1240, xLog: true, xRange: [20, 20000], yRange: [-25, 25],
     yTicks: [-20, -10, 0, 10, 20], zeroLine: 0,
   });
-  g.position.set(GX, 0.1060, 0);
+  g.position.set(GX, 0.0660, 0);
   card.add(g);
   R.graph = g;
+
+  // The library grid is 0x2a2f36, which is the same luminance as the plate now
+  // that the plate is a properly dark instrument panel — the graph was drawing a
+  // grid nobody could see. Lifting it two stops is what makes it a plot rather
+  // than two curves floating on a rectangle.
+  for (const gr of [g]) if (gr._gridMat) { gr._gridMat.color.setHex(0x4a525d); gr._gridMat.opacity = 0.62; }
 
   for (const f of [F1, F2, F3]) g.addMarker(f, { color: PAL.ink3, width: 1.2, opacity: 0.55 });
 
@@ -639,11 +768,12 @@ function buildOverlay(ctx) {
   R.dotRec = g.addDot(PAL.am, 0.0042);
   R.dotPlay = g.addDot(PAL.cy, 0.0042);
 
-  // A plot a reader cannot take a value off is a decoration.
+  // A plot a reader cannot take a value off is a decoration. The unit rides on
+  // the top numeral, so the axis is labelled once without a fourth label.
   g.tickLabels(L, {
     yVals: [-20, 0, 20],
-    yFmt: (v) => (v > 0 ? '+' : '') + v,
-    yOffset: [-19, 0],
+    yFmt: (v) => (v > 0 ? '+' + v + ' dB' : String(v)),
+    yOffset: [-22, 0],
   });
 
   // ======================= 2. the error lane ===============================
@@ -654,12 +784,13 @@ function buildOverlay(ctx) {
   // parts' tolerance costs marked in dashes just inside the frame: the design
   // error is visibly inside the tolerance, which is the point.
   const gl = new DIAG.Graph({
-    w: GW, h: 0.0460, xLog: true, xRange: [20, 20000], yRange: [-0.13, 0.13],
+    w: GW, h: 0.0290, xLog: true, xRange: [20, 20000], yRange: [-0.13, 0.13],
     yTicks: [], zeroLine: 0,
   });
-  gl.position.set(GX, 0.0300, 0);
+  gl.position.set(GX, 0.0100, 0);
   card.add(gl);
   R.lane = gl;
+  if (gl._gridMat) { gl._gridMat.color.setHex(0x4a525d); gl._gridMat.opacity = 0.62; }
 
   for (const s of [1, -1]) {
     gl.add(poly([V3(0, gl.y(s * TOL_DB), 0.0004), V3(GW, gl.y(s * TOL_DB), 0.0004)],
@@ -676,48 +807,54 @@ function buildOverlay(ctx) {
   });
 
   // ======================= the specular layer over the card ================
-  // The plot is a lit panel, and nothing in this piece had a reflection sitting
-  // in front of what was underneath it. This is a crowned clear panel over the
-  // whole card: 12 mm of crown across 320 mm, so the surface normal turns
-  // through 17° top to bottom and the widened front strip sweeps across it as a
-  // soft band. Black albedo, additive, so it adds a reflection to the traces
-  // rather than veiling them.
+  // The plot is a lit panel and it needs a reflection sitting in front of what
+  // is underneath it. The previous answer here was a cylindrical section with
+  // ADDITIVE blending, which is the wrong model twice over: a partly-reflecting
+  // dielectric does not add its reflection to full transmission, it splits the
+  // budget, and the additive term is unbounded. Measured off the shipped frame
+  // it took the card to 62 % mean luminance — brighter than the hero, so the
+  // picture's hierarchy was inverted by a piece of glass.
   //
-  // The clearcoat is OFF. mats().glass carries clearcoat 1.0, and a clearcoat
-  // lobe on top of the base specular took the whole panel to a white wash that
-  // buried the traces. A sheet of glass reflects ~4 % at normal incidence and
-  // rises at the edges by Fresnel, which is exactly what the base dielectric
-  // lobe gives — a soft band across the crown, not a veil.
-  const CR = 1.10, CARC = (OH + 0.040) / CR;
-  const glassMat = M.glass.clone();
-  glassMat.color.setHex(0x000000);
-  glassMat.roughness = 0.170;
-  glassMat.clearcoat = 0.0;
-  glassMat.specularIntensity = 0.50;
-  glassMat.envMapIntensity = 0.45;
-  glassMat.transparent = true;
-  glassMat.depthWrite = false;
-  glassMat.blending = THREE.AdditiveBlending;
-  glassMat.side = THREE.FrontSide;
-  const glass = new THREE.Mesh(
-    new THREE.CylinderGeometry(CR, CR, OW + 0.004, 72, 1, true, -CARC / 2, CARC), glassMat,
-  );
-  glass.rotation.z = Math.PI / 2;
-  glass.position.set(0, 0, 0.0035 - CR);
+  // `GEO.instrumentGlass` is the shared part and it composites correctly: 4 mm
+  // of paraboloid crown across the card so the front strip sweeps as a band,
+  // reflectivity 0.34 for a coated cover glass, and normal blending at 26 %, so
+  // the traces are dimmed by a quarter exactly as real glass dims them.
+  const glass = GEO.instrumentGlass(OW + 0.006, OH + 0.006, {
+    crown: 0.0034, roughness: 0.19, tint: 0x05070b, segs: 32,
+  });
+  // The helper sets BOTH `reflectivity` 0.34 (F0 ≈ 2.7 %, a coated cover glass)
+  // and `clearcoat` 1.0, which adds a second full dielectric lobe on top of the
+  // first — about 7 % total, not 1.7 %. On a panel this large, facing a lens
+  // that has the rig's biggest softbox directly behind it, that is the whole
+  // difference between a sheen and a wash. One lobe only.
+  //
+  // Measured with the clearcoat removed and opacity 0.24, the card still read
+  // 27.5 % mean — and the padding outside the plot and the empty middle of the
+  // plot read 28.2 % and 27.6 %, i.e. a FLAT veil, which is the one thing a
+  // specular layer must not be. It is the environment term that is flat here,
+  // not the geometry, so the environment term comes down and the crown's own
+  // Fresnel sweep is what is left: a band running from about 12 % to 24 % across
+  // the panel instead of 28 % everywhere.
+  glass.material.clearcoat = 0.0;
+  glass.material.envMapIntensity = 0.28;
+  glass.material.opacity = 0.18;
+  glass.position.z = 0.0040;
   glass.castShadow = glass.receiveShadow = false;
-  glass.frustumCulled = false;
-  glass.renderOrder = 16;
   holder.add(glass);
 
   // ======================= labels ==========================================
   const lab = {};
 
-  // The identifying label is pinned to the hero with a leader dot, in the flagged
-  // gap immediately below its own fascia — not to the shelf above it.
-  lab.hero = L.add(V3(-0.17, 0.585, HERO_Z + 0.03), {
+  // The identifying label goes in the 55 px band between the chassis and the
+  // card — the only clear horizontal run in the frame, and it names the thing
+  // directly above it. Placed through `place()`, so it lands where the
+  // arithmetic says rather than wherever an offset from a corner happens to
+  // fall: geometric ndc x −0.3125 is screen x 420 once the director's −0.1625
+  // shift is applied, and ndc y +0.026 is screen y 487.
+  lab.hero = L.add(place(-0.3125, 0.108, CARD_DIST), {
     kicker: 'Bay 3 · moving-coil phono',
     value: G_STAGE_DB.toFixed(2) + ' dB at 1 kHz · ' + CART.loadOhm + ' Ω',
-    cls: 'lead', occlude: false, offset: [104, 0], priority: 9,
+    cls: 'lead', occlude: false, offset: [0, 0], priority: 9,
   });
 
   // The two curves cross at 1 kHz, which leaves exactly three large clear areas
@@ -732,7 +869,7 @@ function buildOverlay(ctx) {
     kicker: 'Record · standard', cls: 'am plain', occlude: false, priority: 5,
     value: sgn(DSP.riaaRecordDb(20000)) + ' dB at 20 kHz', offset: [0, 0],
   });
-  lab.err = L.add(anchor(card, GX + GW / 2, 0.0910), {
+  lab.err = L.add(anchor(card, GX + GW / 2, 0.0520), {
     kicker: 'Record + network · error',
     text: 'dashed: ±' + TOL_DB.toFixed(2) + ' dB, parts tolerance',
     cls: 'plain', occlude: false, priority: 6,
@@ -788,56 +925,60 @@ export default {
 
   content() {
     return `
-<p>A moving-coil cartridge is a velocity transducer: its output follows how
-fast the groove wall moves, not how far. Peak displacement is
+<p>A moving-coil cartridge is a velocity transducer: output follows how fast the
+groove wall moves, not how far. Displacement is
 <span class="num">a = v&#770;/&omega;</span>, so excursion grows as
-<span class="num">1/f</span>: at <span class="num">${(V_REF * 100).toFixed(0)} cm/s</span>, 50 Hz wants
-<span class="num">&plusmn;${(A_50_FLAT * 1e6).toFixed(1)} &micro;m</span> against a
-<span class="num">${(PITCH * 1e6).toFixed(0)} &micro;m</span> groove pitch.</p>
+<span class="num">1/f</span>.</p>
 
-<div class="key"><span class="lab">The idea</span><p>The cyan curve is
-<em>not</em> the algebraic inverse of the amber one: it is the network below, in
-stock parts. Their sum is a result &mdash;
-<span class="num">+${ERR.hi.toFixed(3)} dB</span>, inside the parts' own
-<span class="num">&plusmn;${TOL_DB.toFixed(2)} dB</span>.</p></div>
+<div class="key"><span class="lab">The idea</span><p>Cut flat at
+<span class="num">${(V_REF * 100).toFixed(0)} cm/s</span>, 50 Hz would want
+<span class="num">&plusmn;${(A_50_FLAT * 1e6).toFixed(1)} &micro;m</span> against a
+<span class="num">${(PITCH * 1e6).toFixed(0)} &micro;m</span> pitch. Pre-emphasis puts it
+<span class="num">${Math.abs(REC_50).toFixed(2)} dB</span> down, so the cut is
+<span class="num">&plusmn;${(A_50_CUT * 1e6).toFixed(1)} &micro;m</span> and the land survives. Cyan
+undoes it &mdash; not as an algebraic inverse but as a network in stock parts,
+so their sum is a <em>result</em>: <span class="num">+${ERR.hi.toFixed(3)} dB</span>.</p></div>
 
 <div class="eq">(1+sT&#8322;)/(1+sT&#8321;)(1+sT&#8323;)  <span class="c">fitted (ideal) Hz</span>
 T&#8321; ${((NET.R1 + NET.R2) / 1e3).toFixed(1)} k &middot; ${(NET.C1 * 1e9).toFixed(0)} nF  ${(TR.T1 * 1e6).toFixed(0)} &micro;s <span class="hl">${FR.f1.toFixed(2)}</span> (${F1.toFixed(2)})
 T&#8322; ${(NET.R2 / 1e3).toFixed(2)} k &middot; ${(NET.C1 * 1e9).toFixed(0)} nF  ${(TR.T2 * 1e6).toFixed(1)} &micro;s <span class="hl">${FR.f2.toFixed(1)}</span> (${F2.toFixed(1)})
 T&#8323; ${(NET.R3 / 1e3).toFixed(2)} k &middot; ${(NET.C2 * 1e9).toFixed(0)} nF   ${(TR.T3 * 1e6).toFixed(1)} &micro;s <span class="hl">${FR.f3.toFixed(0)}</span> (${F3.toFixed(0)})</div>
 
-<p>The network loses <span class="num">${Math.abs(NET_LOSS_1K).toFixed(2)} dB</span>, so the
-blocks make <span class="num">${AMP_RAW_DB.toFixed(2)} dB</span> for
-<span class="num">${G_STAGE_DB.toFixed(2)}</span> net:
+<p>Passive de-emphasis costs
+<span class="num">${Math.abs(NET_LOSS_1K).toFixed(2)} dB</span>, so the blocks make
+<span class="num">${AMP_RAW_DB.toFixed(2)} dB</span> for
+<span class="num">${G_STAGE_DB.toFixed(2)}</span> net.
 <span class="num">${(V_IN * 1e6).toFixed(1)} &micro;V</span> in,
-<span class="num">${(V_OUT * 1e3).toFixed(1)} mV</span> out on
-<span class="num">${(V_NOISE * 1e9).toFixed(1)} nV</span> of noise over the
-<span class="num">${(ENB / 1000).toFixed(2)} kHz</span> the curve leaves, not a flat 20 &mdash;
-<span class="num">${SNR_DB.toFixed(1)} dB</span> down.
-<span class="num">+${G_REST_DB.toFixed(2)} dB</span> more lands
-<span class="num">${V_TERM.toFixed(3)} V</span> &mdash;
-<span class="num">${W_TERM.toFixed(3)} W</span> into <span class="num">${SPEAKER.nominalZ} &Omega;</span>.</p>
+<span class="num">${(V_OUT * 1e3).toFixed(1)} mV</span> out,
+<span class="num">${SNR_DB.toFixed(1)} dB</span> above
+<span class="num">${(V_NOISE * 1e9).toFixed(1)} nV</span> over the curve's
+<span class="num">${(ENB / 1000).toFixed(2)} kHz</span>, not a flat 20.</p>
 
 <div class="myth"><span class="lab">Commonly got wrong</span><p>The earth wire is
-not the signal return: the coil's two terminals have their own screened
+not the signal return: the coil has its own screened
 <span class="num">${TONEARM.litzMm2.toFixed(3)} mm&sup2;</span> pair.</p></div>
 `;
   },
 
+  // Every row except the first is a value AT THE SWEPT FREQUENCY, not at the
+  // 1 kHz reference the prose derives, and the keys now say so. Without that,
+  // 'GAIN 60.46 dB' reads as a contradiction of the prose's 64.00 dB, and
+  // 'IN → OUT  0.389 → 410 mV rms' reads as 0.389 mV in against a stated
+  // 258.7 µV. Both were the same number quoted at two operating points.
   readouts() {
     return [
       {
-        k: 'SWEEP', u: 'Hz', cls: 'acc', bar: Math.log10(S.f / 20) / 3,
+        k: 'SWEEP f', u: 'Hz', cls: 'acc', bar: Math.log10(S.f / 20) / 3,
         v: S.f < 1000 ? S.f.toFixed(1) : String(Math.round(S.f)),
       },
-      { k: 'RECORD EQ', v: sgn(S.rec), u: 'dB', cls: 'am' },
-      { k: 'PLAYBACK EQ', v: sgn(S.play), u: 'dB', cls: 'acc' },
-      { k: 'ERROR', v: sgn(S.sum, 3), u: 'dB', cls: '' },
-      { k: 'GAIN', v: S.gain.toFixed(2), u: 'dB', cls: 'am', bar: S.gain / 90 },
+      { k: 'RECORD EQ @ f', v: sgn(S.rec), u: 'dB', cls: 'am' },
+      { k: 'PLAYBACK EQ @ f', v: sgn(S.play), u: 'dB', cls: 'acc' },
+      { k: 'ERROR @ f', v: sgn(S.sum, 3), u: 'dB', cls: '' },
+      { k: 'GAIN @ f', v: S.gain.toFixed(2), u: 'dB', cls: 'am', bar: S.gain / 90 },
       {
-        k: 'IN → OUT',
-        v: (S.vin * 1e3).toFixed(3) + ' → ' + (S.vout * 1e3).toFixed(0),
-        u: 'mV rms', cls: 'acc',
+        k: 'IN → OUT @ f',
+        v: (S.vin * 1e6).toFixed(1) + ' µV → ' + (S.vout * 1e3).toFixed(0) + ' mV',
+        u: 'rms', cls: 'acc',
       },
     ];
   },

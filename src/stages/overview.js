@@ -5,7 +5,7 @@ import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
 import { anodisedNormal } from '../core/tex.js';
-import { MAINS, SPEAKER, AMP, CART, PHONO, PREAMP, CHAIN } from '../core/spec.js';
+import { MAINS, SPEAKER, DRIVER, AMP, CART, PHONO, PREAMP, CHAIN } from '../core/spec.js';
 
 /* ===========================================================================
  * OVERVIEW — "The System"
@@ -40,28 +40,33 @@ const G_LOAD = CART.loadLossDb;               // −0.828 dB
 const V_IN = CART.atInputRms;                 // 258.7 µV rms
 
 /**
- * The gain budget, built FORWARDS from spec.js. The only free choice is the
- * volume setting, and it is not free either: the ladder is a switched resistor
- * network that steps in whole decibels, so it takes the integer nearest the
- * residual that spec.js derives for exactly one watt.
+ * The gain budget, built FORWARDS from spec.js and NOT rounded anywhere.
+ *
+ * An earlier revision took the nearest whole-decibel ladder step, summed the
+ * ladder from the rounded row and landed 2.903 V — so the opening spread, which
+ * is the piece's contract with the reader, closed on a different answer from the
+ * four chapters that derive it. The volume setting is `CHAIN.volumeDb`, the
+ * residual spec.js solves for exactly one watt, and it is used at full
+ * precision. Every figure below is then arithmetic on spec.js primaries.
  */
 const G_PHONO = PHONO.gainDb;                 // +64.0 dB at 1 kHz
 const G_LINE = PREAMP.gainDb;                 // +10.0 dB, fixed line stage
-const G_LADDER = Math.round(CHAIN.volumeDb);  // −19 dB, nearest whole step
-const G_PRE = G_LINE + G_LADDER;              // −9.0 dB net through the pre-amp
+const G_LADDER = CHAIN.volumeDb;              // −19.23 dB, the derived residual
+const G_PRE = G_LINE + G_LADDER;              // −9.23 dB net through the pre-amp
 const G_XOVER = 0.0;                          // active crossover, in band
 const G_AMP = AMP.gainDb;                     // +26.0 dB
-const G_TOTAL = G_LOAD + G_PHONO + G_PRE + G_XOVER + G_AMP;   // +80.17 dB
+const G_TOTAL = G_LOAD + G_PHONO + G_PRE + G_XOVER + G_AMP;   // +79.9459 dB
 
 const R_SPK = SPEAKER.nominalZ;                   // 8 Ω nominal
-const V_TERM = V_CART * DSP.undB(G_TOTAL);        // 2.9031 V rms
+const R_COIL = DRIVER.Re;                         // 6.2 Ω voice-coil dc resistance
+const V_TERM = V_CART * DSP.undB(G_TOTAL);        // 2.8284 V rms — = CHAIN.vTerm
 const V_SENS = CHAIN.vTerm;                       // 2.8284 V = 1.000 W into 8 Ω
-const P_TERM = DSP.powerW(V_TERM, R_SPK);         // 1.053 W into the 8 Ω nominal
-const HEAD_DB = DSP.dB(V_TERM / V_SENS);          // +0.226 dB, the rounding residual
+const P_TERM = DSP.powerW(V_TERM, R_SPK);         // 1.0000 W into the 8 Ω nominal
+const P_COIL = DSP.powerW(V_TERM, R_COIL);        // 1.290 W into the actual coil
 
 /** Sensitivity is a voltage figure, so the SPL is referred to 2.83 V. */
 const SENS = SPEAKER.sens;                        // 91.21 dB at 2.83 V / 1 m
-const SPL_1M = SENS + HEAD_DB;                    // 91.44 dB
+const SPL_1M = SENS + DSP.dB(V_TERM / V_SENS);    // 91.21 dB — the residual is 0
 
 /** Amplifier. The load in this room is 8 Ω, so the 8 Ω rating is the one used. */
 const P_OUT = AMP.pOut8;                          // 300 W into 8 Ω
@@ -326,10 +331,16 @@ function floorBox() {
   g.add(bezel);
 
   const neon = new THREE.Mesh(new THREE.CircleGeometry(0.0104, 24), M.ledAmber.clone());
-  neon.material.color.multiplyScalar(0.80);
+  neon.material.color.multiplyScalar(1.35);
   neon.rotation.x = -Math.PI / 2;
   neon.position.set(LX, 0.0234, LZ);
   g.add(neon);
+  // The box is 250 mm across and sits eight metres from the lens — about ten
+  // pixels. Without a halo the one place mains enters the room is a dark plate.
+  const ring = new THREE.Mesh(GEO.bevelCyl(0.0134, 0.0140, 0.0016, 28, 0.0004), M.ledAmber.clone());
+  ring.material.color.multiplyScalar(0.42);
+  ring.position.set(LX, 0.0228, LZ);
+  g.add(ring);
 
   const R = 0.034, rim = 0.0132;
   const lensMat = M.clearGlass.clone();
@@ -420,9 +431,9 @@ const TT = LAYOUT.ttPlinth;
 const SPINE_X = -0.365, SPINE_Z = -3.200;
 const bayY = (i) => RK.shelfY[i] + 0.055;     // 0.669 / 0.845 / 1.021
 
-/** Mains floor box, out in the right foreground where the loop reads broadside. */
-const FB = [1.880, 0, -1.640];
-const FB_RY = -0.26;
+/** Mains floor box, out in the foreground where the loop reads broadside. */
+const FB = [0.220, 0, -1.660];
+const FB_RY = -1.45;
 
 /** Tonearm output, on the plinth's rear right corner (plinth is yawed 0.30). */
 const ARM_OUT = (() => {
@@ -495,15 +506,15 @@ const FB_OUT = (() => {
 function mainsRoute() {
   return [
     FB_OUT,
-    [1.660, 0.023, -1.792],
-    [1.560, 0.021, -1.880],
-    [1.240, 0.020, -2.096],
-    [0.940, 0.020, -2.278],
-    [0.680, 0.021, -2.440],
-    [0.560, 0.021, -2.560],
-    [0.462, 0.023, -2.702],
-    [0.412, 0.035, -2.960],
-    [0.378, 0.090, -3.222],
+    [0.300, 0.022, -1.930],
+    [0.395, 0.021, -2.110],
+    [0.470, 0.020, -2.320],
+    [0.505, 0.020, -2.530],
+    [0.500, 0.021, -2.720],
+    [0.470, 0.021, -2.890],
+    [0.432, 0.024, -3.040],
+    [0.406, 0.038, -3.180],
+    [0.386, 0.092, -3.340],
     [0.356, 0.180, RACK_BACK + 0.110],
   ];
 }
@@ -539,41 +550,8 @@ const LEVELS = (() => {
   const L5 = L4 + G_AMP;
   return [L0, L1, L2, L3, L4, L5];
 })();
-const L_POSTS = LEVELS[LEVELS.length - 1];   // +9.26 dBV
+const L_POSTS = LEVELS[LEVELS.length - 1];   // +9.03 dBV
 const L_REF = DSP.dB(V_SENS);                // +9.03 dBV = 1.000 W into 8 Ω
-
-/**
- * A slightly convex glass front for the diagram card.
- *
- * The art director's headline note: nothing in this piece has a specular layer
- * sitting IN FRONT of what is underneath it, so every plot reads as a decal.
- * This is a real one — a dielectric panel, gently crowned so the reflected
- * image of the wide front strip sweeps across it as a band rather than sitting
- * on it as a patch. Low opacity, so what it contributes is almost entirely its
- * own specular; the plot underneath still reads through it.
- */
-function glassFront(w, h, bulge = 0.020) {
-  const SEG = 24;
-  const geo = new THREE.PlaneGeometry(w, h, SEG, SEG);
-  const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const u = (pos.getX(i) / w) * 2, v = (pos.getY(i) / h) * 2;
-    pos.setZ(i, bulge * (1 - u * u) * (1 - v * v));
-  }
-  geo.computeVertexNormals();
-  const mat = mats().glass.clone();
-  mat.color.setHex(0x0a0d12);
-  mat.roughness = 0.13;                  // low, but not zero: a band, not a dot
-  mat.clearcoat = 0.85;
-  mat.clearcoatRoughness = 0.10;
-  mat.envMapIntensity = 1.35;
-  mat.transparent = true;
-  mat.opacity = 0.15;
-  mat.depthWrite = false;
-  const m = new THREE.Mesh(geo, mat);
-  m.renderOrder = 18;
-  return m;
-}
 
 /**
  * A machined bezel around the diagram plate.
@@ -587,11 +565,11 @@ function glassFront(w, h, bulge = 0.020) {
  */
 function cardBezel(w, h, x0, y0) {
   const g = new THREE.Group();
-  const m = mats().alu.clone();
-  m.color.setHex(0x8f959d);
-  m.roughness = 0.30;
-  m.envMapIntensity = 1.05;
-  const T = 0.034, D = 0.026;
+  const m = mats().aluTrim.clone();
+  m.color.setHex(0x8b9198);
+  m.roughness = 0.38;
+  m.envMapIntensity = 0.72;
+  const T = 0.030, D = 0.024;
   const rail = (sx, sy, px, py) => {
     const r = new THREE.Mesh(GEO.bevelBox(sx, sy, D, 0.0052, 4), m);
     r.position.set(px, py, -D / 2 + 0.008);
@@ -620,21 +598,25 @@ function reflectionScrim() {
   c.width = 4; c.height = 256;
   const g = c.getContext('2d');
   const grd = g.createLinearGradient(0, 0, 0, 256);
-  grd.addColorStop(0.00, 'rgba(6,7,10,0.08)');
-  grd.addColorStop(0.30, 'rgba(6,7,10,0.16)');
-  grd.addColorStop(0.62, 'rgba(6,7,10,0.27)');
-  grd.addColorStop(1.00, 'rgba(6,7,10,0.42)');
+  // The far end must reach ZERO, not 0.08: a scrim that starts at a finite
+  // alpha draws its own leading edge across the floor as a tonal step, and at
+  // this strength that step was visible as a straight line behind the rack.
+  grd.addColorStop(0.00, 'rgba(6,7,10,0.00)');
+  grd.addColorStop(0.16, 'rgba(6,7,10,0.09)');
+  grd.addColorStop(0.44, 'rgba(6,7,10,0.28)');
+  grd.addColorStop(0.72, 'rgba(6,7,10,0.46)');
+  grd.addColorStop(1.00, 'rgba(6,7,10,0.62)');
   g.fillStyle = grd;
   g.fillRect(0, 0, 4, 256);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(13.5, 7.2),
+    new THREE.PlaneGeometry(18.0, 11.0),
     new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, toneMapped: false }),
   );
   m.rotation.x = -Math.PI / 2;
   m.rotation.z = Math.PI;                 // gradient runs far → near
-  m.position.set(-0.2, 0.0034, 0.35);
+  m.position.set(-0.2, 0.0034, 0.10);
   m.renderOrder = 4;
   return m;
 }
@@ -646,14 +628,21 @@ export default {
   kicker: 'Overview',
   standfirst: 'Thirteen boxes carrying one quantity, and one closed loop feeding all of them.',
   /**
-   * The whole room, and the width is the binding constraint: turntable to
-   * outboard loudspeaker cheek is 4.5 m, which at `fill` 0.37 already spans the
-   * safe box's full 960 px. Anything larger puts the right loudspeaker behind
-   * the panel. So the emptiness the audit caught above the system is answered
-   * by filling the top band with the level diagram and the bottom band with the
-   * floor's own reflection — not by cropping the system.
+   * WIDTH IS THE BINDING CONSTRAINT, and the way out of it is azimuth.
+   *
+   * Turntable plinth to outboard loudspeaker cheek is 4.6 m. Seen close to
+   * square on (az 0.50) that spans more than the safe box's 960 px at `fill`
+   * 0.37, so the previous framing was simultaneously too small AND over the
+   * rails at both edges. Foreshortening is the lever: swinging to az 0.78 packs
+   * the same 4.6 m into fewer degrees, and the largest `fill` that keeps the
+   * plinth, both loudspeakers and the rack inside x 160…1120 rises from 0.34 to
+   * 0.42. The subject is a third larger in area and nothing crosses a rail.
+   *
+   * The cost is the outer subwoofers, which cannot be in frame at any usable
+   * size — ±2.92 m of them needs a 48° vertical lens, which makes the system a
+   * model on a table. They are cropped rather than shrunk.
    */
-  shot: frameShot([-0.18, 0.63, -2.80], 0.65, { fill: 0.372, az: 0.50, el: 0.155, fov: 29 }),
+  shot: frameShot([-0.27, 0.90, -2.85], 0.65, { fill: 0.391, az: 0.78, el: 0.115, fov: 33 }),
   timeScale: TIME_SCALE,
   alwaysUpdate: false,
 
@@ -683,15 +672,18 @@ export default {
       hardware.add(riser);
     }
 
-    // PVC jacket: a dielectric with a broad, soft specular lobe. With the
-    // widened front strip this now takes a long band down each run, which is
-    // what stops the cabling reading as matte tubing.
-    const jacket = M.plastic.clone();
-    jacket.color.setHex(0x15171b);
-    jacket.roughness = 0.44;
-    jacket.clearcoat = 0.52;
-    jacket.clearcoatRoughness = 0.26;
-    jacket.envMapIntensity = 0.85;
+    // PVC jacket. THREE line systems were competing here — cyan diagram, amber
+    // diagram and lit interconnect — and none of them read. A real interconnect
+    // is dark and nearly matte; it is not supposed to compete with the drawing
+    // laid over it. So the jacket keeps only the thin grazing sheen that tells
+    // you it is round, and gives the frame back to the two diagram colours.
+    const jacket = M.rubber.clone();
+    jacket.color.setHex(0x0d0e11);
+    jacket.roughness = 0.78;
+    jacket.sheen = 0.55;
+    jacket.sheenRoughness = 0.62;
+    jacket.sheenColor = new THREE.Color(0x2c3138);
+    jacket.envMapIntensity = 0.46;
 
     const SIG = signalPath();
     const addCable = (pts, r) => {
@@ -702,12 +694,12 @@ export default {
       return t;
     };
 
-    addCable(SIG, 0.0042);
+    addCable(SIG, 0.0036);
     // right channel: starts at its own riser, so it has no free end in mid-air
-    addCable(mirrorPath(SIG).slice(13), 0.0042);
+    addCable(mirrorPath(SIG).slice(13), 0.0036);
     const mRoute = mainsRoute();
-    addCable(mRoute, 0.0062);
-    for (const m of [MONO_L, MONO_R]) addCable(monoMains(m), 0.0056);
+    addCable(mRoute, 0.0058);
+    for (const m of [MONO_L, MONO_R]) addCable(monoMains(m), 0.0050);
 
     // loudspeaker cable, drawn as the PAIR it is — out and back
     for (const [m, sp] of [[MONO_L, SPK_L], [MONO_R, SPK_R]]) {
@@ -753,15 +745,16 @@ export default {
     overlay.add(reflectionScrim());
 
     /* --- gesture 1: signal through, riding the real cable --------------- */
-    // A DRAWN LINE, not a lit cable. At this distance an 8.4 mm jacket is about
-    // two pixels, so a diagram line laid ON it simply replaces it and the run
-    // reads as glowing cable — the neon-spaghetti note. It therefore rides 26 mm
-    // clear of the jacket, thinner than the amber loop, and dim everywhere
-    // except at the travelling front.
-    const cCurve = curveThrough(liftPath(SIG, 0.0260));
+    // A DRAWN LINE, not a lit cable. At this distance a 7 mm jacket is about two
+    // pixels, so a diagram line laid ON it simply replaces it and the run reads
+    // as glowing cable — the neon-spaghetti note. It rides 30 mm clear of the
+    // jacket, at half the weight of the drawn cable and the same weight as the
+    // amber loop, and it is nearly dark everywhere except at the travelling
+    // front. Two diagram systems, matched in weight, differing only in hue.
+    const cCurve = curveThrough(liftPath(SIG, 0.0300));
     this.chainLen = curveThrough(SIG).getLength();
     const N = 300;
-    const chain = new DIAG.Trace(N, PAL.cy, 1.35, { opacity: 0.95, renderOrder: 13 });
+    const chain = new DIAG.Trace(N, PAL.cy, 1.15, { opacity: 0.95, renderOrder: 13 });
     chain.write((i, u) => { const v = cCurve.getPointAt(u); return [v.x, v.y, v.z]; });
     chain.material.vertexColors = true;
     chain.material.needsUpdate = true;
@@ -833,7 +826,7 @@ export default {
     for (let i = MP - 1; i >= 0; i--) loopPts.push(neut[i]);
     loopPts.push(live[0].clone());
     const LN = loopPts.length;
-    const loop = new DIAG.Trace(LN, PAL.am, 2.0, { opacity: 0.88, renderOrder: 13 });
+    const loop = new DIAG.Trace(LN, PAL.am, 1.15, { opacity: 0.90, renderOrder: 13 });
     loop.write((i) => [loopPts[i].x, loopPts[i].y, loopPts[i].z]);
     loop.material.vertexColors = true;
     loop.material.needsUpdate = true;
@@ -885,8 +878,12 @@ export default {
     this.fieldSlow = PULSE_REAL / this.tCu;     // ≈ 8.7 × 10⁷ against real time
 
     /* --- the one plot: a level diagram, cartridge to posts -------------- */
-    const GW = 1.70, GH = 0.52;
-    const PADX = 0.21, PADB = 0.15, PADT = 0.26;
+    // Sized to occupy the band the system's own aspect ratio leaves empty: six
+    // boxes across a room are 2.8 : 1 and the safe box is 1.14 : 1, so there is
+    // always a top band. It is filled deliberately, at the width of the system
+    // beneath it, rather than left as a grey void with one small card in it.
+    const GW = 2.44, GH = 0.60;
+    const PADX = 0.23, PADB = 0.16, PADT = 0.29;
     const CW = GW + 2 * PADX, CH = GH + PADT + PADB;
 
     const plot = new THREE.Group();
@@ -896,9 +893,10 @@ export default {
     plot.add(cardBezel(CW + 0.04, CH + 0.04, -PADX - 0.02, -PADB - 0.02));
 
     const g = new DIAG.Graph({
-      w: GW, h: GH, xRange: [0, 6], yRange: [-84, 44],
-      xTicks: [0, 1, 2, 3, 4, 5, 6], yTicks: [-80, -60, -40, -20, 0, 20, 40],
-      zeroLine: 0,
+      w: GW, h: GH, xRange: [0, 6], yRange: [-86, 22],
+      xTicks: [0, 1, 2, 3, 4, 5, 6], yTicks: [-80, -60, -40, -20, 0, 20],
+      // no zeroLine: 0 dBV and the one-watt reference at +9.03 dBV sit twelve
+      // pixels apart at this scale and read as one smudged pair of rules.
     });
     plot.add(g);
 
@@ -910,6 +908,12 @@ export default {
     ref.write((i) => [i === 0 ? 0 : GW, YR, 0.0006]);
     g.add(ref);
 
+    // Mass under the staircase. A level diagram is nine tenths empty plot by
+    // construction, and an empty plot reads as a decoration; the filled area is
+    // what makes the 148 dB the chain actually spans legible as a quantity.
+    g.addArea((xv) => LEVELS[Math.min(LEVELS.length - 1, Math.floor(xv))],
+      { color: PAL.cy, opacity: 0.045, n: 260, baseline: -86 });
+
     // one tread per node, one riser per row of the panel's equation
     const step = [];
     for (let i = 0; i < LEVELS.length; i++) { step.push([i, LEVELS[i]]); step.push([i + 1, LEVELS[i]]); }
@@ -917,17 +921,32 @@ export default {
     lt.write((i) => [g.x(step[i][0]), g.y(step[i][1]), 0.0010]);
     g.add(lt);
 
-    const dot = g.addDot(PAL.cy, 0.0080);
+    // markers at both ends: the number the plot exists to deliver is at POSTS,
+    // and the source it starts from is at CART
+    const dot = g.addDot(PAL.cy, 0.0090);
     dot.userData.setData(6, L_POSTS);
+    const dot0 = g.addDot(PAL.cy, 0.0062);
+    dot0.userData.setData(0, LEVELS[0]);
+    dot0.material.opacity = 0.7;
 
-    // aligned on the card's plate, not on the plot box
-    const front = glassFront(CW + 0.04, CH + 0.04, 0.014);
-    front.position.set(CW / 2 - PADX, CH / 2 - PADB, 0.011);
+    // THE SPECULAR LAYER, and it is the core helper, not a near-mirror of my
+    // own: crowned so the widened front strip sweeps the plate as a band, and
+    // at a coated cover glass's 1.7 % normal-incidence return rather than an
+    // uncoated 4 %. Opacity is pulled back from the default 0.30 because the
+    // plot has to read THROUGH it; what it contributes is its own specular.
+    // The crown has to scale with the PANEL: at 0.016 m across a 2.9 m plate the
+    // surface is flat to within a degree and the softbox comes back as one blown
+    // patch — the lens-flare failure the addendum names. At 0.055 m the normal
+    // turns through enough angle that the source sweeps as a band.
+    const front = GEO.instrumentGlass(CW + 0.04, CH + 0.04, { crown: 0.055, roughness: 0.30 });
+    front.material.opacity = 0.15;
+    front.material.envMapIntensity = 0.42;
+    front.position.set(CW / 2 - PADX, CH / 2 - PADB, 0.013);
     plot.add(front);
 
     // Yawed off the lens axis by 0.21 rad: square to the camera the plate has no
     // gradient across it and reads as a decal; raked, the strip sweeps it.
-    plot.position.set(-0.46, 1.455, -3.400);
+    plot.position.set(-0.95, 1.535, -3.400);
     const faceY = Math.atan2(this.shot.position[0] - plot.position.x,
       this.shot.position[2] - plot.position.z);
     plot.rotation.y = faceY - 0.21;
@@ -940,18 +959,23 @@ export default {
     const L = ctx.labels;
 
     const title = new THREE.Object3D();
-    title.position.set(GW / 2, GH + 0.135, 0.002);
+    title.position.set(GW * 0.30, GH + 0.150, 0.002);
     g.add(title);
     L.add(title, {
-      kicker: 'LEVEL DIAGRAM · dBV re 1 V', cls: 'acc plain', priority: 6, occlude: false,
+      kicker: 'LEVEL DIAGRAM · dBV re 1 V', cls: 'acc plain', priority: 7, occlude: false,
       text: 'cartridge to binding posts<br>',
-      value: `+${G_TOTAL.toFixed(2)} dB in five steps`,
+      value: `+${G_TOTAL.toFixed(2)} dB in five blocks`,
     });
 
+    // AXIS NUMERALS, and one x tick per riser — the caption used to ask the
+    // reader to count five steps in a staircase whose smallest riser is under a
+    // plot pixel. Now every node is named where it sits, so a riser that is
+    // deliberately small is still findable.
+    const NODE = ['CART', 'LOAD', 'PHONO', 'PRE', 'XO', 'POSTS'];
     g.tickLabels(L, {
-      yVals: [-80, -40, 0], yFmt: (v) => v.toFixed(0),
-      xVals: [0.5, 5.5], xFmt: (v) => (v < 2 ? 'CART' : 'POSTS'),
-      yOffset: [-20, 0], xOffset: [0, 14], priority: 4,
+      yVals: [-80, -40, 0, 20], yFmt: (v) => (v > 0 ? `+${v}` : String(v)),
+      xVals: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5], xFmt: (v) => NODE[Math.floor(v)],
+      yOffset: [-24, 0], xOffset: [0, 15], priority: 5,
     });
 
     // the number the whole plot exists to deliver, on the plot
@@ -959,35 +983,35 @@ export default {
     end.position.set(GW, g.y(L_POSTS), 0.002);
     g.add(end);
     L.add(end, {
-      cls: 'acc plain', priority: 5, occlude: false, offset: [-88, -24],
-      text: `+${HEAD_DB.toFixed(2)} dB over one watt<br>`,
+      cls: 'acc plain', priority: 6, occlude: false, offset: [-104, -30],
+      text: 'lands on the one-watt line<br>',
       value: `+${L_POSTS.toFixed(2)} dBV = ${V_TERM.toFixed(3)} V`,
     });
 
     // and what the amber line it lands on actually is
     const refA = new THREE.Object3D();
-    refA.position.set(g.x(1.25), g.y(L_REF), 0.002);
+    refA.position.set(g.x(1.15), g.y(L_REF), 0.002);
     g.add(refA);
     L.add(refA, {
-      cls: 'am plain', priority: 3, occlude: false, offset: [0, -15],
-      value: '2.83 V = 1.000 W into 8 Ω',
+      cls: 'am plain', priority: 4, occlude: false, offset: [6, 20],
+      value: `2.83 V = 1.000 W into ${R_SPK} Ω`,
     });
 
-    L.add(V3(ARM_OUT), {
+    L.add(V3([-1.240, 0.040, -3.150]), {
       kicker: 'FIELD FRONT · 0.66 c', cls: 'acc lead', priority: 3,
-      occlude: false, offset: [40, -152],
+      occlude: false, offset: [-40, 66],
       text: `${this.chainLen.toFixed(2)} m of copper in ${(this.tCu * 1e9).toFixed(0)} ns<br>`,
       value: `slowed 1 : ${expo(this.fieldSlow)}`,
     });
 
-    L.add(V3([1.240, 0.060, -2.096]), {
-      kicker: 'MAINS · ONE CLOSED LOOP', cls: 'am lead', priority: 4, offset: [-30, 128],
+    L.add(V3([0.700, 0.060, -2.360]), {
+      kicker: 'MAINS · ONE CLOSED LOOP', cls: 'am lead', priority: 4, offset: [8, 96],
       text: `live out · neutral back<br>swing ±${(X_DRIFT * 1e6).toFixed(2)} µm at ${(V_DRIFT * 1e3).toFixed(2)} mm/s`,
       value: `magnified × ${expo(this.drawMag)} in space`,
     });
 
-    L.add(V3([-0.970, 0.005, -0.630]), {
-      kicker: 'THEN AIR', cls: 'acc', priority: 2, offset: [86, 26],
+    L.add(V3([-0.320, 0.005, -1.180]), {
+      kicker: 'THEN AIR', cls: 'acc', priority: 2, offset: [10, 34],
       text: `${D_SEAT.toFixed(2)} m to the seat · ${(T_AIR * 1e3).toFixed(1)} ms<br>`,
       value: `${SPL_1M.toFixed(1)} dB at 1 m → ${SPL_SEAT.toFixed(1)} at the seat`,
     });
@@ -1069,9 +1093,9 @@ export default {
     const pad = (v, n) => String(v).padStart(n, ' ');
     return `
 <h3>One quantity, six forms</h3>
-<p>Thirteen chassis stand here; twelve touch the signal, the conditioner only
-energy. A note is mechanical in the groove, electrical through six boxes,
-mechanical again at the voice coil, acoustic for the last
+<p>Thirteen chassis; twelve touch the signal, the conditioner only energy. A
+note is mechanical in the groove, electrical through six boxes, mechanical
+again at the voice coil, acoustic for the last
 <span class="num">${D_SEAT.toFixed(2)}</span> m.</p>
 
 <div class="key"><span class="lab">The idea</span><p>Current is a closed loop: the
@@ -1081,17 +1105,17 @@ carriers oscillate ±<span class="num">${(X_DRIFT * 1e6).toFixed(2)}</span> µm 
 driving them runs at <span class="num">${expo(V_FIELD, 2)}</span> m/s.</p></div>
 
 <div class="eq">  ${(V_CART * 1e3).toFixed(3)} mV  <span class="c">cartridge, 5 cm/s at 1 kHz</span>
-− ${pad((-G_LOAD).toFixed(2), 4)} dB  <span class="c">10 Ω coil into a 100 Ω load</span>
-+ ${pad(G_PHONO.toFixed(1), 4)} dB  <span class="c">phono stage, × ${DSP.undB(G_PHONO).toFixed(0)}</span>
-− ${pad((-G_PRE).toFixed(1), 4)} dB  <span class="c">pre-amp: +10 line, −${-G_LADDER} ladder</span>
-+ ${pad(G_XOVER.toFixed(1), 4)} dB  <span class="c">crossover, in band</span>
-+ ${pad(G_AMP.toFixed(1), 4)} dB  <span class="c">monoblock,   × ${DSP.undB(G_AMP).toFixed(2)}</span>
+− ${pad((-G_LOAD).toFixed(2), 5)} dB  <span class="c">10 Ω coil into a 100 Ω load</span>
++ ${pad(G_PHONO.toFixed(2), 5)} dB  <span class="c">phono stage, × ${DSP.undB(G_PHONO).toFixed(0)}</span>
+− ${pad((-G_PRE).toFixed(2), 5)} dB  <span class="c">+10 line, ${G_LADDER.toFixed(2)} ladder</span>
++ ${pad(G_XOVER.toFixed(2), 5)} dB  <span class="c">crossover, in band</span>
++ ${pad(G_AMP.toFixed(2), 5)} dB  <span class="c">monoblock, × ${DSP.undB(G_AMP).toFixed(2)}</span>
 <span class="hl">= +${G_TOTAL.toFixed(2)} dB</span> → ${V_TERM.toFixed(3)} V at the posts
-  <span class="c">= ${P_TERM.toFixed(3)} W in ${R_SPK} Ω, ${(V_TERM * V_TERM / 6.2).toFixed(2)} W in the 6.2 Ω coil</span></div>
+  <span class="c">= ${P_TERM.toFixed(3)} W in ${R_SPK} Ω, ${P_COIL.toFixed(2)} W in the ${R_COIL} Ω coil</span></div>
 
 <p>The chain runs in <b>volts</b>: sensitivity is itself a voltage figure,
-<span class="num">${SENS.toFixed(2)}</span> dB at 2.83 V / 1 m, so a watt
-appears exactly once — above — and the level follows the volts.</p>`;
+<span class="num">${SENS.toFixed(2)}</span> dB at 2.83 V / 1 m. The ladder
+setting is not chosen — it is the residual that lands one watt.</p>`;
   },
 
   readouts() {
@@ -1100,8 +1124,11 @@ appears exactly once — above — and the level follows the volts.</p>`;
     const x = -X_DRIFT * Math.cos(ph);
     return [
       { k: 'CHAIN GAIN', v: `+${G_TOTAL.toFixed(2)}`, u: 'dB', cls: 'acc' },
-      { k: 'AT THE POSTS', v: V_TERM.toFixed(3), u: 'V rms', cls: 'acc' },
-      { k: 'MAINS · FULL OUT', v: i.toFixed(2), u: 'A', cls: 'am', bar: Math.abs(i) / I_MAINS_PK },
+      { k: 'AT THE POSTS', v: V_TERM.toFixed(3), u: `V rms · ${P_TERM.toFixed(3)} W`, cls: 'acc' },
+      {
+        k: 'MAINS · FULL OUT', v: i.toFixed(2), u: `A · ${I_MAINS.toFixed(2)} rms`,
+        cls: 'am', bar: Math.abs(i) / I_MAINS_PK,
+      },
       { k: 'CARRIER DRIFT', v: (DSP.driftVelocity(Math.abs(i), CU_MM2) * 1e3).toFixed(3), u: 'mm/s', cls: 'am' },
       { k: 'CARRIER OFFSET', v: (x * 1e6).toFixed(3), u: 'µm', cls: 'am', bar: Math.abs(x) / X_DRIFT },
       {

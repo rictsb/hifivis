@@ -4,6 +4,7 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { PAL, mats } from './materials.js';
 import { bevelBox } from './geo.js';
+import { radialSprite } from './tex.js';
 import { logSpace, linSpace, clamp } from './dsp.js';
 
 /**
@@ -417,8 +418,12 @@ export class Swarm extends THREE.InstancedMesh {
 
 /** A glowing sprite — LEDs, hot spots, the leading edge of a wavefront. */
 export function glow(color = PAL.cy, size = 0.05, intensity = 1, tex = null) {
+  // A SpriteMaterial with map:null draws a solid SQUARE. The default has to be
+  // a real radial falloff, or every caller that omits a texture puts a coloured
+  // rectangle in the frame — which is exactly what happened.
   const m = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: tex, color, transparent: true, opacity: intensity,
+    map: tex || radialSprite(128, 'rgba(255,255,255,1)', 'rgba(255,255,255,0)', 1.7),
+    color, transparent: true, opacity: intensity,
     blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
   }));
   m.scale.set(size, size, 1);

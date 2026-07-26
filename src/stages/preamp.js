@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { LAYOUT } from '../core/layout.js';
+import { LAYOUT, frameShot } from '../core/layout.js';
 import { mats, PAL } from '../core/materials.js';
 import * as GEO from '../core/geo.js';
 import * as DIAG from '../core/diagram.js';
 import * as DSP from '../core/dsp.js';
 import * as T from '../core/tex.js';
-import { PREAMP, PHONO, AMP, CART, SPEAKER, CHAIN } from '../core/spec.js';
+import { PREAMP, PHONO, AMP, CART, DRIVER, SPEAKER, CHAIN } from '../core/spec.js';
 
 /* ===========================================================================
    GAIN & CONTROL — the line preamplifier.
@@ -114,8 +114,19 @@ const SNR_EARLY = new Float64Array(64);
 for (let N = 0; N < 64; N++) { SNR_LATE[N] = chainLate(N).snr; SNR_EARLY[N] = chainEarly(N).snr; }
 const MARGIN_OP = SNR_LATE[N_VINYL] - SNR_EARLY[N_VINYL];   // 8.58 dB at −19
 const MARGIN_63 = SNR_LATE[63] - SNR_EARLY[63];             // 10.17 dB
-const Z_32 = ladderState(32).zOut;                 // 245 Ω
+const Z_31 = ladderState(31).zOut;                 // 3954 Ω — six pads cascaded
+const Z_32 = ladderState(32).zOut;                 // 245 Ω  — one pad, terminated
 const Z_33 = ladderState(33).zOut;                 // 1164 Ω
+/**
+ * THE STEP AT −32 IS REAL, and it is the most interesting thing on the plot.
+ * S/N is not monotonic in the setting, because the ladder's own Johnson noise
+ * goes as √Zout and Zout is a function of the relay WORD, not of the number of
+ * decibels. 011111 cascades six pads and looks back into 3.95 kΩ; 100000 is one
+ * 32 dB pad terminated in 10 kΩ and looks back into 245 Ω — 12.1 dB less
+ * thermal noise for 1 dB more attenuation.
+ */
+const STEP_32 = SNR_LATE[32] - SNR_LATE[31];       // +9.40 dB
+const STEP_TH = DSP.dB(Math.sqrt(Z_31 / Z_32));    // 12.1 dB of noise-voltage
 const KINK = SNR_LATE[32] - SNR_LATE[33];          // 6.33 dB
 const KINK_TH = KINK - 1;                          // 5.33 dB of it is thermal
 
@@ -139,7 +150,8 @@ export const MODEL = {
   EK, G, E_SRC, E_NI, V_CLIP, CLIP_DBV, HEADROOM, C_CABLE,
   SECTIONS, ladderState, chainLate, chainEarly, loadDb, cornerHz,
   SNR_LATE, SNR_EARLY, R_PASSIVE, R_ACT, N_VINYL, N_DIGITAL,
-  MARGIN_OP, MARGIN_63, Z_32, Z_33, KINK, KINK_TH, DIV_LOSS, HF_LOSS,
+  MARGIN_OP, MARGIN_63, Z_31, Z_32, Z_33, STEP_32, STEP_TH, KINK, KINK_TH,
+  DIV_LOSS, HF_LOSS,
 };
 
 /* ===========================================================================
@@ -206,28 +218,6 @@ function setDisplay(disp, N) {
     }
     im.instanceColor.needsUpdate = true;
   }
-}
-
-/**
- * A shallow convex pane. THE SPECULAR LAYER: a flat cover glass either returns
- * the source or it does not, so a display under flat glass reads as a printed
- * decal. Bowing the pane by a millimetre spreads the reflected image of the
- * wide front strip into a soft band that sweeps the whole window, which is what
- * a real instrument lens does and what makes the readout sit *behind* glass.
- */
-function convexPane(w, h, bulge, segX = 24) {
-  const segY = Math.max(12, Math.round((segX * h) / w) * 3);
-  const g = new THREE.PlaneGeometry(w, h, segX, segY);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const u = p.getX(i) / (w / 2), v = p.getY(i) / (h / 2);
-    // cylindrical in y, barely relieved in x: the reflected strip then crosses
-    // the window as a band with a top and a bottom edge, not as a flat wash
-    p.setZ(i, bulge * Math.max(0, 1 - v * v) * (1 - 0.25 * u * u));
-  }
-  p.needsUpdate = true;
-  g.computeVertexNormals();
-  return g;
 }
 
 /* ---- brushed alloy authored FOR this panel --------------------------------
@@ -319,18 +309,23 @@ function buildPreamp() {
   // cyan. Warming the base colour by a few points is what a real alloy's own
   // reflectance does, and it is the difference between "aluminium" and "steel
   // lit by a monitor".
-  const fm = fasciaMaps(0.58, 0.26);
+  // And it must belong to the rack. A bright silver fascia among five dark ones
+  // reads as a different product photographed on the same shelf; the hero has
+  // to be the hero through framing and finish, not through albedo. This is a
+  // dark-anodised graphite that still carries the brush, so the machined
+  // grooves and the display bezel are what separate it from its neighbours.
+  const fm = fasciaMaps(0.58, 0.17);
   const face = M.alu.clone();
-  face.color.setHex(0x545252); face.roughness = 0.58;
+  face.color.setHex(0x504e4b); face.roughness = 0.52;
   face.roughnessMap = fm.rough; face.normalMap = fm.norm;
-  face.normalScale = new THREE.Vector2(0.55, 0.55);
-  face.anisotropy = 0.12; face.envMapIntensity = 0.27;
+  face.normalScale = new THREE.Vector2(0.38, 0.38);
+  face.anisotropy = 0.12; face.envMapIntensity = 0.40;
   // The end cheeks are bead-blasted rather than brushed: an anisotropic vertical
   // grain on a 62 mm panel concentrates the strip into one clipped white block.
   const faceV = M.aluV.clone();
-  faceV.color.setHex(0x393a3c); faceV.roughness = 0.80;
+  faceV.color.setHex(0x323337); faceV.roughness = 0.78;
   faceV.roughnessMap = fm.rough; faceV.normalMap = null;
-  faceV.anisotropy = 0.06; faceV.envMapIntensity = 0.24;
+  faceV.anisotropy = 0.06; faceV.envMapIntensity = 0.34;
   // Controls are TURNED, not brushed. The stock brush map lands radially on a
   // lathe cap and throws a starburst of spokes straight at the camera, which is
   // a CGI signature rather than a knob; and a dark metal at metalness 1 is a
@@ -425,28 +420,18 @@ function buildPreamp() {
   meter.position.set(0.010 - 0.059, H / 2 - 0.0150, ZF + 0.0030);
   g.add(meter);
 
-  // THE LENS. A cover glass is a REFLECTION ADDED TO what is behind it, so it
-  // composites additively: a near-black dielectric whose only output is its own
-  // specular, blended on top of the cavity and the digits. Transmission would
-  // do the same job at the cost of a whole extra scene pass, and three's
-  // refraction offset drags the bright fascia in from beside the window.
-  // Curved in y only, so the wide front strip crosses the pane as a band with
-  // a top and a bottom edge — the thing a flat pane cannot do.
-  const lensMat = M.glass.clone();
-  lensMat.color.setHex(0x02040a);
-  lensMat.roughness = 0.055;
-  lensMat.clearcoat = 1.0;
-  lensMat.clearcoatRoughness = 0.055;
-  // 0.45 floated the whole cavity to mid-grey and the digits read as printed
-  // marks on a light panel rather than as light coming out of a dark one. The
-  // band must be a reflection ON the display, never brighter than the display.
-  lensMat.envMapIntensity = 0.16;
-  lensMat.transparent = true;
-  lensMat.depthWrite = false;
-  lensMat.blending = THREE.AdditiveBlending;
-  const lens = new THREE.Mesh(convexPane(winW - 0.0015, winH - 0.0015, 0.0052), lensMat);
+  // THE LENS — GEO.instrumentGlass, not a near-mirror rolled here. A crowned
+  // pane at roughness 0.15 sweeps the widened front strip across the window as
+  // a soft band with a top and a bottom edge; the roughness-0.055 pane this
+  // stage used to build returned essentially the whole softbox as a clipped
+  // rectangle and was the brightest object in the frame. reflectivity 0.34 is
+  // a coated cover glass (~1.7 % at normal incidence), which is why the band
+  // sits ON the digits instead of drowning them.
+  const lens = GEO.instrumentGlass(winW - 0.0015, winH - 0.0015, { crown: 0.0040 });
+  lens.material.opacity = 0.30;
+  lens.material.envMapIntensity = 1.25;
   lens.position.set(0.010, H / 2, ZF + 0.0038);
-  lens.renderOrder = 4;
+  lens.renderOrder = 22;
   g.add(lens);
 
   // ---- volume knob --------------------------------------------------------
@@ -528,8 +513,20 @@ function buildPreamp() {
   g.add(stby);
 
   // ---- input pushbuttons --------------------------------------------------
+  // A milled well under the whole control cluster. Without it the left third of
+  // the fascia is 200 mm of unbroken metal, and the buttons read as stickers.
+  // The step catches a hairline along its top edge and drops the ground behind
+  // the caps into shadow, which is what gives them a height.
+  const wellPan = new THREE.Mesh(GEO.bevelBox(0.152, 0.030, 0.0034, 0.0011, 3), groove);
+  wellPan.position.set(-0.152, H / 2 - 0.0250, ZF - 0.0016);
+  wellPan.receiveShadow = true;
+  g.add(wellPan);
+  const wellLip = new THREE.Mesh(GEO.bevelBox(0.158, 0.036, 0.0022, 0.0008, 2), faceV);
+  wellLip.position.set(-0.152, H / 2 - 0.0250, ZF - 0.0030);
+  wellLip.receiveShadow = true;
+  g.add(wellLip);
   for (let i = 0; i < 4; i++) {
-    const bx = -0.128 + i * 0.0215;
+    const bx = -0.156 + i * 0.0215;
     const well = new THREE.Mesh(GEO.bevelCyl(0.0072, 0.0074, 0.0022, 28, 0.0004), M.anodBlack);
     well.rotation.x = Math.PI / 2;
     well.position.set(bx, H / 2 - 0.0245, ZF + 0.0004);
@@ -600,37 +597,42 @@ function buildPreamp() {
 }
 
 /* ===========================================================================
-   FRAMING
+   FRAMING — derived through frameShot(), then trucked in pixels.
 
-   The clear stage is 960 x 840 px inside a 1600 x 1000 canvas, and the Director
-   already offsets the principal point so the camera axis lands at its centre.
-   What is left to get right is the SIZE and PLACEMENT of things inside that
-   box, so the shot is specified in pixels and solved backwards for a camera.
+   The subject is a 555 x 98 mm chassis: 5.7 : 1. Its bounding radius is half
+   the DIAGONAL, and frameShot sizes against the safe box's HEIGHT, so a wide
+   flat object needs a fill above 0.62 before it fills the box's WIDTH — the
+   safe box is 960 x 840, i.e. 1.14 : 1, and this subject is nearly six times
+   wider than it is tall. fill 0.80 puts 0.282 m of radius across 672 px, so the
+   fascia runs 721 px inside a 960 px box and the rack's near-left post lands at
+   x = 241 with the far-right one at 1091.
 
-   The subject is a 555 x 98 mm chassis — 5.7 : 1. Filling the safe box means
-   filling its WIDTH: at 1260 px/m the fascia runs 668 px across a 960 px box
-   and the rack posts land just inside it. The hero sits high, at 265 px above
-   the axis, which leaves the lower half of the box clear for one card and puts
-   a hand's width of rack between the two so the card is not stuck to the
-   chassis.
+   The truck is then an explicit pixel offset applied to the aim point, and it
+   is chosen so that BOTH terminating elements are whole: the top of the rack
+   (LAYOUT.rack.topY = 1.128) sits 316 px above the axis with air above it, and
+   the bottom edge of the canvas lands on the bay-2 shelf at 0.452 rather than
+   through the chassis standing on it.
    =========================================================================== */
 
-const AZ = 0.30, EL = 0.050, FOV = 30;
+const AZ = 0.30, EL = 0.115, FOV = 30;
 const HALF_TAN = Math.tan((FOV * Math.PI) / 360);
 
-const PX_PER_M = 1260;                      // scale on the preamp's own plane
-const HERO_PX = [6, 216];                   // where the preamp centre lands
-const MPP_HERO = 1 / PX_PER_M;
-const CAM_DIST = (500 * MPP_HERO) / HALF_TAN;             // 1.530 m
-const DECK_DIST = CAM_DIST - 0.42;                        // card plane, nearer
-const MPP_DECK = (DECK_DIST * HALF_TAN) / 500;
+const PRE = new THREE.Vector3(LAYOUT.rack.x, LAYOUT.rack.shelfY[4] + FOOT + H / 2, LAYOUT.rack.z);
+const HERO_R = Math.hypot(W / 2, H / 2);                  // 0.2818 m
+const BASE = frameShot(PRE, HERO_R, { fill: 0.70, az: AZ, el: EL, fov: FOV });
 
-const DIRV = new THREE.Vector3(
-  Math.sin(AZ) * Math.cos(EL), Math.sin(EL), Math.cos(AZ) * Math.cos(EL));
+const DIRV = new THREE.Vector3(...BASE.position).sub(PRE);
+const CAM_DIST = DIRV.length();                           // 1.789 m
+DIRV.normalize();
 const RIGHT = new THREE.Vector3(Math.cos(AZ), 0, -Math.sin(AZ));
 const UPV = new THREE.Vector3().crossVectors(DIRV, RIGHT).normalize();
 
-const PRE = new THREE.Vector3(LAYOUT.rack.x, LAYOUT.rack.shelfY[4] + FOOT + H / 2, LAYOUT.rack.z);
+const PX_PER_M = 500 / (CAM_DIST * HALF_TAN);             // 1043 px/m at the aim plane
+const MPP_HERO = 1 / PX_PER_M;
+const HERO_PX = [24, 24];                   // truck: hero centred, lifted 24 px
+const DECK_DIST = CAM_DIST - 0.46;                        // card plane, nearer
+const MPP_DECK = (DECK_DIST * HALF_TAN) / 500;
+
 const AIM = PRE.clone()
   .addScaledVector(RIGHT, -HERO_PX[0] * MPP_HERO)
   .addScaledVector(UPV, -HERO_PX[1] * MPP_HERO);
@@ -648,11 +650,11 @@ function screenPoint(px, py, dist) {
    drives, and what moving it does to signal-to-noise.
    =========================================================================== */
 
-const CARD_PX = [520, 396];                 // one card, below the hero
-const CARD_AT = [-92, -118];                // its centre, px from the axis
-const CARD_PAD = 15;                        // px of plate outside the content
-const CARD_YAW = -0.205;                    // rad off the lens axis (about UPV)
-const CARD_TILT = -0.115;                   // top leans AWAY, so the plate's
+const CARD_PX = [356, 250];                 // one card, below and right of hero
+const CARD_AT = [44, -272];                 // its centre, px from the axis
+const CARD_PAD = 13;                        // px of plate outside the content
+const CARD_YAW = -0.30;                     // rad off the lens axis (about UPV)
+const CARD_TILT = -0.16;                    // top leans AWAY, so the plate's
                                             // normal tips up into the front strip
 const CW = CARD_PX[0] * MPP_DECK;
 const CH = CARD_PX[1] * MPP_DECK;
@@ -689,7 +691,7 @@ const R1W = 0.0196, R1H = 0.0066;
 const R2W = 0.0066, R2H = 0.0148;
 const X0 = -0.006 - SPITCH * 2.5;
 const X_TERM = 0.1030;
-const BOARD_PX = 432;
+const BOARD_PX = 314;
 const BOARD_SCALE = (BOARD_PX * MPP_DECK) / BW_;
 /* The card floats nearer the lens than the chassis does, so comparing metres to
    metres would understate the blow-up. This is the ratio of ANGULAR sizes: the
@@ -868,74 +870,51 @@ function seedFade(root) {
 /* ---------------------------------------------------------------------------
    THE CARD AS AN OBJECT.
 
-   A square-cornered black plane with a 1 px border is a pasted PNG, and it is
-   the loudest CGI signal left in the frame after the highlights. Four things
-   fix it, and all four are physical rather than graphic:
+   `DIAG.diagramCard` now builds the slab itself — real thickness, a broken
+   edge, a machined aluTrim bezel, lit, shadow-casting and present in the floor
+   reflection. Stacking a second hand-rolled slab and bezel behind it, as this
+   stage used to, is what made the plate read as a rectangular hole cut into
+   the rack: two opaque black plates and two bezels at slightly different sizes.
 
-     1. THICKNESS. An 11 mm slab with a broken edge, so the machined fillet
-        catches a hairline all the way round and the plate has a near side.
-     2. A MACHINED BEZEL in trim alloy standing proud of the ink, which is what
-        actually reads as "an instrument panel" rather than "a rectangle".
-     3. THE SPECULAR LAYER. A shallow convex cover pane over the whole face,
-        additive and near-black, so its only output is the reflected image of
-        the wide front strip — a soft band that crosses the plate and tells the
-        eye there is glass in front of the ink.
-     4. OFF THE LENS AXIS. Yawed and leaned back, so that band is asymmetric.
-        A card square to the lens returns the source as a flat wash or not at
-        all; either way it looks printed.
+   What is still this stage's job is the two things the core cannot know about:
 
-   Plus a multiply-blended pool behind it, which darkens the rack the card is
-   floating in front of. Nothing else in the frame supplies that occlusion,
-   because the key light is 0.4 m of standoff away from a true cast shadow.
+     1. A MULTIPLY-BLENDED POOL behind the plate, darkening the rack the card
+        floats in front of. The key light is 0.40 m of standoff away from
+        casting a true shadow that far, so without this the card has no
+        occlusion and no distance from what it covers.
+     2. THE SPECULAR LAYER, from `GEO.instrumentGlass` — crowned, coated
+        (reflectivity 0.34, not the uncoated 4 %) and roughness 0.15, so the
+        widened front strip sweeps across the face as a soft band with a top
+        and a bottom edge rather than sitting on it as a clipped rectangle.
+        The near-mirror this stage used to roll itself — roughness 0.085 on a
+        flat pane — returned the whole softbox and bloomed.
+
+   Plus: the deck is yawed and leaned off the lens axis, so that band is
+   asymmetric. A card square to the lens returns the source as a flat wash or
+   not at all; either way it looks printed.
    --------------------------------------------------------------------------- */
 function cardPlate(w, h) {
   const g = new THREE.Group();
-  const M = mats();
 
   const shade = new THREE.Mesh(
-    new THREE.PlaneGeometry(w * 1.55, h * 1.75),
+    new THREE.PlaneGeometry(w * 1.7, h * 1.9),
     new THREE.MeshBasicMaterial({
-      map: T.blobShadow(256, 1), transparent: true, opacity: 0.62,
+      map: T.blobShadow(256, 1), transparent: true, opacity: 0.58,
       depthWrite: false, toneMapped: false,
     }));
-  shade.position.set(0.014, -0.020, -0.030);
+  shade.position.set(0.016, -0.022, -0.034);
   shade.renderOrder = 1;
   g.add(shade);
 
-  const slabMat = M.anodBlack.clone();
-  slabMat.color.setHex(0x0b0d11);
-  slabMat.roughness = 0.46; slabMat.envMapIntensity = 0.55;
-  const slab = new THREE.Mesh(GEO.bevelBox(w, h, 0.011, 0.0022, 4), slabMat);
-  slab.position.z = -0.0075;
-  slab.castShadow = false; slab.receiveShadow = true;
-  g.add(slab);
-
-  const trim = M.aluTrim.clone();
-  trim.color.setHex(0x71767d); trim.envMapIntensity = 0.34;
-  const bz = 0.0042, prd = 0.0030;
-  for (const [bw, bh, bx, by] of [
-    [w, bz, 0, (h - bz) / 2], [w, bz, 0, -(h - bz) / 2],
-    [bz, h - bz * 2, (w - bz) / 2, 0], [bz, h - bz * 2, -(w - bz) / 2, 0],
-  ]) {
-    const b = new THREE.Mesh(GEO.bevelBox(bw, bh, prd, 0.0007, 2), trim);
-    b.position.set(bx, by, -0.0009);
-    b.castShadow = false; b.receiveShadow = true;
-    g.add(b);
-  }
-
-  const paneMat = M.glass.clone();
-  paneMat.color.setHex(0x02040a);
-  paneMat.roughness = 0.085;
-  paneMat.clearcoat = 1.0; paneMat.clearcoatRoughness = 0.075;
-  paneMat.envMapIntensity = 0.42;
-  paneMat.transparent = true; paneMat.depthWrite = false;
-  paneMat.blending = THREE.AdditiveBlending;
-  const pane = new THREE.Mesh(convexPane(w - bz * 2.2, h - bz * 2.2, 0.0075, 28), paneMat);
-  pane.position.z = 0.0042;
-  pane.renderOrder = 24;
-  g.add(pane);
-
   return g;
+}
+
+/** The cover glass over a card face. Separated so it can be added last. */
+function cardGlass(w, h) {
+  const p = GEO.instrumentGlass(w, h, { crown: Math.min(w, h) * 0.05 });
+  p.material.opacity = 0.15;          // a coated pane, not a smoked filter
+  p.renderOrder = 26;
+  return p;
 }
 
 /* ===========================================================================
@@ -999,81 +978,101 @@ export default {
     // opaque: at 0.9 the shelf lips behind still print through the card
     inner.add(DIAG.diagramCard(CW, CH, { pad: PAD * 0.72, opacity: 1.0, border: false }));
 
+    // The core plate is a lit dielectric at roughness 0.34, which under this rig
+    // returns enough of the room that the whole card floats to mid-grey and the
+    // two dark regions read as separate panels dropped onto a light sheet. A
+    // near-black inked field over it, inset by 4 px so the plate survives as a
+    // machined surround, puts the card back to one instrument face — and the
+    // cover glass then has something dark to lay its band across.
+    const inkMat = mats().anodBlack.clone();
+    inkMat.color.setHex(0x0a0d12);
+    inkMat.roughness = 0.44; inkMat.envMapIntensity = 0.26;
+    inkMat.clearcoat = 0.35; inkMat.clearcoatRoughness = 0.30;
+    const ink = new THREE.Mesh(GEO.bevelBox(CW - P(5), CH - P(5), 0.0015, 0.0006, 2), inkMat);
+    ink.position.set(CW / 2, CH / 2, 0.0010);
+    ink.receiveShadow = true;
+    inner.add(ink);
+
     // hairline between the two regions
     const rule = new DIAG.Trace(2, 0x39414c, 1.0, { opacity: 0.7, renderOrder: 6 });
-    rule.write((i) => [i === 0 ? P(16) : P(504), P(206), 0.0006]);
+    rule.write((i) => [i === 0 ? P(14) : P(342), P(108), 0.0006]);
     inner.add(rule);
 
     // ---- region 1: the relay ladder ---------------------------------------
     const board = buildBoard();
     board.scale.setScalar(BOARD_SCALE);
-    board.position.set(P(262), P(306), 0.002);
+    board.position.set(P(178), P(178), 0.002);
     inner.add(board);
 
     // ---- region 2: S/N against knob position ------------------------------
-    const gw = P(404), gh = P(118);
+    const gw = P(262), gh = P(74);
     const G_ = new DIAG.Graph({
       w: gw, h: gh, xRange: [0, 63], yRange: [55, 125],
       xTicks: [0, 16, 32, 48, 63], yTicks: [60, 80, 100, 120],
     });
-    G_.position.set(P(88), P(40), 0.002);
+    G_.position.set(P(76), P(28), 0.002);
     inner.add(G_);
     G_.addTrace((n) => SNR_EARLY[Math.round(n)],
-      { color: PAL.cy, width: 1.6, n: 64, dashed: true, opacity: 0.85 });
-    G_.addTrace((n) => SNR_LATE[Math.round(n)], { color: PAL.cy, width: 2.8, n: 64 });
+      { color: PAL.cy, width: 1.4, n: 64, dashed: true, opacity: 0.85 });
+    G_.addTrace((n) => SNR_LATE[Math.round(n)], { color: PAL.cy, width: 2.4, n: 64 });
 
     // where this system actually sits — a fixed amber marker, not a decoration
     const opMark = G_.addMarker(N_VINYL, { color: PAL.am, width: 1.4, opacity: 0.9 });
     const gap = new DIAG.Trace(2, PAL.gr, 3.0, { renderOrder: 15 });
     G_.add(gap);
-    const dotL = G_.addDot(PAL.cy, P(3.4));
-    const dotE = G_.addDot(PAL.ink3, P(2.8));
+    const dotL = G_.addDot(PAL.cy, P(3.0));
+    const dotE = G_.addDot(PAL.ink3, P(2.4));
 
     // AXIS NUMERALS — a plot you cannot take a value off is a decoration.
-    // Both sets sit INSIDE the plate: the y column has 60 px of margin to its
-    // left and the x row 25 px below it before the bezel.
+    // Both sets sit INSIDE the plate: the y column has 76 px of margin to its
+    // left and the x row 32 px below it before the bezel.
     G_.tickLabels(ctx.labels, {
       xVals: [0, 32, 63], yVals: [60, 90, 120],
       xFmt: (v) => (v === 0 ? '0 dB' : '−' + v),
       yFmt: (v) => String(v),
-      xOffset: [0, 13], yOffset: [-21, 0],
+      xOffset: [0, 12], yOffset: [-19, 0],
     });
 
     // ---- labels -----------------------------------------------------------
     const L = ctx.labels;
     const cardPt = (x, y) => inner.localToWorld(new THREE.Vector3(x, y, 0));
-    const plotPt = (x, y) => G_.localToWorld(new THREE.Vector3(G_.x(x), G_.y(y), 0));
 
-    // anchored to the subject chassis's own fascia, so a reader knows which of
-    // the six identical rack units this chapter is about
-    // Docked ABOVE the chassis, in the void under the shelf: the two card
-    // captions own the space below it, and three scrims stacked in one column
-    // read as a stack of code comments rather than as callouts.
+    // THREE world labels, not five. The card is small now and the captions sit
+    // off it, in the clear rack to its left, so nothing overprints the plot and
+    // nothing stacks into a column of scrims.
+    //
+    // The subject label docks ABOVE the chassis, in the 71 mm void between the
+    // preamp's lid and the shelf over it, so a reader knows which of the six
+    // identical rack units this chapter is about.
     S.lab.hw = L.add(
       new THREE.Vector3(PRE.x - 0.190, PRE.y + H / 2 + 0.002, PRE.z + ZF),
       {
         kicker: 'Line preamp · rack bay 4',
         value: '−19 dB · 8.9 : 1 · 710 mV',
-        cls: 'acc lead', occlude: false, offset: [66, -44], priority: 5,
+        cls: 'acc lead', occlude: false, offset: [70, -42], priority: 5,
       });
 
-    S.lab.board = L.add(cardPt(P(262), CH + P(CARD_PAD)), {
+    S.lab.board = L.add(cardPt(P(0), P(182)), {
       kicker: `Relay ladder, shown ×${BOARD_MAG.toFixed(1)}`,
       value: '010011 · Z 2.94 kΩ', occlude: false,
-      offset: [0, -34], priority: 3,
+      offset: [-98, 0], priority: 4,
     });
 
-    S.lab.snr = L.add(cardPt(P(268), P(178)), {
+    // The step is REAL, not a sampling artefact: SNR_LATE is tabulated on the
+    // integers and the trace is sampled at n = 64 over 0…63, so every drawn
+    // vertex is one relay word. At −31 six pads cascade to a 3.95 kΩ source; at
+    // −32 a single pad terminated in 10 kΩ gives 245 Ω, and 12 dB less thermal
+    // noise from the ladder more than pays for the extra 1 dB of attenuation.
+    S.lab.snr = L.add(cardPt(P(0), P(58)), {
       kicker: 'S/N re. output · dB',
-      value: 'solid late 115.3 · dashed early 106.7',
-      cls: 'plain', occlude: false, offset: [0, 0], priority: 3,
+      text: `Amber is this system. The step at −32 is ladder Z: `
+        + `${DSP.si(Z_31, 3)}Ω → ${DSP.si(Z_32, 3)}Ω.`,
+      value: 'late 115.3 · early 106.7',
+      occlude: false, offset: [-118, 6], priority: 3,
     });
 
-    S.lab.op = L.add(plotPt(N_VINYL, 76), {
-      kicker: 'This system, vinyl at 1 W',
-      value: `−${ATT_VINYL.toFixed(2)} dB · ${bits(N_VINYL)}`,
-      cls: 'am', occlude: false, offset: [64, 6], priority: 4,
-    });
+    // the specular layer goes on last, over everything the card draws
+    deck.add(cardGlass(CW + PAD * 1.1, CH + PAD * 1.1));
 
     seedFade(overlay);
     Object.assign(S, { hw: hardware, board, G: G_, opMark, gap, dotL, dotE });
@@ -1120,8 +1119,7 @@ export default {
     const rTxt = ratio < 100 ? ratio.toFixed(1) : Math.round(ratio);
     S.lab.hw.setValue(`−${N} dB · ${rTxt} : 1 · ${DSP.si(late.s[3], 3)}V`);
     S.lab.board.setValue(`${bits(N)} · Z ${DSP.si(late.L.zOut, 3)}Ω`);
-    S.lab.snr.setValue(
-      `solid late ${yl.toFixed(1)} · dashed early ${ye.toFixed(1)}`);
+    S.lab.snr.setValue(`late ${yl.toFixed(1)} · early ${ye.toFixed(1)}`);
   },
 
   update(dt, t) {
@@ -1142,12 +1140,13 @@ export default {
 <div class="key"><span class="lab">The idea</span><p>Volume is subtraction. The gain is fixed; the knob decides how much to throw away, and where.</p></div>
 
 <h3>Where the setting comes from</h3>
-<p>The cartridge makes ${n((CART.outRms * 1e6).toFixed(0) + ' µV')} rms at 5 cm/s, ${n((CART.atInputRms * 1e6).toFixed(0) + ' µV')} into ${n('100 Ω')}. One watt into ${n('8 Ω')} is ${n('2.83 V')}, ${n(SPEAKER.sens.toFixed(1) + ' dB')} at 1 m:</p>
+<p>${n((CART.outRms * 1e6).toFixed(0) + ' µV')} at the cartridge must become ${n('2.83 V')} at the terminals — ${n(CHAIN.totalDb.toFixed(2) + ' dB')}, plus ${n(Math.abs(CHAIN.loadLossDb).toFixed(2) + ' dB')} lost into its ${n('100 Ω')} load:</p>
 <div class="eq">${CHAIN.totalDb.toFixed(2)} + ${Math.abs(CHAIN.loadLossDb).toFixed(2)} − ${PHONO.gainDb} − ${GAIN_DB.toFixed(0)} − ${AMP.gainDb} = <span class="hl">−${ATT_VINYL.toFixed(2)}</span>
-<span class="c">setting ${N_VINYL} dB · ${bits(N_VINYL)} · 2 V src −${ATT_DIGITAL.toFixed(1)}</span></div>
+<span class="c">2.83 V = ${((V_TERM_1W * V_TERM_1W) / DRIVER.Re).toFixed(2)} W in ${DRIVER.Re} Ω → ${SPEAKER.sens.toFixed(2)} dB, 1 W ${SPEAKER.sens1W.toFixed(2)}
+setting ${N_VINYL} dB · ${bits(N_VINYL)} · 2 V src −${ATT_DIGITAL.toFixed(1)}</span></div>
 
 <h3>Late, not early</h3>
-<p>Six L-pads, binary-weighted ${n('32/16/8/4/2/1 dB')} into a ${n('10 kΩ')} image, sit <b>after</b> the ${n('+' + GAIN_DB.toFixed(0) + ' dB')} block. S/N is not held still — it falls to ${n(SNR_LATE[52].toFixed(1) + ' dB')} at −52 — but the <b>margin</b> over the same ladder placed first is: ${n(MARGIN_OP.toFixed(2) + ' dB')} here, ${n(MARGIN_63.toFixed(2) + ' dB')} at −63.</p>
+<p>Six binary-weighted L-pads, ${n('32/16/8/4/2/1 dB')} into ${n('10 kΩ')}, sit <b>after</b> the ${n('+' + GAIN_DB.toFixed(0) + ' dB')} block: ${n(MARGIN_OP.toFixed(2) + ' dB')} better S/N here, ${n(MARGIN_63.toFixed(2) + ' dB')} at −63. S/N is not monotonic — −32 beats −31 by ${n(STEP_32.toFixed(1) + ' dB')}.</p>
 
 <div class="myth"><span class="lab">Commonly got wrong</span><p>"A passive control is more transparent." Its ${n('40 kΩ')} pot at midpoint is a ${n('10 kΩ')} source: ${n(DIV_LOSS.toFixed(2) + ' dB')} in the divider, ${n(HF_LOSS.toFixed(2) + ' dB')} more at 20 kHz into 3 m of cable. This ${n('50 Ω')} buffer corners at ${n((cornerHz(R_ACT) / 1e6).toFixed(1) + ' MHz')}.</p></div>`;
   },

@@ -46,7 +46,11 @@ const OVERHANG = L_EFF - Math.sqrt(L_EFF * L_EFF - K_BAER);   // 17.32 mm
 const MOUNT_D  = L_EFF - OVERHANG;                            // 221.68 mm
 const OFFSET   = Math.asin((NULL1 + NULL2) / (2 * L_EFF));    // 23.02°
 const reqOffset = (r) => Math.asin((r * r + K_BAER) / (2 * L_EFF * r));
-const trackErr  = (r) => OFFSET - reqOffset(r);               // rad, + = overhung
+// rad. Positive means the fitted offset EXCEEDS what the tangent needs, which
+// is the case between the two nulls; outside them it goes negative, reaching
+// −1.79° at the first groove. Löfgren A equalises weighted DISTORTION (error
+// over radius), not error, so the angular error is largest at the rim.
+const trackErr  = (r) => OFFSET - reqOffset(r);
 
 // ---- 45/45 groove geometry ------------------------------------------------
 const GROOVE_W = 60e-6;                 // top width of an unmodulated groove
@@ -75,7 +79,11 @@ const E_STAR = 1 / ((1 - NU_DIA ** 2) / E_DIA + (1 - NU_PVC ** 2) / E_PVC);
 const R_EQ   = Math.sqrt(TIP_R_H * TIP_R_V);          // geometric-mean tip radius
 const A_HZ   = Math.cbrt((3 * N_WALL * R_EQ) / (4 * E_STAR));   // contact radius
 const AREA_C = Math.PI * A_HZ * A_HZ;                 // 2.88 × 10⁻¹¹ m²
-const P_MEAN = N_WALL / AREA_C;                       // 482 MPa
+const P_MEAN = N_WALL / AREA_C;                       // 482 MPa — the MEAN
+// Hertz's pressure distribution over a circular contact is a hemisphere, so the
+// peak at the centre is exactly 3/2 of the mean. A tribologist reads an
+// unqualified contact pressure as the peak, so both are printed.
+const P_PEAK = 1.5 * P_MEAN;                          // 723 MPa
 // 1 tonne-force per cm² = 1000 × 9.80665 N / 10⁻⁴ m² = 9.80665 × 10⁷ Pa
 const TF_CM2 = 1000 * G0 * 1e4;
 const P_TCM2 = P_MEAN / TF_CM2;                       // 4.92 tf/cm²
@@ -88,7 +96,10 @@ const L_TURN  = BL / (B_GAP * N_TURNS);   // DERIVED: 0.799 mm of conductor per 
 const V_REF   = CART.vRef;                // 5 cm/s reference wall velocity, PEAK
 const E_PK    = CART.outPk;               // 402.5 µV peak
 const E_RMS   = CART.outRms;              // 284.6 µV rms
-const R_COIL  = 10, R_LOAD = CART.loadOhm; // Ω — coil DCR (chosen) and phono load
+// Coil dc resistance and phono load are BOTH spec primaries. This line used to
+// type 10 for the coil, which is a re-declaration of CART.srcOhm and exactly the
+// class of thing the editor caught elsewhere in the piece.
+const R_COIL  = CART.srcOhm, R_LOAD = CART.loadOhm;         // Ω
 const I_PK    = E_PK / (R_COIL + R_LOAD); // 3.659 µA peak
 // The tonearm wire is a SPEC PRIMARY (TONEARM.litzMm2), shared with the phono
 // chapter so the two cannot quote the same cable differently. The strand
@@ -129,9 +140,20 @@ const vMaxAt   = (r) => TAU * F_HF * aMaxAt(r);        // 0.83 → 0.14 m/s
 const LAND = PITCH - GROOVE_W;                        // 69.0 µm
 
 // ---- display scalings (both stated on screen) -----------------------------
-// MAG is set so exactly three grooves at true 129 µm pitch span the card: the
-// reader sees the width, the land and the pitch in one picture, to scale.
-const MAG        = 770;       // groove cross-section magnification
+// The section card is 92.5 mm wide in world units and hangs 0.56 m from the
+// lens — about a fifth of the frame width, beside the deck and never over it.
+// MAG is DERIVED from that width and the requirement that exactly three grooves
+// at the true 129 µm pitch span the card edge to edge, so the width, the land
+// and the pitch are all in one picture at one scale:
+//     span = 2 · pitch + one groove width
+const CARD_D     = 0.545;                                  // m from the lens
+const CARD_WANT  = 0.0795;                                 // m, target card width
+const MAG        = Math.round(CARD_WANT / (2 * PITCH + GROOVE_W));   // 250 : 1
+const CARD_W     = MAG * (2 * PITCH + GROOVE_W);           // 0.0795 m, exactly 3 grooves
+// The card's internal layout was drawn at 770 : 1; every length in it scales
+// with the magnification so the drawing stays proportioned.
+const CS         = MAG / 770;
+const CARD_H     = 0.100 * CS;
 const TIME_RATIO = 1000;      // groove/stylus motion slowed 1 : 1000
 
 /**
@@ -265,16 +287,22 @@ function poly(pts, color, opacity = 1, order = 11, z = 0) {
  * with a 1 px border is a pasted PNG; a plate with thickness, a fillet that
  * catches the front strip and a shadow line down one edge is an object.
  */
-function cardPlate(w, h, pad = 0.020) {
+function cardPlate(w, h, pad = 0.020 * CS) {
   const g = new THREE.Group();
   const W = w + pad * 2, H = h + pad * 2;
+  const T = 0.0034 * Math.max(0.6, CS * 2.2);
 
   const bez = mats().alu.clone();
   bez.color.setHex(0x343a41);
   bez.roughness = 0.46;
   bez.envMapIntensity = 0.58;
-  const bezel = new THREE.Mesh(GEO.bevelBox(W + 0.0050, H + 0.0050, 0.0055, 0.0011, 3), bez);
-  bezel.position.set(w / 2, h / 2, -0.0040);
+  const bezel = new THREE.Mesh(GEO.bevelBox(W + 0.0034, H + 0.0034, T, 0.0008, 3), bez);
+  // Its FRONT face must sit behind the plate. Placed at −T·0.72 the box's front
+  // face landed at −0.5 mm, i.e. in front of both the plate and the drawing's
+  // ground, so what the whole card was reading against was a sheet of satin
+  // alloy — which is where the streaky mid-grey wash came from, and why nothing
+  // done to the plate material changed it.
+  bezel.position.set(w / 2, h / 2, -0.0018 - T / 2);
   bezel.renderOrder = 1;
   // NOT a shadow caster. Tried: the plate sits between the key light and the
   // left loudspeaker, and taking that cabinet's top chamfer out of shadow left
@@ -283,16 +311,44 @@ function cardPlate(w, h, pad = 0.020) {
   bezel.castShadow = false;
   g.add(bezel);
 
-  const plate = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({
-    color: 0x080a0d, transparent: true, opacity: 0.95, depthWrite: true, toneMapped: false,
-  }));
+  // The ground the drawing sits on is a LIT DIELECTRIC, not a UI div. A
+  // MeshBasicMaterial takes no light, shades across nothing and never appears
+  // in the floor reflection, which is what made every card in this piece read
+  // as a pasted PNG. A physical plate catches the shell's horizon band along
+  // its top edge and falls away down its face.
+  //
+  // MATTE, and that is the whole trick. At roughness 0.36 with a clearcoat the
+  // plate spread the key light and the shell's horizon band across its entire
+  // face as a streaky mid-grey, and hairline white ink on mid-grey is not a
+  // drawing. The ground has to stay in the bottom tenth of the ramp; the
+  // specular EVENT belongs to the glass in front of it, where it can be a band
+  // in one corner instead of a wash over everything.
+  const plateMat = new THREE.MeshPhysicalMaterial({
+    color: 0x0a0d12, metalness: 0.0, roughness: 0.44,
+    clearcoat: 0.45, clearcoatRoughness: 0.20,
+    envMapIntensity: 0.55, transparent: true, opacity: 0.97,
+  });
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(W, H), plateMat);
   plate.position.set(w / 2, h / 2, -0.0011);
   plate.renderOrder = 3;
   g.add(plate);
 
+  // The drawing's own ground, inset so a lit margin of the slab still shows
+  // inside the bezel. Even at roughness 0.74 and envMapIntensity 0.10 the lit
+  // slab settles around 28 % — fine as a surround, hopeless as the ground under
+  // hairline ink, which needs to sit near black or the section stops reading as
+  // a section. So the slab is the object and this is the paper on it.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.010 * CS, H - 0.010 * CS),
+    new THREE.MeshBasicMaterial({
+      color: 0x0a0d13, transparent: true, opacity: 0.94, toneMapped: false, depthWrite: true,
+    }));
+  ground.position.set(w / 2, h / 2, -0.0008);
+  ground.renderOrder = 4;
+  g.add(ground);
+
   const b = new DIAG.Trace(5, 0x39414c, 1.0, { opacity: 0.75, renderOrder: 5 });
   const x0 = -pad, y0 = -pad;
-  b.write((i) => [[x0, y0], [x0 + W, y0], [x0 + W, y0 + H], [x0, y0 + H], [x0, y0]][i].concat(-0.0009));
+  b.write((i) => [[x0, y0], [x0 + W, y0], [x0 + W, y0 + H], [x0, y0 + H], [x0, y0]][i].concat(-0.0007));
   g.add(b);
   return g;
 }
@@ -303,7 +359,7 @@ function dimH(x0, x1, y, colour = 0x9aa3b0, z = 0.0013) {
   const t = new DIAG.Trace(2, colour, 1.2, { opacity: 0.80, renderOrder: 11 });
   t.write((i) => [i ? x1 : x0, y, z]);
   g.add(t);
-  const hl = 0.0058, hw = 0.0019;
+  const hl = 0.0058 * CS, hw = 0.0019 * CS;
   for (const [x, s] of [[x0, 1], [x1, -1]]) {
     g.add(poly([[x, y], [x + s * hl, y + hw], [x + s * hl, y - hw]], colour, 0.85, 12, z));
   }
@@ -360,48 +416,30 @@ function hatchRects(rects, step, colour, opacity, slope = 0.52, z = 0.0002) {
 }
 
 /**
- * THE SPECULAR LAYER.
+ * THE SPECULAR LAYER — `GEO.instrumentGlass`, not a hand-rolled near-mirror.
  *
- * A lit panel with nothing in front of it reads as a decal. Real instrument
- * glass is very slightly convex, so the reflected image of the studio's front
- * strip sweeps across it as a soft band that moves with the camera, and that
- * band is most of what says "this is a physical object". A shallow spherical
- * cap over the card, black-bodied and additively blended, contributes only its
- * own reflection: the drawing underneath prints through undimmed.
+ * Round 3 answered "the card reads as a decal" with a crowned panel at
+ * roughness 0.095 and additive blending, which returns the softbox at close to
+ * full intensity: a milky wash across the drawing rather than a band laid over
+ * it. The core helper is crowned so the source SWEEPS as a band, sits at
+ * reflectivity 0.34 (a coated cover glass returns ~1.7 % at normal incidence,
+ * not the uncoated 4 %) and carries a little roughness because it is glass in a
+ * room. The only local change is the tint, which is pulled to black so the
+ * 30 % veil darkens the plate rather than tinting the ink blue.
  */
-function specularPanel(w, h, sag = 0.006) {
-  const geo = new THREE.PlaneGeometry(w, h, 30, 24);
-  const p = geo.attributes.position;
-  const rMax = Math.hypot(w / 2, h / 2);
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i);
-    const k = Math.min(1, Math.hypot(x, y) / rMax);
-    p.setZ(i, sag * (1 - k * k));
-  }
-  geo.computeVertexNormals();
-  const m = mats().glass.clone();
-  // No body colour: this layer contributes ONLY its own reflection. It must be
-  // near-mirror and very dim — a blurred reflection at any useful brightness
-  // washes the whole card to milk instead of laying a band across it.
-  //
-  // ROUND 3: this was four times too strong. A sweep that reaches mid-grey
-  // stops being glass and becomes a milky wash over the drawing — the card
-  // rendered LIGHTER than the backdrop and the section printed through it. The
-  // band has to sit in the bottom quarter of the ramp: present, gradated, and
-  // never competing with the ink it covers.
-  m.color.setHex(0x000000);
-  m.roughness = 0.095;
-  m.reflectivity = 0.5;
-  m.clearcoat = 0.80;
-  m.clearcoatRoughness = 0.055;
-  m.specularIntensity = 0.9;
-  m.envMapIntensity = 0.090;
-  m.transparent = true;
-  m.depthWrite = false;
-  m.blending = THREE.AdditiveBlending;
-  const mesh = new THREE.Mesh(geo, m);
-  mesh.renderOrder = 40;
-  return mesh;
+function cardGlass(w, h) {
+  const gl = GEO.instrumentGlass(w, h, {
+    crown: Math.min(w, h) * 0.050, roughness: 0.20, tint: 0x010203,
+  });
+  // The helper's defaults are set for a meter face against a bright fascia. A
+  // black card carrying hairline ink is the opposite case: at opacity 0.30 and
+  // envMapIntensity 0.85 the veil lifted the whole upper half of the drawing to
+  // mid grey and the section printed through it. Dim it until the sweep is a
+  // band across the top corner and nothing else.
+  gl.material.opacity = 0.15;
+  gl.material.envMapIntensity = 0.50;
+  gl.renderOrder = 40;
+  return gl;
 }
 
 // ---------------------------------------------------------------------------
@@ -447,7 +485,9 @@ function grooveRoughTex() {
     const vLeadIn = vOf(R_OUT);          // 0.965 — outside this, smooth land
     const vLeadOut = vOf(R_IN);          // 0.096 — inside this, smooth land
     const GAPS = [0.17, 0.34, 0.51, 0.67, 0.84];   // five track gaps
-    const ROUGH_LAND = 0.115, ROUGH_FIELD = 0.220;
+    // The lands are the polished part and the cut band scatters: widening that
+    // gap is what makes the disc read as a record rather than a machined platter.
+    const ROUGH_LAND = 0.105, ROUGH_FIELD = 0.255;
     for (let y = 0; y < H; y++) {
       // v = radius fraction, 0 at the label, 1 at the rim. CanvasTexture flips
       // Y and the surface lathe runs inward, so the two inversions cancel.
@@ -508,9 +548,15 @@ function grooveNormalTex() {
       let cut = 1 - smooth(vIn - 0.005, vIn + 0.010, v);
       cut = Math.min(cut, smooth(vOut - 0.010, vOut + 0.006, v));
       for (const gv of GAPS) cut = Math.min(cut, smooth(0.006, 0.015, Math.abs(v - gv)));
+      // ROUND 4: the cut band carried three LOW harmonics (5.3, 8.7, 15 cycles
+      // across the band) at large amplitude, which swept the reflected ray
+      // through the whole hemisphere half a dozen times and rendered the record
+      // as a banded, brushed-aluminium disc. What a photographed LP shows is a
+      // fine concentric grain — one broad sheen with structure INSIDE it — so
+      // the frequencies go up and the amplitudes come down.
       return (1 - cut) * 0.42
-        + cut * (0.070 * Math.sin(v * TAU * 5.3) + 0.032 * Math.sin(v * TAU * 8.7 + 1.1)
-               + 0.018 * Math.sin(v * TAU * 15.0));
+        + cut * (0.026 * Math.sin(v * TAU * 19.0) + 0.014 * Math.sin(v * TAU * 33.0 + 1.1)
+               + 0.008 * Math.sin(v * TAU * 57.0));
     };
     const dv = 1.5 / H;
     for (let y = 0; y < H; y++) {
@@ -537,35 +583,94 @@ function grooveNormalTex() {
   });
 }
 
-/** Printed record label: dark amber paper with fine concentric ruling. */
+/**
+ * The printed label — a 100 mm paper disc with real type on it.
+ *
+ * Round 3 drew a bare brown ring, and at this framing the label is the one
+ * light-valued object inside the largest dark object in the picture: the eye
+ * goes straight to it and finds nothing. A record label is paper, so it is the
+ * only matte thing on the disc, and it is printed, so it carries type set on
+ * arcs. Two arcs of type in the annulus the record weight leaves visible do
+ * more for the read than any amount of ring ruling.
+ */
 function labelTex() {
   return cached('lbl', () => {
-    const S = 512, c = makeCanvas(S, S), g = c.getContext('2d');
-    g.fillStyle = '#120e09'; g.fillRect(0, 0, S, S);
+    const S = 1024, c = makeCanvas(S, S), g = c.getContext('2d');
     const cx = S / 2;
-    g.fillStyle = '#5a3d1c';
-    g.beginPath(); g.arc(cx, cx, cx * 0.98, 0, TAU); g.fill();
-    g.strokeStyle = 'rgba(24,18,10,0.85)';
-    for (const [r, w] of [[0.94, 2], [0.90, 1], [0.62, 1], [0.58, 2], [0.30, 1], [0.16, 3]]) {
+    g.fillStyle = '#0d0a06'; g.fillRect(0, 0, S, S);
+    // NOT mirrored. Tried it: the arc set along the foot of the label reads
+    // upside down whenever the platter has carried it round to the top, which
+    // is what a photographed record does, and "fixing" it with a horizontal
+    // flip put the type into a genuine mirror.
+    g.fillStyle = '#6e5530';                       // deep amber stock
+    g.beginPath(); g.arc(cx, cx, cx * 0.995, 0, TAU); g.fill();
+
+    // paper is not one flat value: a faint radial shade off the spindle
+    const shade = g.createRadialGradient(cx, cx, cx * 0.10, cx, cx, cx);
+    shade.addColorStop(0, 'rgba(255,236,200,0.07)');
+    shade.addColorStop(1, 'rgba(24,16,6,0.34)');
+    g.fillStyle = shade;
+    g.beginPath(); g.arc(cx, cx, cx * 0.995, 0, TAU); g.fill();
+
+    const INK = '#241a0c';
+    g.strokeStyle = 'rgba(26,18,8,0.85)';
+    for (const [r, w] of [[0.955, 5], [0.930, 2], [0.470, 2], [0.440, 5]]) {
       g.lineWidth = w;
       g.beginPath(); g.arc(cx, cx, cx * r, 0, TAU); g.stroke();
     }
-    // printed matter, implied: two rings of short marks
-    g.fillStyle = 'rgba(22,16,9,0.75)';
-    for (const [r, n, l] of [[0.76, 46, 22], [0.44, 26, 15]]) {
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * TAU;
+
+    /** Type set on an arc. `bottom` runs it the right way up along the foot. */
+    const arcText = (txt, rf, px, bottom, track = 1.16) => {
+      g.save();
+      g.translate(cx, cx);
+      g.fillStyle = INK;
+      g.font = `600 ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      const r = cx * rf;
+      const wds = [...txt].map((ch) => g.measureText(ch).width * track);
+      const span = wds.reduce((a, b) => a + b, 0) / r;
+      let a = bottom ? span / 2 : -span / 2;
+      for (let i = 0; i < txt.length; i++) {
+        const da = wds[i] / r;
         g.save();
-        g.translate(cx + Math.cos(a) * cx * r, cx + Math.sin(a) * cx * r);
-        g.rotate(a + Math.PI / 2);
-        g.fillRect(-l / 2, -2.5, l, 5);
+        g.rotate(bottom ? a - da / 2 : a + da / 2);
+        g.translate(0, bottom ? r : -r);
+        if (bottom) g.rotate(Math.PI);
+        g.fillText(txt[i], 0, 0);
         g.restore();
+        a += bottom ? -da : da;
       }
+      g.restore();
+    };
+    // Set SMALL. The record turns, so at any instant the arcs may be at the
+    // foot of the label and reading upside down — which is what a photographed
+    // record does, and is only distracting if the type is large enough to parse.
+    // At 42 px on a 1024 canvas the cap height lands at ~8 px on screen: plainly
+    // type, not plainly a word.
+    arcText('GROOVE TO VOLTAGE', 0.855, 42, false);
+    arcText('REFERENCE PRESSING', 0.855, 30, true);
+    arcText('45/45 STEREO', 0.630, 32, false);
+    arcText('33⅓ RPM · SIDE A', 0.630, 27, true);
+
+    // the small print, implied: a fine ring of marks between the two arcs
+    g.fillStyle = 'rgba(26,18,8,0.55)';
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * TAU;
+      g.save();
+      g.translate(cx + Math.cos(a) * cx * 0.745, cx + Math.sin(a) * cx * 0.745);
+      g.rotate(a + Math.PI / 2);
+      g.fillRect(-9, -2.5, 18, 5);
+      g.restore();
     }
-    g.fillStyle = '#0d0a06';
-    g.beginPath(); g.arc(cx, cx, cx * 0.075, 0, TAU); g.fill();
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
+    // A RingGeometry's u runs with local +x and the ring is laid down by a
+    // −90° rotation about X, which reverses the handedness the type was drawn
+    // in: set straight, "SIDE A" comes out "A EDIS". Mirroring the SAMPLE is
+    // unambiguous where mirroring the canvas transform is not (with centre at
+    // 0.5 and repeat −1 the sample stays inside [0,1], so clamping is safe).
+    t.center.set(0.5, 0.5);
+    t.repeat.set(-1, 1);
     t.anisotropy = 8;
     return t;
   });
@@ -637,9 +742,12 @@ function armMats() {
     _steelMat.roughness = 0.42;
     _steelMat.envMapIntensity = 0.56;
 
+    // ROUND 4: at roughness 0.38 the top plate's two long broken edges returned
+    // a pair of clipped white rails across the lower left of the frame, which
+    // beat the record for brightness. A machined alloy top plate is satin.
     _plateMat = mats().alu.clone();
-    _plateMat.roughness = 0.38;
-    _plateMat.envMapIntensity = 0.66;
+    _plateMat.roughness = 0.42;
+    _plateMat.envMapIntensity = 0.62;
   }
   return { arm: _armMat, head: _headMat, steel: _steelMat, plate: _plateMat };
 }
@@ -683,17 +791,21 @@ let _vinylTop = null, _vinylEdge = null;
 function vinylMats() {
   if (!_vinylTop) {
     _vinylTop = mats().vinyl.clone();
+    // The key is 3200 K-ish; a rougher diffuse lobe takes more of it, and the
+    // disc drifted warm-brown. Vinyl is neutral, so the base pulls very slightly
+    // cool to sit the sheen back at neutral black.
+    _vinylTop.color.setHex(0x080a0e);
     _vinylTop.roughness = 1.0;                        // the map carries the value
     _vinylTop.roughnessMap = grooveRoughTex();
     _vinylTop.normalMap = grooveNormalTex();
-    _vinylTop.normalScale = new THREE.Vector2(0.038, 0.038);
+    _vinylTop.normalScale = new THREE.Vector2(0.024, 0.024);
     // A specular layer over the surface, not instead of it: the clearcoat is a
     // second, much tighter lobe sitting in front of the roughness ramp, so the
     // studio strip lays a hard sheen across the disc while the lands and the
     // modulated band still read underneath it. Round 2 had this at 0.15, which
     // is below the level where the second lobe is visible at all.
-    _vinylTop.clearcoat = 0.30;
-    _vinylTop.clearcoatRoughness = 0.075;
+    _vinylTop.clearcoat = 0.44;
+    _vinylTop.clearcoatRoughness = 0.055;
     // A horizontal disc seen from 29 degrees above can only mirror what is
     // BEHIND it and high up, and in this rig that is bare shell — which is why
     // every attempt to light the record with envMapIntensity alone left it dead.
@@ -709,8 +821,12 @@ function vinylMats() {
     // disc banded like a machined part. An LP under a softbox is BLACK, with
     // one broad sheen across it and the ring structure visible only inside that
     // sheen. 1.25 is where the black returns and the rings survive.
-    _vinylTop.specularIntensity = 0.34;
-    _vinylTop.envMapIntensity = 0.85;
+    // ROUND 4: 0.85 still lit the disc to a mid grey. An LP under a softbox is
+    // BLACK with one sheen laid across it; the ring structure lives inside that
+    // sheen and nowhere else. The clearcoat above now carries the sheen, so the
+    // diffuse/rough lobe can come down to where black is black again.
+    _vinylTop.specularIntensity = 0.26;
+    _vinylTop.envMapIntensity = 0.34;
     // An anisotropic lobe rotated onto the circumference draws the specular into
     // concentric arcs — the signature of a record under a studio softbox. At
     // rotation 0 it smears the other way and the disc starbursts.
@@ -749,9 +865,12 @@ function buildRecord() {
   // from the camera: no key, no highlight, no anisotropy, nothing but ambient.
   // That, not the mip chain, is why it rendered as a grey slate. Written
   // inward, the normal is (0, +1) and the disc lights.
-  const NP = 96, pts = [];
+  // 64 × 176, not 96 × 256: the maps are linear in r and the profile is flat, so
+  // the extra 26k triangles bought nothing and this stage is permanently in the
+  // wide shot where every other stage's geometry is competing for the frame.
+  const NP = 64, pts = [];
   for (let i = 0; i <= NP; i++) pts.push([R_DISC - (R_DISC - R_LABEL) * (i / NP), T_REC]);
-  const surf = lathe(pts, 256, topMat);
+  const surf = lathe(pts, 176, topMat);
   surf.receiveShadow = true;
   g.add(surf);
 
@@ -1073,25 +1192,31 @@ function buildArmBase() {
   return g;
 }
 
+/**
+ * The record weight. It was 60 mm across and 22 mm tall, which covered the
+ * label out to 30 mm — most of the printed area — and left the disc with a dark
+ * boss where its one light-valued element should be. A 39 mm weight holds the
+ * record down just as well and leaves the whole 100 mm label reading.
+ */
 function buildClamp() {
   const g = new THREE.Group();
   const y = Y_SURF;
   const M = armMats();
   const body = lathe([
-    [0.0040, y], [0.0290, y], [0.0300, y + 0.0014], [0.0300, y + 0.0060],
-    [0.0250, y + 0.0080], [0.0250, y + 0.0180], [0.0225, y + 0.0205],
-    [0.0060, y + 0.0205], [0.0060, y + 0.0180],
+    [0.0040, y], [0.0186, y], [0.0195, y + 0.0011], [0.0195, y + 0.0042],
+    [0.0164, y + 0.0058], [0.0164, y + 0.0118], [0.0146, y + 0.0134],
+    [0.0052, y + 0.0134], [0.0052, y + 0.0118],
   ], 48, mats().anodBlack);
   g.add(body);
-  const knurl = GEO.knob(0.0252, 0.0100, { flutes: 52, body: mats().anodGrey, dial: false });
-  knurl.position.y = y + 0.0130;
+  const knurl = GEO.knob(0.0166, 0.0070, { flutes: 44, body: mats().anodGrey, dial: false });
+  knurl.position.y = y + 0.0090;
   g.add(knurl);
-  const cap = new THREE.Mesh(GEO.bevelCyl(0.0210, 0.0222, 0.0026, 40, 0.0006), mats().anodBlack);
-  cap.position.y = y + 0.0218;
+  const cap = new THREE.Mesh(GEO.bevelCyl(0.0138, 0.0148, 0.0020, 40, 0.0005), mats().anodBlack);
+  cap.position.y = y + 0.0142;
   g.add(cap);
-  const trim = new THREE.Mesh(new THREE.TorusGeometry(0.0216, 0.0009, 8, 44), M.plate);
+  const trim = new THREE.Mesh(new THREE.TorusGeometry(0.0143, 0.0007, 8, 44), M.plate);
   trim.rotation.x = Math.PI / 2;
-  trim.position.y = y + 0.0206;
+  trim.position.y = y + 0.0134;
   g.add(trim);
   return g;
 }
@@ -1101,20 +1226,31 @@ function buildClamp() {
 // ---------------------------------------------------------------------------
 
 /**
- * Aim at the platter centre, not at the chassis: the record is the subject and
- * the reader should be looking at it, not at a deck with a record on it.
+ * Aim between the spindle and the stylus, not at the plinth.
  *
- * The azimuth is chosen as much for what it excludes. At −0.72 rad the left
- * subwoofer clears the left edge of the frame entirely — in round 2 it sat
- * across the left fifth of the picture as an unidentifiable dark blob with a
- * bright ring — and the plinth's projected width (0.81 m at this angle, against
- * 0.85 m seen square on) fits inside the safe box.
+ * ROUND 4 REFRAME. The old shot was built round a 0.30 m subject radius, which
+ * is the ISOLATION PLINTH's radius, not the deck's — so the largest area in the
+ * frame was 0.66 × 0.56 m of core-owned matte slab returning nothing, while the
+ * cartridge, which is what the chapter is about, measured 25 px. The subject
+ * radius is now the deck's own (0.20 m) and the aim sits a third of the way
+ * from the spindle towards the stylus, so the record, the arm and the headshell
+ * share the safe box and the plinth is cropped back to a surround.
+ *
+ * Distance falls 1.68 → 1.04 m and the elevation rises 28.6° → 33.5°, which
+ * opens the record towards a circle and puts the headshell assembly at ~85 px.
+ *
+ * The azimuth is chosen as much for what it excludes: at −0.74 rad the left
+ * subwoofer clears the frame entirely and the counterweight does not cross the
+ * platter rim.
  */
-const AIM = [LAYOUT.ttPlinth.x, LAYOUT.ttPlinth.top + Y_SURF + 0.020, LAYOUT.ttPlinth.z];
-const FOV = 28;
-// fill 0.850, not 0.880: at 0.880 the plinth's near-left corner projected to
-// x = 146 px at 1600 × 1000 and broke the safe box.
-const SHOT = frameShot(AIM, 0.300, { fill: 0.850, az: -0.74, el: 0.500, fov: FOV });
+const AIM_LX = 0.013, AIM_LZ = 0.015;        // local, spindle at the origin
+const AIM = [
+  LAYOUT.ttPlinth.x + AIM_LX * Math.cos(LAYOUT.ttPlinth.ry) + AIM_LZ * Math.sin(LAYOUT.ttPlinth.ry),
+  LAYOUT.ttPlinth.top + Y_SURF + 0.022,
+  LAYOUT.ttPlinth.z - AIM_LX * Math.sin(LAYOUT.ttPlinth.ry) + AIM_LZ * Math.cos(LAYOUT.ttPlinth.ry),
+];
+const FOV = 27;
+const SHOT = frameShot(AIM, 0.200, { fill: 1.020, az: -0.74, el: 0.650, fov: FOV });
 
 // Camera basis, so overlay cards can be placed in SCREEN terms and not guessed
 // at in world coordinates.
@@ -1141,14 +1277,13 @@ function screenPoint(sx, sy, dist) {
 // OVERLAY — ONE card. Round 2 ran two, and neither carried its area.
 // ---------------------------------------------------------------------------
 
-// The card sits 1.24 m from the lens. The camera is 1.68 m from the platter
-// centre and the deck is ~0.3 m in radius, so its nearest part is at ~1.38 m:
-// at 1.24 m NOTHING of the hero can print through the diagram, which is what
-// round 2 did — the tonearm crossed the section drawing.
-const CARD_W = 0.245;
-const CARD_H = 0.100;
-const CARD_D = 1.24;
-const CARD_AT = screenPoint(0.265, 0.214, CARD_D);
+// The card hangs 0.56 m from the lens — barely half the 1.04 m to the deck, so
+// nothing of the hero can print through the drawing — and it is sized (see
+// CARD_W above, from which MAG is derived) to 0.19 of the frame width. Placed
+// at screen (0.235, 0.170) it spans x 224…528 px and y 108…232 px at
+// 1600 × 1000: inside the safe box on the left, clear of the arm's bearing
+// housing on the right at 560 px, and 100 px above the record's top edge.
+const CARD_AT = screenPoint(0.235, 0.170, CARD_D);
 
 /** Filled strip under a polyline whose top edge is rewritten every frame. */
 function fillStrip(n, color, opacity, yBase, order = 6) {
@@ -1175,28 +1310,29 @@ function fillStrip(n, color, opacity, yBase, order = 6) {
 }
 
 /**
- * THE card — three grooves of a 45/45 cut in section at 770 : 1, with the tip
- * riding the middle one.
+ * THE card — three grooves of a 45/45 cut in section, with the tip riding the
+ * middle one.
  *
- * Round 2 drew ONE groove on a card twice this size, so the lower half was
- * blank hatching and the reader was given no sense of how a groove sits among
- * its neighbours. The magnification is now chosen so that exactly three grooves
- * at the true 129 µm pitch span the card edge to edge: the 60 µm width, the
- * 69 µm land and the 129 µm pitch are all in one picture and all to the same
- * scale, dimensioned as a chain, and the ±9 µm the tip actually wanders is
- * visibly a small fraction of the land it must not cross.
+ * MAG is derived (see the constant) so that exactly three grooves at the true
+ * 129 µm pitch span the card edge to edge: the 60 µm width, the 69 µm land and
+ * the 129 µm pitch are all in one picture at one scale, dimensioned as a chain
+ * whose witnesses sit on real feature edges, and the ±9 µm the tip actually
+ * wanders is visibly a small fraction of the land it must not cross.
+ *
+ * Every length in the drawing scales with CS = MAG/770, the layout having been
+ * drawn at 770 : 1, so shrinking the card reproportions it rather than cropping.
  */
 function buildGrooveCard(S) {
   const g = new THREE.Group();
   const W = CARD_W, H = CARD_H;
   g.add(cardPlate(W, H));
 
-  const CX = W / 2, CY = 0.062;           // centre groove axis · surface level
-  const D  = GROOVE_D * MAG;                // 0.0231 — groove depth
-  const RB = BOTTOM_R * MAG;                // 0.0046 — bottom fillet
-  const RT = TIP_R_H * MAG;                 // 0.0139 — tip across-groove radius
-  const PW = PITCH * MAG;                   // 0.0993 — one groove pitch
-  const UM = U_MAX * MAG;                   // 0.0070 — widest wander
+  const CX = W / 2, CY = 0.062 * CS;        // centre groove axis · surface level
+  const D  = GROOVE_D * MAG;                // groove depth
+  const RB = BOTTOM_R * MAG;                // bottom fillet
+  const RT = TIP_R_H * MAG;                 // tip across-groove radius
+  const PW = PITCH * MAG;                   // one groove pitch
+  const UM = U_MAX * MAG;                   // widest wander
   const NX = 300;
 
   /** One groove's cut below the land, dx from its own axis, apex raised by w. */
@@ -1221,12 +1357,14 @@ function buildGrooveCard(S) {
   g.add(fill);
   // Hatching in the regions that are solid vinyl whatever the modulation does:
   // the two lands, and everything below the deepest the apex ever goes.
-  const yFloor = CY - D - UM - 0.004;
+  const yFloor = CY - D - UM - 0.004 * CS;
   g.add(hatchRects([
     [0, 0, W, yFloor],
+    [0, yFloor, CX - PW - D, CY],
     [CX - PW + D, yFloor, CX - D - UM, CY],
     [CX + D + UM, yFloor, CX + PW - D, CY],
-  ], 0.0110, 0x44505e, 0.55));
+    [CX + PW + D, yFloor, W, CY],
+  ], 0.0110 * CS, 0x4b586a, 0.70));
 
   const edge = new DIAG.Trace(NX, 0xb3bcc6, 1.9, { opacity: 0.95, renderOrder: 12 });
   g.add(edge);
@@ -1237,7 +1375,7 @@ function buildGrooveCard(S) {
   // frame, and the only violet in twelve chapters.)
   const wallL = new DIAG.Trace(2, PAL.cy, 3.0, { opacity: 0.95, renderOrder: 19 });
   const wallR = new DIAG.Trace(2, PAL.cy, 3.0,
-    { opacity: 0.78, dashed: true, dashSize: 0.0042, gapSize: 0.0032, renderOrder: 19 });
+    { opacity: 0.78, dashed: true, dashSize: 0.0042 * CS, gapSize: 0.0032 * CS, renderOrder: 19 });
   g.add(wallL, wallR);
 
   S.grooveWrite = (u, w) => {
@@ -1257,9 +1395,9 @@ function buildGrooveCard(S) {
 
   // ---- the unmodulated groove, ghosted -------------------------------------
   // The modulation must read as a departure from a datum, not as a wobble.
-  const rx0 = CX - D - UM - 0.004, rx1 = CX + D + UM + 0.004, NR = 90;
-  const rest = new DIAG.Trace(NR, PAL.ink3, 1.1,
-    { opacity: 0.50, dashed: true, dashSize: 0.0040, gapSize: 0.0034, renderOrder: 10 });
+  const rx0 = CX - D - UM - 0.004 * CS, rx1 = CX + D + UM + 0.004 * CS, NR = 90;
+  const rest = new DIAG.Trace(NR, PAL.ink3, 1.3,
+    { opacity: 0.62, dashed: true, dashSize: 0.0040 * CS, gapSize: 0.0034 * CS, renderOrder: 10 });
   rest.write((i) => {
     const x = rx0 + (rx1 - rx0) * (i / (NR - 1));
     return [x, CY + prof(x, 0, 0), 0.0003];
@@ -1267,14 +1405,22 @@ function buildGrooveCard(S) {
   g.add(rest);
 
   // ---- the dimension chain: 60 + 69 = 129 µm -------------------------------
-  const DIM1 = CY + 0.0130, DIM2 = CY + 0.0300;
+  // Every witness lands on a real edge of the drawing, and on a STATIC one:
+  //   xA, xB  the left groove's two top corners      → 60 µm, the groove width
+  //   xB, xC  that corner to the played groove's own
+  //           top corner at rest (the ghosted datum) → 69 µm, the land
+  //   xA, xC  one whole period, corner to corner     → 129 µm, the pitch
+  // The played groove wanders ±9 µm about xC, which at this scale is a tenth of
+  // the land: the ghost is drawn precisely so the chain still measures something
+  // when it does.
+  const DIM1 = CY + 0.0130 * CS, DIM2 = CY + 0.0300 * CS;
   const xA = CX - PW - D, xB = CX - PW + D, xC = CX - D;
   for (const [p, q, y] of [[xA, xB, DIM1], [xB, xC, DIM1], [xA, xC, DIM2]]) {
     g.add(dimH(p, q, y));
   }
   for (const x of [xA, xB, xC]) {                    // projection lines
-    const t = new DIAG.Trace(2, PAL.ink3, 1.0, { opacity: 0.38, renderOrder: 10 });
-    t.write((i) => [x, i ? DIM2 + 0.005 : CY, 0.0005]);
+    const t = new DIAG.Trace(2, PAL.ink3, 1.0, { opacity: 0.42, renderOrder: 10 });
+    t.write((i) => [x, i ? DIM2 + 0.005 * CS : CY - 0.002 * CS, 0.0005]);
     g.add(t);
   }
   const anchor = (x, y) => {
@@ -1293,7 +1439,7 @@ function buildGrooveCard(S) {
   });
   g.add(arc);
   const lead = new DIAG.Trace(2, PAL.ink3, 1.0, { opacity: 0.45, renderOrder: 11 });
-  lead.write((i) => [AX, i ? CY + 0.0125 : AY + AR, 0.0012]);
+  lead.write((i) => [AX, i ? CY + 0.0125 * CS : AY + AR, 0.0012]);
   g.add(lead);
 
   S.aWidth = anchor((xA + xB) / 2, DIM1);
@@ -1333,10 +1479,10 @@ function buildGrooveCard(S) {
   }
   S.stylusAt = (u, w) => sty.position.set(CX + u * MAG, CY - D + w * MAG + RT * SQ2, 0.001);
 
-  // No u/w construction legs. At 770 : 1 the whole excursion is ±9 µm — seven
-  // screen pixels — so a right triangle drawn on it is a white smudge inside
-  // the diamond, not a decomposition. The live u and w are on the cartridge
-  // label, where they are readable, and the locus below shows the shape.
+  // No u/w construction legs. The whole excursion is ±9 µm — a few screen
+  // pixels at this scale — so a right triangle drawn on it is a white smudge
+  // inside the diamond, not a decomposition. The live u and w are on the
+  // cartridge label, where they are readable, and the locus shows the shape.
 
   // ---- the tip locus: the stereo ellipse it actually traces ---------------
   const NL = 96;
@@ -1351,11 +1497,12 @@ function buildGrooveCard(S) {
   };
 
   // the specular layer, over everything
-  const spec = specularPanel(W + 0.040, H + 0.040);
-  spec.position.set(W / 2, H / 2, 0.004);
+  // Sized to the plate, not past it: glass overhanging its own bezel is a decal.
+  const spec = cardGlass(W + 0.038 * CS, H + 0.038 * CS);
+  spec.position.set(W / 2, H / 2, 0.0022);
   g.add(spec);
 
-  S.headA = anchor(CX, -0.026);
+  S.headA = anchor(CX, -0.026 * CS);
 
   g.position.set(-CARD_W / 2, -CARD_H / 2, 0);
   return g;
@@ -1382,8 +1529,8 @@ function buildRecordAnnot(S) {
     });
     return t;
   };
-  g.add(circle(R_OUT, PAL.cy, 1.3, 0.45, true));
-  g.add(circle(R_IN, PAL.cy, 1.3, 0.45, true));
+  g.add(circle(R_OUT, PAL.cy, 1.3, 0.36, true));
+  g.add(circle(R_IN, PAL.cy, 1.3, 0.36, true));
   const live = circle(0.11, PAL.am, 1.6, 0.8, false);
   g.add(live);
   S.liveCircleWrite = (r) => {
@@ -1403,7 +1550,7 @@ function buildRecordAnnot(S) {
     const px = Math.cos(a) * r, pz = Math.sin(a) * r;
     const tx = -Math.sin(a), tz = Math.cos(a);
     const v = vAt(r) * K;
-    return arrow([px, Y, pz], [px + tx * v, Y, pz + tz * v], PAL.cy, 2.2, 0.010);
+    return arrow([px, Y, pz], [px + tx * v, Y, pz + tz * v], PAL.cy, 2.8, 0.0062);
   };
   g.add(tang(R_OUT, A_OUT));
   g.add(tang(R_IN, A_IN));
@@ -1447,7 +1594,7 @@ export default {
   title: 'Groove to Voltage',
   nav: 'Turntable',
   kicker: 'Turntable',
-  standfirst: 'A diamond reads a scratch, and reports how fast it moves.',
+  standfirst: 'A diamond reads a scratch and reports its speed.',
   shot: SHOT,
   timeScale: 1,
   alwaysUpdate: true,
@@ -1511,14 +1658,19 @@ export default {
     ov.add(panel);
     ov.add(buildRecordAnnot(S));
 
-    // ---- labels: one caption, three dimension numerals, three callouts -----
+    // ---- labels ------------------------------------------------------------
+    // ROUND 4: four world labels stacked at bottom-centre read as a bulleted
+    // list dropped on the photograph. Two survive — one on the headshell, one
+    // on the outer-radius velocity arrow — and the belt-drive/strobe arithmetic
+    // moves into content(), where it belongs. The rest are the card's own
+    // numerals, which are typography inside a drawing, not annotation.
     const L = ctx.labels;
 
     L.add(S.headA, {
       kicker: `45/45 GROOVE · ${MAG} : 1`,
-      text: `tip ${(TIP_R_H * 1e6).toFixed(0)} × ${(TIP_R_V * 1e6).toFixed(0)} µm · motion 1 : ${TIME_RATIO}`,
-      value: `${(GROOVE_D * 1e6).toFixed(0)} µm deep · rides the walls, ${(TIP_CLEAR * 1e6).toFixed(1)} µm off the bottom`,
-      occlude: false, priority: 4, offset: [0, 26],
+      text: 'solid = left wall &middot; dashed = right',
+      value: `${(GROOVE_D * 1e6).toFixed(0)} µm deep · tip clears by ${(TIP_CLEAR * 1e6).toFixed(1)} µm · 1 : ${TIME_RATIO}`,
+      occlude: false, priority: 4, offset: [0, 24],
     });
     // The dimension chain's numerals. 60 + 69 = 129.
     L.add(S.aWidth, {
@@ -1542,22 +1694,18 @@ export default {
       kicker: 'MOVING COIL · e = Bl · v',
       text: 'tip u = +0.00 µm · w = +0.00 µm',
       value: `0 µV of ${(E_PK * 1e6).toFixed(0)} µV pk (${(E_RMS * 1e6).toFixed(0)} µV rms)`,
-      cls: 'acc lead', offset: [156, -74], priority: 2,
+      // Above the headshell, over the dark cabinet, and well clear of the
+      // panel's left edge: at [168, −96] the value line was being clipped by it.
+      cls: 'acc lead', offset: [44, -180], priority: 3,
     });
 
+    // The belt-drive callout is gone; its one durable number rides here, on the
+    // label that is already pointing at the rim it is printed on.
     L.add(S.anchorOut, {
       kicker: 'GROOVE VELOCITY',
+      text: `rim strobe: ${STROBE_BARS} = 120 × ${MAINS.f} / 33⅓`,
       value: `${V_OUT.toFixed(3)} → ${V_IN.toFixed(3)} m/s · ${(R_OUT * 1000).toFixed(0)} → ${(R_IN * 1000).toFixed(0)} mm`,
-      cls: 'acc lead', offset: [-96, 156], priority: 2,
-    });
-
-    const podAnchor = new THREE.Object3D();
-    podAnchor.position.set(POD[0], 0.076, POD[1]);
-    hw.add(podAnchor);
-    L.add(podAnchor, {
-      kicker: 'BELT DRIVE · 33⅓ rpm',
-      value: `${STROBE_BARS} strobe bars = 120 × ${MAINS.f} Hz / 33⅓`,
-      offset: [10, 52], priority: 1,
+      cls: 'acc lead', offset: [-58, 112], priority: 2,
     });
 
     return { hardware: hw, overlay: ov };
@@ -1588,52 +1736,49 @@ export default {
     // Nothing numeric is written here on purpose — see latch().
   },
 
+  /**
+   * ROUND 4 BLOCKER: this ran to 380 words and the still frame cut it at
+   * "482 MPa", losing both of the chapter's best arguments — the traceability
+   * collapse and the whole myth block. It is now 225 words with the callouts
+   * first, because the tail is what gets cut. The 45/45 geometry that the
+   * deleted equation block carried is on the card, dimensioned and to scale.
+   */
   content() {
     return `
-<h3>The cut</h3>
-<p>One chisel, two coils at right angles, each <span class="num">45°</span> to
-the disc: left cuts the wall facing the spindle (solid on the section), right
-the wall facing the rim (dashed), the right-hand polarity set so identical
-signals move the tip sideways.</p>
-<div class="eq">u = (L + R)/√2  <span class="c">lateral — a mono cut</span>
-w = (L − R)/√2  <span class="c">vertical — the difference</span></div>
-
 <div class="key"><span class="lab">The idea</span>
 <p>The cartridge does not measure where the wall is. It measures how fast the
 wall is moving.</p></div>
 
+<div class="myth"><span class="lab">Commonly got wrong</span>
+<p>Nothing races down the wire at the speed of the music. At
+<span class="num">${(I_PK * 1e6).toFixed(2)} µA</span> peak in
+<span class="num">${WIRE_MM2.toFixed(3)} mm²</span> of litz the carriers drift at
+<span class="num">${(V_DRIFT * 1e9).toFixed(2)} nm/s</span> and shuffle
+<span class="num">±${(X_DRIFT * 1e12).toFixed(2)} pm</span> at 1 kHz — 1/${CU_RATIO.toFixed(0)}
+of the <span class="num">255.6 pm</span> between copper atoms. The field arrives
+at <span class="num">${(V_FIELD / 1e8).toFixed(2)} × 10⁸ m/s</span>. It is a loop:
+out on one conductor, back on the other.</p></div>
+
 <h3>The generator</h3>
 <div class="eq">e = Bl·v̂ = <span class="hl">${(BL * 1e3).toFixed(2)} mV·s/m</span> × ${V_REF.toFixed(4)} m/s pk
   = ${(E_PK * 1e6).toFixed(0)} µV pk = ${(E_RMS * 1e6).toFixed(0)} µV rms  <span class="c">1 kHz</span></div>
-<p>${N_TURNS} turns of <span class="num">${(L_TURN * 1e3).toFixed(2)} mm</span> in
-a <span class="num">${B_GAP} T</span> gap. A coil reports <em>velocity</em>, so
-constant amplitude means output rising 6 dB per octave — which is why the
-recording characteristic is written in velocity. The
-<span class="num">${(VTF_N * 1e3).toFixed(1)} mN</span> of downforce lands on two
-patches <span class="num">${(2 * A_HZ * 1e6).toFixed(1)} µm</span> across:
-<span class="num">${(P_MEAN / 1e6).toFixed(0)} MPa</span>, ${P_TCM2.toFixed(1)} tf/cm².</p>
+<p>${N_TURNS} turns of <span class="num">${(L_TURN * 1e3).toFixed(2)} mm</span> in a
+<span class="num">${B_GAP} T</span> gap, on two patches
+<span class="num">${(2 * A_HZ * 1e6).toFixed(1)} µm</span> across:
+<span class="num">${(VTF_N * 1e3).toFixed(1)} mN</span> is
+<span class="num">${(P_MEAN / 1e6).toFixed(0)} MPa</span> mean,
+<span class="num">${(P_PEAK / 1e6).toFixed(0)}</span> peak.</p>
 
-<h3>Why the last track is the worst</h3>
-<p>Linear velocity falls <span class="num">${V_OUT.toFixed(3)}</span> →
-<span class="num">${V_IN.toFixed(3)} m/s</span>, so a 10 kHz wavelength shrinks
+<p><b>The last track is the worst.</b> Velocity falls
+<span class="num">${V_OUT.toFixed(3)}</span> →
+<span class="num">${V_IN.toFixed(3)} m/s</span>, so 10 kHz shrinks
 <span class="num">${(lambdaAt(R_OUT) * 1e6).toFixed(0)}</span> →
-<span class="num">${(lambdaAt(R_IN) * 1e6).toFixed(0)} µm</span>. A tip of
-along-groove radius <span class="num">${(TIP_R_V * 1e6).toFixed(0)} µm</span>
-follows the wall only while λ²/4π²A exceeds it, so traceable peak velocity
-collapses <span class="num">${(vMaxAt(R_OUT) * 100).toFixed(0)}</span> →
-<span class="num">${(vMaxAt(R_IN) * 100).toFixed(0)} cm/s</span>, by
-(146/60)² = <span class="num">${((R_OUT / R_IN) ** 2).toFixed(2)}</span>.</p>
-
-<div class="myth"><span class="lab">Commonly got wrong</span>
-<p>Nothing races down the tonearm wire at the speed of the music. At
-<span class="num">${(I_PK * 1e6).toFixed(2)} µA</span> peak in
-${STRANDS} × <span class="num">${(STRAND_D * 1e3).toFixed(0)} µm</span> litz
-(<span class="num">${WIRE_MM2.toFixed(3)} mm²</span>) the carriers drift at
-<span class="num">${(V_DRIFT * 1e9).toFixed(2)} nm/s</span> and on a 1 kHz signal
-shuffle <span class="num">±${(X_DRIFT * 1e12).toFixed(2)} pm</span> — 1/${CU_RATIO.toFixed(0)}
-of the <span class="num">255.6 pm</span> between copper atoms. The field arrives
-at <span class="num">${(V_FIELD / 1e8).toFixed(2)} × 10⁸ m/s</span>, and it is a
-loop: what leaves the coil returns on the other conductor.</p></div>`;
+<span class="num">${(lambdaAt(R_IN) * 1e6).toFixed(0)} µm</span>. A
+<span class="num">${(TIP_R_V * 1e6).toFixed(0)} µm</span> tip holds a wall only
+while λ²/4π²A exceeds it, so traceable velocity collapses
+<span class="num">${(vMaxAt(R_OUT) * 100).toFixed(0)}</span> →
+<span class="num">${(vMaxAt(R_IN) * 100).toFixed(0)} cm/s</span>, as
+(146/60)² = <span class="num">${((R_OUT / R_IN) ** 2).toFixed(2)}</span>.</p>`;
   },
 
   readouts() {
