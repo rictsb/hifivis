@@ -10,13 +10,29 @@ import { blobShadow } from './tex.js';
  * reflections; these lights exist for shadows and directional shaping.
  */
 
+/**
+ * Cove radius. The sweep must begin *behind* everything that stands on the
+ * floor (rack rear −3.55, subwoofer rear ≈ −3.53), or the lower 300–400 mm of
+ * the equipment is geometrically buried in the rising backdrop.
+ * Sweep starts at `LAYOUT.room.wallZ + COVE_R` = −3.65.
+ */
+export const COVE_R = 1.75;
+
+/** Height of the visible ground at a given z — flat floor, then the cove. */
+export function groundY(z) {
+  const z0 = LAYOUT.room.wallZ + COVE_R;
+  if (z >= z0) return 0;
+  const s = Math.min(1, (z0 - z) / COVE_R);
+  return COVE_R * (1 - Math.cos(Math.asin(s)));
+}
+
 function seamlessBackdrop() {
   // Cyclorama: the floor sweeps up into the back wall with no horizon line —
   // the classic infinity-cove used for product photography. Profile is defined
   // explicitly in (z, y); the surface is then extruded across X.
-  const W = 20, H = 6.2, R = 1.9, wallZ = LAYOUT.room.wallZ;
+  const W = 22, H = 7.0, R = COVE_R, wallZ = LAYOUT.room.wallZ;
   const prof = [];
-  prof.push([wallZ + R + 3.0, 0]);                 // flat floor coming forward
+  prof.push([wallZ + R + 5.0, 0]);                 // flat floor coming forward
   const N = 26;
   for (let i = 0; i <= N; i++) {                   // quarter-round cove
     const a = (Math.PI / 2) * (i / N);
@@ -188,10 +204,18 @@ export function buildRoom(scene) {
   rim.target.position.set(0, 0.8, -2.0);
   scene.add(rim, rim.target);
 
-  const fill = new THREE.DirectionalLight(0x9ab4d6, 0.20);
+  const fill = new THREE.DirectionalLight(0x9ab4d6, 0.26);
   fill.position.set(2.2, 1.4, 6.4);
   fill.target.position.set(0, 0.9, -2.4);
   scene.add(fill, fill.target);
+
+  // Foreground wash: without this the floor between camera and system falls to
+  // pure black and the frame loses its bottom third.
+  const fore = new THREE.SpotLight(0xdCE6F2, 26, 14, Math.PI * 0.42, 0.95, 1.35);
+  fore.position.set(1.4, 3.6, 5.6);
+  fore.target.position.set(-0.2, 0.0, 0.4);
+  fore.castShadow = false;
+  scene.add(fore, fore.target);
 
   // A soft overhead pool that grazes the top surfaces and pools on the floor.
   const pool = new THREE.SpotLight(0xffe9cf, 40, 12, Math.PI * 0.30, 0.85, 1.6);
@@ -206,14 +230,14 @@ export function buildRoom(scene) {
 /** Large soft gradient pool on the floor — sells the "studio sweep" feel. */
 export function floorPool(scene) {
   const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(9.5, 7.5),
+    new THREE.PlaneGeometry(13.0, 11.5),
     new THREE.MeshBasicMaterial({
-      map: blobShadow(256, 1), color: 0x2b3a4a, transparent: true, opacity: 0.16,
+      map: blobShadow(256, 1), color: 0x35485c, transparent: true, opacity: 0.26,
       blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     }),
   );
   m.rotation.x = -Math.PI / 2;
-  m.position.set(-0.1, 0.0016, -2.2);
+  m.position.set(-0.1, 0.0016, -1.4);
   m.renderOrder = -2;
   scene.add(m);
   return m;

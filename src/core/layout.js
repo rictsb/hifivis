@@ -4,7 +4,7 @@
  * The listening seat is at +Z. Every stage MUST take its transform from here.
  */
 export const LAYOUT = {
-  room: { w: 7.4, d: 9.0, h: 3.1, wallZ: -4.05 },
+  room: { w: 7.4, d: 9.0, h: 3.1, wallZ: -5.40 },
 
   /** Equipment rack: 6 bays, shelf tops listed. */
   rack: {

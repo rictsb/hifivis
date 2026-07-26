@@ -20,7 +20,7 @@ const GradeShader = {
     uTime: { value: 0 },
     uGrain: { value: 0.030 },
     uCA: { value: 0.0011 },
-    uVig: { value: 0.30 },
+    uVig: { value: 0.22 },
     uLift: { value: 0.0 },
   },
   vertexShader: /* glsl */`

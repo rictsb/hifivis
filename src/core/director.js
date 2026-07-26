@@ -34,7 +34,28 @@ export class Director {
     this.ptr = new THREE.Vector2();
     this._ptrS = new THREE.Vector2();
 
+    /**
+     * Shift lens. The explanation panel occupies the right ~29 % of the canvas
+     * and the chapter rail the left ~10 %, so the optical centre of the *visible*
+     * stage is at about 0.40 of the width, not 0.50. Rather than skewing the
+     * camera (which would tilt verticals), we offset the principal point — the
+     * same thing a product photographer does with a tilt-shift lens. Subjects
+     * land centred in the clear band with vertical lines still vertical.
+     */
+    this.shiftX = 0;
+    this._updateShift();
+    window.addEventListener('resize', () => this._updateShift(), { passive: true });
+
     this._bind();
+  }
+
+  _updateShift() {
+    const w = window.innerWidth;
+    if (w < 820) { this.shiftX = 0; return; }          // panel is bottom-docked
+    const panelW = Math.min(w * 0.315, 436) + 24;      // #panel width + right gap
+    const railW = w < 1180 ? 46 : 200;                 // chapter rail
+    const centre = (railW + (w - panelW)) / 2;         // centre of the clear band
+    this.shiftX = (1 - (2 * centre) / w) * -1;         // → NDC offset of that centre
   }
 
   _bind() {
@@ -121,9 +142,10 @@ export class Director {
       this.tgt.z + Math.cos(az) * ce * rr,
     );
     this.cam.lookAt(this.tgt);
-    if (Math.abs(this.cam.fov - this.fov) > 1e-4) {
-      this.cam.fov = this.fov;
-      this.cam.updateProjectionMatrix();
-    }
+    this.cam.fov = this.fov;
+    this.cam.updateProjectionMatrix();
+    // Principal-point offset. m[8] = (r+l)/(r−l); the resulting NDC shift is −m[8].
+    this.cam.projectionMatrix.elements[8] = -this.shiftX;
+    this.cam.projectionMatrixInverse.copy(this.cam.projectionMatrix).invert();
   }
 }
