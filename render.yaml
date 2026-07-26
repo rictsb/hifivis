@@ -1,0 +1,23 @@
+# Render blueprint. The site is one self-contained HTML file, so the "static
+# site" is a directory containing exactly one index.html.
+services:
+  - type: web
+    name: signal-path
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      # puppeteer is a devDependency used only by the screenshot harness; without
+      # this, `npm ci` downloads ~150 MB of Chromium that the build never touches
+      - key: PUPPETEER_SKIP_DOWNLOAD
+        value: "true"
+      - key: NODE_VERSION
+        value: "22"
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

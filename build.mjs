@@ -39,4 +39,15 @@ const html = readFileSync(join(root, 'src/index.html'), 'utf8')
 
 writeFileSync(out, html);
 const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
-console.log(`\n  → ${out}  ${kb} KB  (self-contained)\n`);
+console.log(`\n  → ${out}  ${kb} KB  (self-contained)`);
+
+// Static hosts publish a DIRECTORY, so emit dist/index.html as well. The file
+// is entirely self-contained, so the directory needs nothing else in it.
+if (oi === -1) {
+  const dist = join(root, 'dist');
+  mkdirSync(dist, { recursive: true });
+  writeFileSync(join(dist, 'index.html'), html);
+  console.log(`  → dist/index.html  ${kb} KB  (deploy this directory)\n`);
+} else {
+  console.log('');
+}

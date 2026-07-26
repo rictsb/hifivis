@@ -96,12 +96,29 @@ Two sensitivities are kept distinct because they are not interchangeable:
 
 ---
 
+## Deploying
+
+The site is a single self-contained file, so the "static site" is a directory
+containing exactly one `index.html`. [`render.yaml`](render.yaml) declares it:
+
+| setting | value |
+|---|---|
+| Build command | `npm ci && npm run build` |
+| Publish directory | `./dist` |
+| `PUPPETEER_SKIP_DOWNLOAD` | `true` |
+
+That last one matters: `puppeteer` is a devDependency used only by the
+screenshot harness, and without it the install pulls ~150 MB of Chromium the
+build never touches.
+
+Any static host works the same way — build, then serve `dist/`.
+
 ## Building
 
 ```bash
 npm install
-node build.mjs                 # → hifi-system.html
-node shoot.mjs                 # headless-Chrome screenshots of every stage
+npm run build                  # → hifi-system.html and dist/index.html
+npm run shoot                  # headless-Chrome screenshots of every stage
 node shoot.mjs dac --w 2400    # one stage, custom size
 node verify.mjs dac            # parallel-safe build + shoot for one stage
 ```

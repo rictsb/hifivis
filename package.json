@@ -1,20 +1,22 @@
 {
-  "name": "hifi-vis",
+  "name": "signal-path",
   "version": "1.0.0",
-  "description": "",
+  "description": "Interactive anatomy of a reference hi-fi system \u2014 mains to eardrum, in one self-contained HTML file.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.mjs",
+    "shoot": "node shoot.mjs",
+    "verify": "node verify.mjs"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "puppeteer": "^23.11.1",
     "three": "^0.180.0"
   },
   "devDependencies": {
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "puppeteer": "^23.11.1"
   }
 }

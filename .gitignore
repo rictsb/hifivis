@@ -3,3 +3,4 @@ shots*/
 audit/
 audit-r*.json
 scripts/
+dist/
