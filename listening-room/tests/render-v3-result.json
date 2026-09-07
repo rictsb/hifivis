@@ -1,0 +1,93 @@
+{
+  "sha256": "9a7c11df1a291d4dbb4d5a5d92bd25fcd348a617cf49e0a54616169258acc9a4",
+  "checks": [
+    {
+      "name": "Nine component entries; no standalone subwoofer object",
+      "ok": true
+    },
+    {
+      "name": "No orphaned subwoofer audio or power branches",
+      "ok": true
+    },
+    {
+      "name": "Stereo distribution feeds only monoblocks and W13 active inputs",
+      "ok": true
+    },
+    {
+      "name": "digital selects two W13 destination branches",
+      "ok": true
+    },
+    {
+      "name": "vinyl selects two W13 destination branches",
+      "ok": true
+    },
+    {
+      "name": "Wiring diagram has no separate powered-sub branch",
+      "ok": true
+    },
+    {
+      "name": "Speaker object identifies built-in active subwoofers",
+      "ok": true
+    },
+    {
+      "name": "Physics view resets an edge-on preset",
+      "ok": true
+    },
+    {
+      "name": "Header Physics entry also restores full-speaker view",
+      "ok": true
+    },
+    {
+      "name": "Generic driver mounting plate has an open cone aperture",
+      "ok": true
+    },
+    {
+      "name": "W13 room-acoustics control updates the first axial mode",
+      "ok": true
+    },
+    {
+      "name": "Mobile layout has no horizontal overflow",
+      "ok": true
+    },
+    {
+      "name": "Room control fits inside mobile inspector",
+      "ok": true
+    },
+    {
+      "name": "Mobile wiring diagram pans to the W13 branch",
+      "ok": true
+    },
+    {
+      "name": "Mobile wiring diagram returns to source branch",
+      "ok": true
+    },
+    {
+      "name": "No JavaScript errors or network assets",
+      "ok": true
+    }
+  ],
+  "routes": [
+    {
+      "from": "crossover",
+      "to": "amps",
+      "kind": "analog"
+    },
+    {
+      "from": "crossover",
+      "to": "speakers",
+      "kind": "analog"
+    },
+    {
+      "from": "crossover",
+      "to": "ampR",
+      "kind": "analog"
+    },
+    {
+      "from": "crossover",
+      "to": "speakerR",
+      "kind": "analog"
+    }
+  ],
+  "errors": [],
+  "external": []
+}

@@ -1,0 +1,66 @@
+{
+  "sha256": "a3e0bba0401a56dbbc9e440719711f919e14c7dee4dde957760cfbecb2e55466",
+  "errors": [],
+  "externalRequests": [],
+  "roomTiming": {
+    "fps": 4.444641984088182,
+    "wallSeconds": 2.2499,
+    "animationSeconds": 2.2498999999999985,
+    "recordRPM": null,
+    "drawCalls": 300
+  },
+  "physicsTiming": {
+    "fps": 20.000888928396822,
+    "wallSeconds": 2.2499,
+    "animationSeconds": 2.2499000000000215,
+    "recordRPM": null,
+    "drawCalls": 44
+  },
+  "motorMotion": {
+    "before": {
+      "frame": 0.19,
+      "cone": 0.019648410370712886,
+      "coil": 0.007648410370712886,
+      "cap": 0.04364841037071288
+    },
+    "after": {
+      "frame": 0.19,
+      "cone": 0.015283866583042363,
+      "coil": 0.0032838665830423625,
+      "cap": 0.03928386658304236
+    }
+  },
+  "exactInvert": "Tone marker\n100 Hz\nLow / high at tone\n-6.02 / -6.02 dB\nIdeal vector sum at tone\nNull (ideal)\nExtra low-band phase at tone\n-0.0°",
+  "exactDelay": "Tone marker\n100 Hz\nLow / high at tone\n-6.02 / -6.02 dB\nIdeal vector sum at tone\nNull (ideal)\nExtra low-band phase at tone\n-180.0°",
+  "actualTone": 100,
+  "recordTiming": {
+    "fps": 8.444444444444445,
+    "wallSeconds": 2.25,
+    "animationSeconds": 2.250000000000007,
+    "recordRPM": 44.99999999999986,
+    "drawCalls": 74
+  },
+  "pauseDelta": 0,
+  "vinylRoute": "Turntable\n→\nPhono\n→\nPreamp\n→\nCrossover\n↗\nMonoblocks → W13 passive\n↘\nFull-range → W13 active bass\n↘\nLow-pass → powered subs",
+  "wiringVisible": true,
+  "math": {
+    "alias": -2000,
+    "lr": {
+      "lo": 0.5,
+      "hi": 0.5,
+      "phase": -3.141592653589793,
+      "sum": 1.6081226496766366e-16
+    },
+    "air": {
+      "p": 0.2,
+      "u": 0.00048429433472487246,
+      "x": 0.0000010900452284381342,
+      "lambda": 3.43
+    },
+    "quant": {
+      "q": 0.75,
+      "delta": 0.125,
+      "k": 6
+    }
+  }
+}

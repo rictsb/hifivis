@@ -1,5 +1,7 @@
 # Signal Path
 
+> **New: [The Listening Room](listening-room/README.md)** — the offline Boenicke W13 SE+ / Nagra exhibit, with a photo-informed personal room, integrated W13 bass, rear SwingBase detailing and two dimmable 2700 K speaker spots. [Download the self-contained HTML](listening-room/The%20Listening%20Room.html). Its Python build and verification records are included under `listening-room/`.
+
 An interactive, physically honest tour of a high-end component hi-fi system —
 from mains electrons to air pressure at the eardrum. Twelve stages, one
 self-contained HTML file, no external requests.

@@ -1,0 +1,119 @@
+{
+  "sha256": "33250a68d7f593bc4ea5fe018f8d3746ed55b9babf9b76ec4ec2ef83a096f6b6",
+  "checks": [
+    {
+      "name": "Offline personal layout is default",
+      "ok": true
+    },
+    {
+      "name": "Photographed wiring explicitly unverified",
+      "ok": true
+    },
+    {
+      "name": "Suspension disclaimer remains visible",
+      "ok": true
+    },
+    {
+      "name": "Symbolic suspension visible without rigid pedestal contact",
+      "ok": true
+    },
+    {
+      "name": "Front support reaches floor and cabinet bottom",
+      "ok": true
+    },
+    {
+      "name": "W13 diaphragms, phase plug, suspension remain stationary",
+      "ok": true
+    },
+    {
+      "name": "Silver tower materials restore",
+      "ok": true
+    },
+    {
+      "name": "Generic driver coil/cap move with cone; frame fixed",
+      "ok": true
+    },
+    {
+      "name": "Representative existing arithmetic is correct",
+      "ok": true
+    },
+    {
+      "name": "Educational component switches to Complete study",
+      "ok": true
+    },
+    {
+      "name": "Copper drift 10 A gives 1.324 micrometres peak",
+      "ok": true
+    },
+    {
+      "name": "Animation clock follows elapsed wall time",
+      "ok": true
+    },
+    {
+      "name": "Pause freezes scientific time",
+      "ok": true
+    },
+    {
+      "name": "Alternative vinyl branch and active bass remain separate",
+      "ok": true
+    },
+    {
+      "name": "No JavaScript errors or external requests",
+      "ok": true
+    }
+  ],
+  "suspension": {
+    "schematic": true,
+    "ropeCount": 2,
+    "translucent": true,
+    "beamBottom": 0.013499999999999998,
+    "pedestalTop": 0.01,
+    "frontBottom": 0,
+    "frontTop": 0.009,
+    "floorTop": 0
+  },
+  "motorA": {
+    "frame": 0.19,
+    "cone": 0.014412782932791036,
+    "cap": 0.03841278293279103,
+    "coil": 0.002412782932791036
+  },
+  "motorB": {
+    "frame": 0.19,
+    "cone": 0.00413026129121552,
+    "cap": 0.028130261291215517,
+    "coil": -0.00786973870878448
+  },
+  "math": {
+    "alias": -2000,
+    "air": {
+      "p": 0.2,
+      "u": 0.00048429433472487246,
+      "x": 0.0000010900452284381342,
+      "lambda": 3.43
+    },
+    "lrInvert": {
+      "lo": 0.5,
+      "hi": 0.5,
+      "phase": -3.141592653589793,
+      "sum": 0
+    },
+    "lrDelay": {
+      "lo": 0.5,
+      "hi": 0.5,
+      "phase": -3.141592653589793,
+      "sum": 1.6081226496766366e-16
+    },
+    "quant": {
+      "q": 0.75,
+      "delta": 0.125,
+      "k": 6
+    }
+  },
+  "timing": {
+    "wall": 1.101,
+    "animation": 1.1166000000000116
+  },
+  "errors": [],
+  "external": []
+}

@@ -1,0 +1,33 @@
+{
+  "fileBytes": 3871855,
+  "sha256": "9a7c11df1a291d4dbb4d5a5d92bd25fcd348a617cf49e0a54616169258acc9a4",
+  "browser": "152.0.7977.82",
+  "perf": {
+    "fps": 60.02719464042862,
+    "wallSeconds": 3.015300000011921,
+    "animationSeconds": 3.0166000000000075,
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Max, Unspecified Version)",
+    "drawCalls": 203
+  },
+  "checks": [
+    "Offline copied file rendered",
+    "Animation uses wall time",
+    "10A drift calculation displayed",
+    "TEM time control works",
+    "Signed alias arithmetic",
+    "Exact LR4 inverted null reachable",
+    "Pointer orbit changes view",
+    "Pause freezes scientific time",
+    "Vinyl route is an alternative",
+    "Wiring map opens",
+    "All 12 owner, brochure and manufacturer reference images loaded",
+    "Mobile frequency control updates model",
+    "No document horizontal overflow",
+    "No JavaScript errors",
+    "No network asset requests"
+  ],
+  "errors": [],
+  "requests": [
+    "file:///[temporary-directory]/exhibit.html"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "sha256": "ef92160e2d227f78e14d5b8755f9ba003bc1610eff53ba77d0f41f81dc199a43",
+  "dimensions": {
+    "scrollHeight": 1043,
+    "clientHeight": 680,
+    "scrollWidth": 898,
+    "clientWidth": 898
+  },
+  "mobileDimensions": {
+    "scrollHeight": 943,
+    "clientHeight": 574,
+    "scrollWidth": 354,
+    "clientWidth": 354
+  },
+  "wrapperBefore": {
+    "scrollWidth": 620,
+    "clientWidth": 318,
+    "scrollLeft": 0,
+    "overflowX": "auto"
+  },
+  "wrapperAfter": {
+    "scrollWidth": 620,
+    "clientWidth": 318,
+    "scrollLeft": 302
+  },
+  "bottomText": "The preamp selects digital or vinyl. After volume, two independent full-range feeds serve the W13s’ passive drivers and integrated active subwoofers. Each arrow below represents a complete labelled cable bundle, not a single conductor or a moving electron.\n\nNetwork streamer\nfile / USB audio\nNagra HD DAC X\nfixed analog output\nTurntable / MC\nfour cartridge leads\nPhono / RIAA\ntwo signal / return pairs\nHD PREAMP\ninput selector → volume\none chosen source; stereo L / R\nPowered distribution stage\ngeneric balanced 100 kΩ input\ntwo independently buffered full-range stereo feeds\n2 × Nagra Reference AMP\none monoblock per L / R channel\nexternal power amplification\nInside each W13: bass DSP + amplifiers\n2 × 350 W Class D per speaker\nfour internal amplifier channels across the pair\nW13 passive sections\nfront 6″ / 3″ drivers + rear tweeter\namp + → driver network → amp −\nIntegrated active subwoofers\ntwo opposed 13″ side woofers in each W13\neach internal amp + → its driver → amp −\nUSB\nRCA1\nRCA2\nmain XLR L / R\ndifferential pair + shield per channel\nfull-range stereo XLR → monoblocks\nfull-range stereo XLR\n→ W13 integrated bass inputs\nspeaker + / − pair per channel\nindependent internal + / − loops\none amplifier channel per woofer\nPOWER IS PARALLEL: conditioner → each power supply via L / N + protective earth.\nNormal load loop: source L → power supply → N → source winding.\nPE bonds chassis to the protective system. Audio returns do not replace protective earth.\nBoth Nagra audio PSUs, both monoblocks, both W13 bass supplies and powered educational stages receive AC.\n\nLeft and right remain independent. No amplifier outputs are combined. RCA carries signal plus return. XLR carries a differential pair plus shield; shield/chassis bonding is distinct from protective earth. Both Nagra audio units have their own matched external PSU and two supply umbilicals.\n\nEach W13 retains its internal bass low-pass and stock passive driver network. The external stage connects only full-range outputs. The LR4 filter laboratory is a separate electrical model; neither its LP nor HP output is wired into this installation. The diagram is a plausible complete study, not verified as-built wiring from the owner’s photographs."
+}
