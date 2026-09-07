@@ -4,9 +4,10 @@
   "description": "Interactive anatomy of a reference hi-fi system \u2014 mains to eardrum, in one self-contained HTML file.",
   "main": "index.js",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node deploy.mjs",
     "shoot": "node shoot.mjs",
-    "verify": "node verify.mjs"
+    "verify": "node verify.mjs",
+    "build:legacy": "node build.mjs"
   },
   "keywords": [],
   "author": "",
