@@ -1,0 +1,122 @@
+{
+  "sha256": "29733ee1e5d8a542cb166523dc78b879c0b2d8446589125cc83d4ac5c820a7ad",
+  "bytes": 3875158,
+  "checks": [
+    {
+      "name": "Exactly two 2700 K speaker spotlights",
+      "ok": true
+    },
+    {
+      "name": "Both spotlights use inverse-square attenuation and shadows",
+      "ok": true
+    },
+    {
+      "name": "One independently aimed target per W13",
+      "ok": true
+    },
+    {
+      "name": "Dimmer turns both spots off",
+      "ok": true
+    },
+    {
+      "name": "Dimmer restores both spots at equal strength",
+      "ok": true
+    },
+    {
+      "name": "Dimming leaves ambient light constant",
+      "ok": true
+    },
+    {
+      "name": "Spots re-aim correctly in Complete study",
+      "ok": true
+    },
+    {
+      "name": "No standalone subwoofers",
+      "ok": true
+    },
+    {
+      "name": "Physics metrics remain readable",
+      "ok": true
+    },
+    {
+      "name": "All twelve offline reference images loaded",
+      "ok": true
+    },
+    {
+      "name": "Both W13s fit within the portrait room view",
+      "ok": true
+    },
+    {
+      "name": "Mobile dimmer updates both lights",
+      "ok": true
+    },
+    {
+      "name": "No horizontal overflow",
+      "ok": true
+    },
+    {
+      "name": "Mobile lighting control is visible and within viewport",
+      "ok": true
+    },
+    {
+      "name": "No JavaScript errors or network assets",
+      "ok": true
+    }
+  ],
+  "spots": [
+    {
+      "side": -1,
+      "cct": 2700,
+      "type": "SpotLight",
+      "color": [
+        1,
+        0.415251456,
+        0.099114421
+      ],
+      "intensity": 45.5,
+      "decay": 2,
+      "distance": 0,
+      "position": [
+        -1.4664,
+        2.7,
+        0.97
+      ],
+      "target": [
+        -1.88,
+        0.62,
+        -0.13999999999999999
+      ],
+      "shadow": true
+    },
+    {
+      "side": 1,
+      "cct": 2700,
+      "type": "SpotLight",
+      "color": [
+        1,
+        0.415251456,
+        0.099114421
+      ],
+      "intensity": 45.5,
+      "decay": 2,
+      "distance": 0,
+      "position": [
+        1.4664,
+        2.7,
+        0.97
+      ],
+      "target": [
+        1.88,
+        0.62,
+        -0.13999999999999999
+      ],
+      "shadow": true
+    }
+  ],
+  "perf": {
+    "fps": 60.32505733337365,
+    "seconds": 2.005800000011921
+  },
+  "errors": [],
+  "external": []
+}

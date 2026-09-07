@@ -1,0 +1,349 @@
+{
+  "sha256": "9a7c11df1a291d4dbb4d5a5d92bd25fcd348a617cf49e0a54616169258acc9a4",
+  "checks": [
+    {
+      "name": "Offline personal layout is default",
+      "ok": true
+    },
+    {
+      "name": "Photographed wiring explicitly unverified",
+      "ok": true
+    },
+    {
+      "name": "Separate subwoofer geometry and data removed",
+      "ok": true
+    },
+    {
+      "name": "Nine component categories with no standalone sub navigation",
+      "ok": true
+    },
+    {
+      "name": "No signal or power routes to removed subwoofers",
+      "ok": true
+    },
+    {
+      "name": "Distribution has exactly four full-range L/R destination cables",
+      "ok": true
+    },
+    {
+      "name": "Wiring map no longer includes external sub branch",
+      "ok": true
+    },
+    {
+      "name": "Suspension disclaimer remains visible",
+      "ok": true
+    },
+    {
+      "name": "Symbolic suspension visible without rigid pedestal contact",
+      "ok": true
+    },
+    {
+      "name": "Front support reaches floor and cabinet bottom",
+      "ok": true
+    },
+    {
+      "name": "W13 diaphragms, phase plug, suspension remain stationary",
+      "ok": true
+    },
+    {
+      "name": "Silver tower materials restore",
+      "ok": true
+    },
+    {
+      "name": "Header Physics resets edge-on speaker view",
+      "ok": true
+    },
+    {
+      "name": "Inspector Physics resets edge-on speaker view",
+      "ok": true
+    },
+    {
+      "name": "Generic driver coil/cap move with cone; frame fixed",
+      "ok": true
+    },
+    {
+      "name": "Generic diaphragm mounting plate has a real open aperture",
+      "ok": true
+    },
+    {
+      "name": "Representative existing arithmetic is correct",
+      "ok": true
+    },
+    {
+      "name": "Room acoustics retained in W13 physics",
+      "ok": true
+    },
+    {
+      "name": "Educational component switches to Complete study",
+      "ok": true
+    },
+    {
+      "name": "Copper drift 10 A gives 1.324 micrometres peak",
+      "ok": true
+    },
+    {
+      "name": "Animation clock follows elapsed wall time",
+      "ok": true
+    },
+    {
+      "name": "Pause freezes scientific time",
+      "ok": true
+    },
+    {
+      "name": "Alternative vinyl branch and integrated bass remain separate",
+      "ok": true
+    },
+    {
+      "name": "Signal tour contains only passive and integrated bass branches",
+      "ok": true
+    },
+    {
+      "name": "Both amplifier branches share a parallel distribution group",
+      "ok": true
+    },
+    {
+      "name": "No JavaScript errors or external requests",
+      "ok": true
+    }
+  ],
+  "inventory": {
+    "keys": [
+      "dac",
+      "preamp",
+      "amps",
+      "ampR",
+      "speakers",
+      "speakerR",
+      "streamer",
+      "phono",
+      "turntable",
+      "crossover",
+      "power"
+    ],
+    "dataKeys": [
+      "power",
+      "streamer",
+      "dac",
+      "turntable",
+      "phono",
+      "preamp",
+      "crossover",
+      "amps",
+      "speakers"
+    ],
+    "order": [
+      "power",
+      "streamer",
+      "dac",
+      "turntable",
+      "phono",
+      "preamp",
+      "crossover",
+      "amps",
+      "speakers"
+    ],
+    "nav": [
+      "power",
+      "streamer",
+      "dac",
+      "turntable",
+      "phono",
+      "preamp",
+      "crossover",
+      "amps",
+      "speakers"
+    ],
+    "routes": [
+      {
+        "from": "streamer",
+        "to": "dac",
+        "kind": "digital"
+      },
+      {
+        "from": "turntable",
+        "to": "phono",
+        "kind": "analog"
+      },
+      {
+        "from": "phono",
+        "to": "preamp",
+        "kind": "analog"
+      },
+      {
+        "from": "dac",
+        "to": "preamp",
+        "kind": "analog"
+      },
+      {
+        "from": "preamp",
+        "to": "crossover",
+        "kind": "analog"
+      },
+      {
+        "from": "crossover",
+        "to": "amps",
+        "kind": "analog"
+      },
+      {
+        "from": "amps",
+        "to": "speakers",
+        "kind": "speaker"
+      },
+      {
+        "from": "crossover",
+        "to": "speakers",
+        "kind": "analog"
+      },
+      {
+        "from": "crossover",
+        "to": "ampR",
+        "kind": "analog"
+      },
+      {
+        "from": "ampR",
+        "to": "speakerR",
+        "kind": "speaker"
+      },
+      {
+        "from": "crossover",
+        "to": "speakerR",
+        "kind": "analog"
+      },
+      {
+        "from": "dacPSU",
+        "to": "dac",
+        "kind": "power"
+      },
+      {
+        "from": "dacPSU",
+        "to": "dac",
+        "kind": "power"
+      },
+      {
+        "from": "prePSU",
+        "to": "preamp",
+        "kind": "power"
+      },
+      {
+        "from": "prePSU",
+        "to": "preamp",
+        "kind": "power"
+      },
+      {
+        "from": "outlet",
+        "to": "power",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "amps",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "ampR",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "speakers",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "speakerR",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "streamer",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "phono",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "turntable",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "crossover",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "dac",
+        "kind": "power"
+      },
+      {
+        "from": "power",
+        "to": "preamp",
+        "kind": "power"
+      }
+    ],
+    "wiring": "One system, two amplification paths.×The preamp selects digital or vinyl. After volume, two independent full-range feeds serve the W13s’ passive drivers and integrated active subwoofers. Each arrow below represents a complete labelled cable bundle, not a single conductor or a moving electron.← SourcesSwipe diagram sidewaysW13s →\n\nNetwork streamerfile / USB audioNagra HD DAC Xfixed analog outputTurntable / MCfour cartridge leadsPhono / RIAAtwo signal / return pairsHD PREAMPinput selector → volumeone chosen source; stereo L / RPowered distribution stagegeneric balanced 100 kΩ inputtwo independently buffered full-range stereo feeds2 × Nagra Reference AMPone monoblock per L / R channelexternal power amplificationInside each W13: bass DSP + amplifiers2 × 350 W Class D per speakerfour internal amplifier channels across the pairW13 passive sectionsfront 6″ / 3″ drivers + rear tweeteramp + → driver network → amp −Integrated active subwooferstwo opposed 13″ side woofers in each W13each internal amp + → its driver → amp −\n\nUSBRCA1RCA2main XLR L / Rdifferential pair + shield per channelfull-range stereo XLR → monoblocksfull-range stereo XLR→ W13 integrated bass inputsspeaker + / − pair per channelindependent internal + / − loopsone amplifier channel per woofer\nPOWER IS PARALLEL: conditioner → each power supply via L / N + protective earth.Normal load loop: source L → power supply → N → source winding.PE bonds chassis to the protective system. Audio returns do not replace protective earth.Both Nagra audio PSUs, both monoblocks, both W13 bass supplies and powered educational stages receive AC.Left and right remain independent. No amplifier outputs are combined. RCA carries signal plus return. XLR carries a differential pair plus shield; shield/chassis bonding is distinct from protective earth. Both Nagra audio units have their own matched external PSU and two supply umbilicals.Each W13 retains its internal bass low-pass and stock passive driver network. The external stage connects only full-range outputs. The LR4 filter laboratory is a separate electrical model; neither its LP nor HP output is wired into this installation. The diagram is a plausible complete study, not verified as-built wiring from the owner’s photographs."
+  },
+  "suspension": {
+    "schematic": true,
+    "ropeCount": 2,
+    "translucent": true,
+    "beamBottom": 0.013499999999999998,
+    "pedestalTop": 0.01,
+    "frontBottom": 0,
+    "frontTop": 0.009,
+    "floorTop": 0
+  },
+  "motorA": {
+    "frame": 0.19,
+    "cone": 0.00901205621046189,
+    "cap": 0.03301205621046189,
+    "coil": -0.00298794378953811
+  },
+  "motorB": {
+    "frame": 0.19,
+    "cone": 0.005010474203858774,
+    "cap": 0.02901047420385877,
+    "coil": -0.006989525796141227
+  },
+  "aperture": {
+    "exists": true,
+    "holes": 1,
+    "depth": 0.006
+  },
+  "math": {
+    "alias": -2000,
+    "air": {
+      "p": 0.2,
+      "u": 0.00048429433472487246,
+      "x": 0.0000010900452284381342,
+      "lambda": 3.43
+    },
+    "lrInvert": {
+      "lo": 0.5,
+      "hi": 0.5,
+      "phase": -3.141592653589793,
+      "sum": 0
+    },
+    "lrDelay": {
+      "lo": 0.5,
+      "hi": 0.5,
+      "phase": -3.141592653589793,
+      "sum": 1.6081226496766366e-16
+    },
+    "quant": {
+      "q": 0.75,
+      "delta": 0.125,
+      "k": 6
+    }
+  },
+  "timing": {
+    "wall": 1.101899999976158,
+    "animation": 1.0999999999999976
+  },
+  "errors": [],
+  "external": []
+}

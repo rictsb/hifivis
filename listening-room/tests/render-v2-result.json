@@ -1,0 +1,57 @@
+{
+  "errors": [],
+  "external": [],
+  "images": [
+    {
+      "complete": true,
+      "width": 1600
+    },
+    {
+      "complete": true,
+      "width": 1200
+    },
+    {
+      "complete": true,
+      "width": 1200
+    },
+    {
+      "complete": true,
+      "width": 1200
+    },
+    {
+      "complete": true,
+      "width": 1600
+    },
+    {
+      "complete": true,
+      "width": 1200
+    },
+    {
+      "complete": true,
+      "width": 1200
+    },
+    {
+      "complete": true,
+      "width": 1200
+    },
+    {
+      "complete": true,
+      "width": 2560
+    },
+    {
+      "complete": true,
+      "width": 1920
+    },
+    {
+      "complete": true,
+      "width": 1920
+    },
+    {
+      "complete": true,
+      "width": 752
+    }
+  ],
+  "fps": 60.05840542060287,
+  "overflow": false,
+  "sha256": "33250a68d7f593bc4ea5fe018f8d3746ed55b9babf9b76ec4ec2ef83a096f6b6"
+}

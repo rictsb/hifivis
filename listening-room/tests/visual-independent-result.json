@@ -1,0 +1,59 @@
+{
+  "errors": [],
+  "net": [],
+  "controls": [
+    {
+      "id": "power",
+      "old": "2",
+      "updated": "2.1"
+    },
+    {
+      "id": "dac",
+      "old": "8000",
+      "updated": "16000"
+    },
+    {
+      "id": "turntable",
+      "old": "33.333333",
+      "updated": "45"
+    },
+    {
+      "id": "crossover",
+      "old": "60",
+      "updated": "61"
+    },
+    {
+      "id": "speakers",
+      "old": "80",
+      "updated": "81"
+    },
+    {
+      "id": "subs",
+      "old": "81",
+      "updated": "82"
+    }
+  ],
+  "refs": [
+    {
+      "loaded": true,
+      "width": 2560,
+      "alt": "Authentic manufacturer reference photograph of W13 SE+ exterior"
+    },
+    {
+      "loaded": true,
+      "width": 1920,
+      "alt": "Authentic manufacturer reference photograph of HD PREAMP"
+    },
+    {
+      "loaded": true,
+      "width": 1920,
+      "alt": "Authentic manufacturer reference photograph of HD DAC X"
+    },
+    {
+      "loaded": true,
+      "width": 752,
+      "alt": "Authentic manufacturer reference photograph of Reference AMP"
+    }
+  ],
+  "vinylRoute": "Turntable\n→\nPhono\n→\nPreamp\n→\nCrossover\n↗\nMonoblocks → W13 passive\n↘\nFull-range → W13 active bass\n↘\nLow-pass → powered subs"
+}

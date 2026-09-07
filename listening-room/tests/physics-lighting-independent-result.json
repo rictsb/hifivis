@@ -1,0 +1,570 @@
+{
+  "sha256": "29733ee1e5d8a542cb166523dc78b879c0b2d8446589125cc83d4ac5c820a7ad",
+  "bytes": 3875158,
+  "checks": [
+    {
+      "name": "Exactly two active spots in photographed installation",
+      "ok": true
+    },
+    {
+      "name": "Both spots carry owner CCT and estimated-photometry metadata",
+      "ok": true
+    },
+    {
+      "name": "2700 K linear RGB agrees with independent Planck/CIE integration",
+      "ok": true
+    },
+    {
+      "name": "Linear color workflow and nonlegacy inverse-square attenuation",
+      "ok": true
+    },
+    {
+      "name": "Both spots cast shadows and have scene-attached targets",
+      "ok": true
+    },
+    {
+      "name": "One spotlight is centered on each corresponding W13",
+      "ok": true
+    },
+    {
+      "name": "Lighting source note distinguishes CCT from lamp spectrum and measured photometry",
+      "ok": true
+    },
+    {
+      "name": "Zero dimmer turns both spots off without changing daylight or audio",
+      "ok": true
+    },
+    {
+      "name": "Half and full dimmer scale both lamps linearly at fixed chromaticity",
+      "ok": true
+    },
+    {
+      "name": "Dimmer output and accessible name are correct",
+      "ok": true
+    },
+    {
+      "name": "Study uses the same two lamps and preserves dimmer state",
+      "ok": true
+    },
+    {
+      "name": "Targets update to W13 locations in study",
+      "ok": true
+    },
+    {
+      "name": "Separate close-up remains explicitly neutral without added spot pair",
+      "ok": true
+    },
+    {
+      "name": "Audio architecture and representative quantities unchanged",
+      "ok": true
+    },
+    {
+      "name": "No JavaScript errors or external resource requests",
+      "ok": true
+    }
+  ],
+  "baseline": {
+    "lamps": [
+      {
+        "uuid": "160984a3-a8ed-46d5-b07a-fcbaa50b1819",
+        "name": "Left speaker spotlight · 2700 K",
+        "intensity": 45.5,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          -1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          -1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      },
+      {
+        "uuid": "b93906d1-70de-4ae4-867e-baf08a7d2cd4",
+        "name": "Right speaker spotlight · 2700 K",
+        "intensity": 45.5,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      }
+    ],
+    "spots": 70,
+    "ambient": [
+      0.48,
+      0.62,
+      0.34
+    ],
+    "legacy": false,
+    "colorManagement": true,
+    "output": "srgb",
+    "installation": "personal",
+    "audio": {
+      "freq": 100,
+      "level": -24,
+      "source": "digital"
+    },
+    "speakers": [
+      [
+        -1.88,
+        0,
+        -0.18
+      ],
+      [
+        1.88,
+        0,
+        -0.18
+      ]
+    ],
+    "sources": "Your photographs establish this system's visible appearance. The supplied original Boenicke brochure and manufacturer documents establish published construction. The scientific experiments use the stated equations. Listening impressions and proprietary marketing are not used as physical mechanisms.Your system, as photographedThese are the owner's supplied reference images. Select a photograph to inspect it. “Your room” follows this visible arrangement; it is not a measured room survey or a verified wiring record.Inspect photograph ↗Your listening roomThe arrangement of the photographed speakers, monoblocks, low cabinet and Nagra chassis. Room dimensions and concealed wiring are not established.Inspect photograph ↗Your W13 · frontPale vertical grain, joined black baffle, recessed wood ring and reddish wood midcone. The finish species is not inferred.Inspect photograph ↗Your W13 · rear and SwingBaseFinned bass amplifier plate, separate speaker terminals, silver towers, crossbeam and inserted support tongue.Inspect photograph ↗Your W13 · sideBuilt-in active subwoofer: glossy black diaphragm, broad surround and the grain across the deep cabinet side.Inspect photograph ↗Your Nagra equipmentThe photographed arrangement informs the listening-room reconstruction.The original W13 brochureInspect photograph ↗Original brochure · frontOriginal-generation exterior reference. Smaller dimensions are photograph estimates.Inspect photograph ↗Original brochure · constructionPublished 105 × 18 × 39 cm envelope, five-driver arrangement and dedicated amplification for the built-in active subwoofers.Inspect photograph ↗Original brochure · rearCorroborating exterior reference; your photographs govern the installed silver SwingBase and rear details.Manufacturer photographsInspect photograph ↗W13 family exteriorAuthentic reference photograph © Boenicke Audio. Manufacturer page ↗Inspect photograph ↗HD PREAMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗HD DAC XAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗Reference AMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗What is documentedThe W13 has a passive mid/treble section and built-in active subwoofers in its side panels. Its published envelope is 105 × 18 × 39 cm. Its SwingBase uses steel-rope suspension. The ropes and their terminations are concealed in the towers and are not reconstructed. No vibration performance is inferred from appearance.The HD PREAMP uses transformer volume control. The DAC X converts through Nagra's documented DSD256 architecture. The Reference AMP is the 300 W/8 Ω model. Exact source links appear in each component.Photographic interpretationThe W13 cabinet textures use perspective-rectified grain samples from your photographs, with lighting normalized and the mapping estimated. The pale finish is matched without asserting a species or finish SKU. Front recesses, wood cone, side-driver reflections and the silver rear support follow visible evidence. Fine dimensions and hidden construction are not factory CAD. Current W13 product pages include MK2 material; the original brochure and your speakers guide this reconstruction.Lighting your roomThe two speaker spotlights use your specified 2700 K colour temperature. Their RGB colour is derived from a 2700 K Planckian spectrum and CIE 1931 colour matching; it approximates warm-white light, not the spectrum or colour-rendering properties of your particular lamps. Placement, beam spread and brightness are visual estimates. The dimmer changes the two spotlights together; ambient daylight stays constant. The separate close-up studio uses neutral inspection lighting.What is an explanatory modelThe Complete study adds unbranded educational components. Its generic balanced distribution stage assumes a 100 kΩ differential input and independent low-impedance outputs; it feeds the monoblocks and the W13s’ built-in active subwoofer inputs full-range. The W13s supply the system’s sub-bass; no separate subwoofer cabinets are included. The adjustable LR4 filter is a separate teaching experiment and is not connected to either W13 feed. This plausible teaching installation is not a record of your wiring.The 8 Ω amplifier load, 1 V preamp source, PCM sampler, quantizer, LR4 filter, copper conductor, generic moving-coil driver, and ideal room are mathematical models. No undisclosed circuit, coil winding, speaker cavity or SE+ treatment is claimed to be reproduced.SourcesOriginal W13 construction — manufacturer brochureOriginal W13 SE+ — image hifi 2021, manufacturer-hostedOrtofon — moving-coil operationOrtofon — stereo groove geometryBoenicke W13 — manufacturer construction & photographsW13 bass amplifier — input and presetsBoenicke SwingBase — steel-rope suspension principleNagra HD PREAMP — original modelHD PREAMP owner manual — input/output selection & supplyNagra HD DAC X — documented conversion architectureHD DAC X owner manual — interfaces & output referenceNagra HD mechanical drawing — 2021Nagra Reference AMP — specifications & photographyOpenStax — model of conduction in metalsTexas Instruments — transmission-line propagationTDK — power-line EMC filter principlesAnalog Devices MT-002 — sampling and aliasingAnalog Devices MT-001 — quantization assumptionsAnalog Devices MT-017 — reconstruction and DAC imagesSiegfried Linkwitz — active filtersOpenStax — sound intensity and pressureOpenStax — sound waves and particle displacementAnalog Devices — precision RIAA equalizationReferences inspected 7 September 2026. All displayed photographs and brochure excerpts remain available offline; external source links require internet. Owner photographs supplied for this study; manufacturer material © its respective owner. Three.js r160, MIT license. This study is independent of all named manufacturers.",
+    "detailSpotCount": 0
+  },
+  "zero": {
+    "lamps": [
+      {
+        "uuid": "160984a3-a8ed-46d5-b07a-fcbaa50b1819",
+        "name": "Left speaker spotlight · 2700 K",
+        "intensity": 0,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          -1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          -1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      },
+      {
+        "uuid": "b93906d1-70de-4ae4-867e-baf08a7d2cd4",
+        "name": "Right speaker spotlight · 2700 K",
+        "intensity": 0,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      }
+    ],
+    "spots": 0,
+    "ambient": [
+      0.48,
+      0.62,
+      0.34
+    ],
+    "legacy": false,
+    "colorManagement": true,
+    "output": "srgb",
+    "installation": "personal",
+    "audio": {
+      "freq": 100,
+      "level": -24,
+      "source": "digital"
+    },
+    "speakers": [
+      [
+        -1.88,
+        0,
+        -0.18
+      ],
+      [
+        1.88,
+        0,
+        -0.18
+      ]
+    ],
+    "sources": "Your photographs establish this system's visible appearance. The supplied original Boenicke brochure and manufacturer documents establish published construction. The scientific experiments use the stated equations. Listening impressions and proprietary marketing are not used as physical mechanisms.Your system, as photographedThese are the owner's supplied reference images. Select a photograph to inspect it. “Your room” follows this visible arrangement; it is not a measured room survey or a verified wiring record.Inspect photograph ↗Your listening roomThe arrangement of the photographed speakers, monoblocks, low cabinet and Nagra chassis. Room dimensions and concealed wiring are not established.Inspect photograph ↗Your W13 · frontPale vertical grain, joined black baffle, recessed wood ring and reddish wood midcone. The finish species is not inferred.Inspect photograph ↗Your W13 · rear and SwingBaseFinned bass amplifier plate, separate speaker terminals, silver towers, crossbeam and inserted support tongue.Inspect photograph ↗Your W13 · sideBuilt-in active subwoofer: glossy black diaphragm, broad surround and the grain across the deep cabinet side.Inspect photograph ↗Your Nagra equipmentThe photographed arrangement informs the listening-room reconstruction.The original W13 brochureInspect photograph ↗Original brochure · frontOriginal-generation exterior reference. Smaller dimensions are photograph estimates.Inspect photograph ↗Original brochure · constructionPublished 105 × 18 × 39 cm envelope, five-driver arrangement and dedicated amplification for the built-in active subwoofers.Inspect photograph ↗Original brochure · rearCorroborating exterior reference; your photographs govern the installed silver SwingBase and rear details.Manufacturer photographsInspect photograph ↗W13 family exteriorAuthentic reference photograph © Boenicke Audio. Manufacturer page ↗Inspect photograph ↗HD PREAMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗HD DAC XAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗Reference AMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗What is documentedThe W13 has a passive mid/treble section and built-in active subwoofers in its side panels. Its published envelope is 105 × 18 × 39 cm. Its SwingBase uses steel-rope suspension. The ropes and their terminations are concealed in the towers and are not reconstructed. No vibration performance is inferred from appearance.The HD PREAMP uses transformer volume control. The DAC X converts through Nagra's documented DSD256 architecture. The Reference AMP is the 300 W/8 Ω model. Exact source links appear in each component.Photographic interpretationThe W13 cabinet textures use perspective-rectified grain samples from your photographs, with lighting normalized and the mapping estimated. The pale finish is matched without asserting a species or finish SKU. Front recesses, wood cone, side-driver reflections and the silver rear support follow visible evidence. Fine dimensions and hidden construction are not factory CAD. Current W13 product pages include MK2 material; the original brochure and your speakers guide this reconstruction.Lighting your roomThe two speaker spotlights use your specified 2700 K colour temperature. Their RGB colour is derived from a 2700 K Planckian spectrum and CIE 1931 colour matching; it approximates warm-white light, not the spectrum or colour-rendering properties of your particular lamps. Placement, beam spread and brightness are visual estimates. The dimmer changes the two spotlights together; ambient daylight stays constant. The separate close-up studio uses neutral inspection lighting.What is an explanatory modelThe Complete study adds unbranded educational components. Its generic balanced distribution stage assumes a 100 kΩ differential input and independent low-impedance outputs; it feeds the monoblocks and the W13s’ built-in active subwoofer inputs full-range. The W13s supply the system’s sub-bass; no separate subwoofer cabinets are included. The adjustable LR4 filter is a separate teaching experiment and is not connected to either W13 feed. This plausible teaching installation is not a record of your wiring.The 8 Ω amplifier load, 1 V preamp source, PCM sampler, quantizer, LR4 filter, copper conductor, generic moving-coil driver, and ideal room are mathematical models. No undisclosed circuit, coil winding, speaker cavity or SE+ treatment is claimed to be reproduced.SourcesOriginal W13 construction — manufacturer brochureOriginal W13 SE+ — image hifi 2021, manufacturer-hostedOrtofon — moving-coil operationOrtofon — stereo groove geometryBoenicke W13 — manufacturer construction & photographsW13 bass amplifier — input and presetsBoenicke SwingBase — steel-rope suspension principleNagra HD PREAMP — original modelHD PREAMP owner manual — input/output selection & supplyNagra HD DAC X — documented conversion architectureHD DAC X owner manual — interfaces & output referenceNagra HD mechanical drawing — 2021Nagra Reference AMP — specifications & photographyOpenStax — model of conduction in metalsTexas Instruments — transmission-line propagationTDK — power-line EMC filter principlesAnalog Devices MT-002 — sampling and aliasingAnalog Devices MT-001 — quantization assumptionsAnalog Devices MT-017 — reconstruction and DAC imagesSiegfried Linkwitz — active filtersOpenStax — sound intensity and pressureOpenStax — sound waves and particle displacementAnalog Devices — precision RIAA equalizationReferences inspected 7 September 2026. All displayed photographs and brochure excerpts remain available offline; external source links require internet. Owner photographs supplied for this study; manufacturer material © its respective owner. Three.js r160, MIT license. This study is independent of all named manufacturers.",
+    "detailSpotCount": 0
+  },
+  "half": {
+    "lamps": [
+      {
+        "uuid": "160984a3-a8ed-46d5-b07a-fcbaa50b1819",
+        "name": "Left speaker spotlight · 2700 K",
+        "intensity": 32.5,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          -1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          -1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      },
+      {
+        "uuid": "b93906d1-70de-4ae4-867e-baf08a7d2cd4",
+        "name": "Right speaker spotlight · 2700 K",
+        "intensity": 32.5,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      }
+    ],
+    "spots": 50,
+    "ambient": [
+      0.48,
+      0.62,
+      0.34
+    ],
+    "legacy": false,
+    "colorManagement": true,
+    "output": "srgb",
+    "installation": "personal",
+    "audio": {
+      "freq": 100,
+      "level": -24,
+      "source": "digital"
+    },
+    "speakers": [
+      [
+        -1.88,
+        0,
+        -0.18
+      ],
+      [
+        1.88,
+        0,
+        -0.18
+      ]
+    ],
+    "sources": "Your photographs establish this system's visible appearance. The supplied original Boenicke brochure and manufacturer documents establish published construction. The scientific experiments use the stated equations. Listening impressions and proprietary marketing are not used as physical mechanisms.Your system, as photographedThese are the owner's supplied reference images. Select a photograph to inspect it. “Your room” follows this visible arrangement; it is not a measured room survey or a verified wiring record.Inspect photograph ↗Your listening roomThe arrangement of the photographed speakers, monoblocks, low cabinet and Nagra chassis. Room dimensions and concealed wiring are not established.Inspect photograph ↗Your W13 · frontPale vertical grain, joined black baffle, recessed wood ring and reddish wood midcone. The finish species is not inferred.Inspect photograph ↗Your W13 · rear and SwingBaseFinned bass amplifier plate, separate speaker terminals, silver towers, crossbeam and inserted support tongue.Inspect photograph ↗Your W13 · sideBuilt-in active subwoofer: glossy black diaphragm, broad surround and the grain across the deep cabinet side.Inspect photograph ↗Your Nagra equipmentThe photographed arrangement informs the listening-room reconstruction.The original W13 brochureInspect photograph ↗Original brochure · frontOriginal-generation exterior reference. Smaller dimensions are photograph estimates.Inspect photograph ↗Original brochure · constructionPublished 105 × 18 × 39 cm envelope, five-driver arrangement and dedicated amplification for the built-in active subwoofers.Inspect photograph ↗Original brochure · rearCorroborating exterior reference; your photographs govern the installed silver SwingBase and rear details.Manufacturer photographsInspect photograph ↗W13 family exteriorAuthentic reference photograph © Boenicke Audio. Manufacturer page ↗Inspect photograph ↗HD PREAMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗HD DAC XAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗Reference AMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗What is documentedThe W13 has a passive mid/treble section and built-in active subwoofers in its side panels. Its published envelope is 105 × 18 × 39 cm. Its SwingBase uses steel-rope suspension. The ropes and their terminations are concealed in the towers and are not reconstructed. No vibration performance is inferred from appearance.The HD PREAMP uses transformer volume control. The DAC X converts through Nagra's documented DSD256 architecture. The Reference AMP is the 300 W/8 Ω model. Exact source links appear in each component.Photographic interpretationThe W13 cabinet textures use perspective-rectified grain samples from your photographs, with lighting normalized and the mapping estimated. The pale finish is matched without asserting a species or finish SKU. Front recesses, wood cone, side-driver reflections and the silver rear support follow visible evidence. Fine dimensions and hidden construction are not factory CAD. Current W13 product pages include MK2 material; the original brochure and your speakers guide this reconstruction.Lighting your roomThe two speaker spotlights use your specified 2700 K colour temperature. Their RGB colour is derived from a 2700 K Planckian spectrum and CIE 1931 colour matching; it approximates warm-white light, not the spectrum or colour-rendering properties of your particular lamps. Placement, beam spread and brightness are visual estimates. The dimmer changes the two spotlights together; ambient daylight stays constant. The separate close-up studio uses neutral inspection lighting.What is an explanatory modelThe Complete study adds unbranded educational components. Its generic balanced distribution stage assumes a 100 kΩ differential input and independent low-impedance outputs; it feeds the monoblocks and the W13s’ built-in active subwoofer inputs full-range. The W13s supply the system’s sub-bass; no separate subwoofer cabinets are included. The adjustable LR4 filter is a separate teaching experiment and is not connected to either W13 feed. This plausible teaching installation is not a record of your wiring.The 8 Ω amplifier load, 1 V preamp source, PCM sampler, quantizer, LR4 filter, copper conductor, generic moving-coil driver, and ideal room are mathematical models. No undisclosed circuit, coil winding, speaker cavity or SE+ treatment is claimed to be reproduced.SourcesOriginal W13 construction — manufacturer brochureOriginal W13 SE+ — image hifi 2021, manufacturer-hostedOrtofon — moving-coil operationOrtofon — stereo groove geometryBoenicke W13 — manufacturer construction & photographsW13 bass amplifier — input and presetsBoenicke SwingBase — steel-rope suspension principleNagra HD PREAMP — original modelHD PREAMP owner manual — input/output selection & supplyNagra HD DAC X — documented conversion architectureHD DAC X owner manual — interfaces & output referenceNagra HD mechanical drawing — 2021Nagra Reference AMP — specifications & photographyOpenStax — model of conduction in metalsTexas Instruments — transmission-line propagationTDK — power-line EMC filter principlesAnalog Devices MT-002 — sampling and aliasingAnalog Devices MT-001 — quantization assumptionsAnalog Devices MT-017 — reconstruction and DAC imagesSiegfried Linkwitz — active filtersOpenStax — sound intensity and pressureOpenStax — sound waves and particle displacementAnalog Devices — precision RIAA equalizationReferences inspected 7 September 2026. All displayed photographs and brochure excerpts remain available offline; external source links require internet. Owner photographs supplied for this study; manufacturer material © its respective owner. Three.js r160, MIT license. This study is independent of all named manufacturers.",
+    "detailSpotCount": 0
+  },
+  "full": {
+    "lamps": [
+      {
+        "uuid": "160984a3-a8ed-46d5-b07a-fcbaa50b1819",
+        "name": "Left speaker spotlight · 2700 K",
+        "intensity": 65,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          -1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          -1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      },
+      {
+        "uuid": "b93906d1-70de-4ae4-867e-baf08a7d2cd4",
+        "name": "Right speaker spotlight · 2700 K",
+        "intensity": 65,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          1.4664,
+          2.7,
+          0.97
+        ],
+        "target": [
+          1.88,
+          0.62,
+          -0.13999999999999999
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      }
+    ],
+    "spots": 100,
+    "ambient": [
+      0.48,
+      0.62,
+      0.34
+    ],
+    "legacy": false,
+    "colorManagement": true,
+    "output": "srgb",
+    "installation": "personal",
+    "audio": {
+      "freq": 100,
+      "level": -24,
+      "source": "digital"
+    },
+    "speakers": [
+      [
+        -1.88,
+        0,
+        -0.18
+      ],
+      [
+        1.88,
+        0,
+        -0.18
+      ]
+    ],
+    "sources": "Your photographs establish this system's visible appearance. The supplied original Boenicke brochure and manufacturer documents establish published construction. The scientific experiments use the stated equations. Listening impressions and proprietary marketing are not used as physical mechanisms.Your system, as photographedThese are the owner's supplied reference images. Select a photograph to inspect it. “Your room” follows this visible arrangement; it is not a measured room survey or a verified wiring record.Inspect photograph ↗Your listening roomThe arrangement of the photographed speakers, monoblocks, low cabinet and Nagra chassis. Room dimensions and concealed wiring are not established.Inspect photograph ↗Your W13 · frontPale vertical grain, joined black baffle, recessed wood ring and reddish wood midcone. The finish species is not inferred.Inspect photograph ↗Your W13 · rear and SwingBaseFinned bass amplifier plate, separate speaker terminals, silver towers, crossbeam and inserted support tongue.Inspect photograph ↗Your W13 · sideBuilt-in active subwoofer: glossy black diaphragm, broad surround and the grain across the deep cabinet side.Inspect photograph ↗Your Nagra equipmentThe photographed arrangement informs the listening-room reconstruction.The original W13 brochureInspect photograph ↗Original brochure · frontOriginal-generation exterior reference. Smaller dimensions are photograph estimates.Inspect photograph ↗Original brochure · constructionPublished 105 × 18 × 39 cm envelope, five-driver arrangement and dedicated amplification for the built-in active subwoofers.Inspect photograph ↗Original brochure · rearCorroborating exterior reference; your photographs govern the installed silver SwingBase and rear details.Manufacturer photographsInspect photograph ↗W13 family exteriorAuthentic reference photograph © Boenicke Audio. Manufacturer page ↗Inspect photograph ↗HD PREAMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗HD DAC XAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗Reference AMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗What is documentedThe W13 has a passive mid/treble section and built-in active subwoofers in its side panels. Its published envelope is 105 × 18 × 39 cm. Its SwingBase uses steel-rope suspension. The ropes and their terminations are concealed in the towers and are not reconstructed. No vibration performance is inferred from appearance.The HD PREAMP uses transformer volume control. The DAC X converts through Nagra's documented DSD256 architecture. The Reference AMP is the 300 W/8 Ω model. Exact source links appear in each component.Photographic interpretationThe W13 cabinet textures use perspective-rectified grain samples from your photographs, with lighting normalized and the mapping estimated. The pale finish is matched without asserting a species or finish SKU. Front recesses, wood cone, side-driver reflections and the silver rear support follow visible evidence. Fine dimensions and hidden construction are not factory CAD. Current W13 product pages include MK2 material; the original brochure and your speakers guide this reconstruction.Lighting your roomThe two speaker spotlights use your specified 2700 K colour temperature. Their RGB colour is derived from a 2700 K Planckian spectrum and CIE 1931 colour matching; it approximates warm-white light, not the spectrum or colour-rendering properties of your particular lamps. Placement, beam spread and brightness are visual estimates. The dimmer changes the two spotlights together; ambient daylight stays constant. The separate close-up studio uses neutral inspection lighting.What is an explanatory modelThe Complete study adds unbranded educational components. Its generic balanced distribution stage assumes a 100 kΩ differential input and independent low-impedance outputs; it feeds the monoblocks and the W13s’ built-in active subwoofer inputs full-range. The W13s supply the system’s sub-bass; no separate subwoofer cabinets are included. The adjustable LR4 filter is a separate teaching experiment and is not connected to either W13 feed. This plausible teaching installation is not a record of your wiring.The 8 Ω amplifier load, 1 V preamp source, PCM sampler, quantizer, LR4 filter, copper conductor, generic moving-coil driver, and ideal room are mathematical models. No undisclosed circuit, coil winding, speaker cavity or SE+ treatment is claimed to be reproduced.SourcesOriginal W13 construction — manufacturer brochureOriginal W13 SE+ — image hifi 2021, manufacturer-hostedOrtofon — moving-coil operationOrtofon — stereo groove geometryBoenicke W13 — manufacturer construction & photographsW13 bass amplifier — input and presetsBoenicke SwingBase — steel-rope suspension principleNagra HD PREAMP — original modelHD PREAMP owner manual — input/output selection & supplyNagra HD DAC X — documented conversion architectureHD DAC X owner manual — interfaces & output referenceNagra HD mechanical drawing — 2021Nagra Reference AMP — specifications & photographyOpenStax — model of conduction in metalsTexas Instruments — transmission-line propagationTDK — power-line EMC filter principlesAnalog Devices MT-002 — sampling and aliasingAnalog Devices MT-001 — quantization assumptionsAnalog Devices MT-017 — reconstruction and DAC imagesSiegfried Linkwitz — active filtersOpenStax — sound intensity and pressureOpenStax — sound waves and particle displacementAnalog Devices — precision RIAA equalizationReferences inspected 7 September 2026. All displayed photographs and brochure excerpts remain available offline; external source links require internet. Owner photographs supplied for this study; manufacturer material © its respective owner. Three.js r160, MIT license. This study is independent of all named manufacturers.",
+    "detailSpotCount": 0
+  },
+  "study": {
+    "lamps": [
+      {
+        "uuid": "160984a3-a8ed-46d5-b07a-fcbaa50b1819",
+        "name": "Left speaker spotlight · 2700 K",
+        "intensity": 65,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          -1.326,
+          2.7,
+          1.5499999999999998
+        ],
+        "target": [
+          -1.7,
+          0.62,
+          0.44
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      },
+      {
+        "uuid": "b93906d1-70de-4ae4-867e-baf08a7d2cd4",
+        "name": "Right speaker spotlight · 2700 K",
+        "intensity": 65,
+        "color": [
+          1,
+          0.415251456,
+          0.099114421
+        ],
+        "decay": 2,
+        "distance": 0,
+        "castShadow": true,
+        "map": [
+          1024,
+          1024
+        ],
+        "position": [
+          1.326,
+          2.7,
+          1.5499999999999998
+        ],
+        "target": [
+          1.7,
+          0.62,
+          0.44
+        ],
+        "targetAttached": true,
+        "angle": 0.2243994752564138,
+        "penumbra": 0.65,
+        "cct": 2700,
+        "estimated": true
+      }
+    ],
+    "spots": 100,
+    "ambient": [
+      0.52,
+      0.85,
+      0.38
+    ],
+    "legacy": false,
+    "colorManagement": true,
+    "output": "srgb",
+    "installation": "study",
+    "audio": {
+      "freq": 100,
+      "level": -24,
+      "source": "digital"
+    },
+    "speakers": [
+      [
+        -1.7,
+        0,
+        0.4
+      ],
+      [
+        1.7,
+        0,
+        0.4
+      ]
+    ],
+    "sources": "Your photographs establish this system's visible appearance. The supplied original Boenicke brochure and manufacturer documents establish published construction. The scientific experiments use the stated equations. Listening impressions and proprietary marketing are not used as physical mechanisms.Your system, as photographedThese are the owner's supplied reference images. Select a photograph to inspect it. “Your room” follows this visible arrangement; it is not a measured room survey or a verified wiring record.Inspect photograph ↗Your listening roomThe arrangement of the photographed speakers, monoblocks, low cabinet and Nagra chassis. Room dimensions and concealed wiring are not established.Inspect photograph ↗Your W13 · frontPale vertical grain, joined black baffle, recessed wood ring and reddish wood midcone. The finish species is not inferred.Inspect photograph ↗Your W13 · rear and SwingBaseFinned bass amplifier plate, separate speaker terminals, silver towers, crossbeam and inserted support tongue.Inspect photograph ↗Your W13 · sideBuilt-in active subwoofer: glossy black diaphragm, broad surround and the grain across the deep cabinet side.Inspect photograph ↗Your Nagra equipmentThe photographed arrangement informs the listening-room reconstruction.The original W13 brochureInspect photograph ↗Original brochure · frontOriginal-generation exterior reference. Smaller dimensions are photograph estimates.Inspect photograph ↗Original brochure · constructionPublished 105 × 18 × 39 cm envelope, five-driver arrangement and dedicated amplification for the built-in active subwoofers.Inspect photograph ↗Original brochure · rearCorroborating exterior reference; your photographs govern the installed silver SwingBase and rear details.Manufacturer photographsInspect photograph ↗W13 family exteriorAuthentic reference photograph © Boenicke Audio. Manufacturer page ↗Inspect photograph ↗HD PREAMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗HD DAC XAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗Inspect photograph ↗Reference AMPAuthentic reference photograph © Nagra / Audio Technology Switzerland. Manufacturer page ↗What is documentedThe W13 has a passive mid/treble section and built-in active subwoofers in its side panels. Its published envelope is 105 × 18 × 39 cm. Its SwingBase uses steel-rope suspension. The ropes and their terminations are concealed in the towers and are not reconstructed. No vibration performance is inferred from appearance.The HD PREAMP uses transformer volume control. The DAC X converts through Nagra's documented DSD256 architecture. The Reference AMP is the 300 W/8 Ω model. Exact source links appear in each component.Photographic interpretationThe W13 cabinet textures use perspective-rectified grain samples from your photographs, with lighting normalized and the mapping estimated. The pale finish is matched without asserting a species or finish SKU. Front recesses, wood cone, side-driver reflections and the silver rear support follow visible evidence. Fine dimensions and hidden construction are not factory CAD. Current W13 product pages include MK2 material; the original brochure and your speakers guide this reconstruction.Lighting your roomThe two speaker spotlights use your specified 2700 K colour temperature. Their RGB colour is derived from a 2700 K Planckian spectrum and CIE 1931 colour matching; it approximates warm-white light, not the spectrum or colour-rendering properties of your particular lamps. Placement, beam spread and brightness are visual estimates. The dimmer changes the two spotlights together; ambient daylight stays constant. The separate close-up studio uses neutral inspection lighting.What is an explanatory modelThe Complete study adds unbranded educational components. Its generic balanced distribution stage assumes a 100 kΩ differential input and independent low-impedance outputs; it feeds the monoblocks and the W13s’ built-in active subwoofer inputs full-range. The W13s supply the system’s sub-bass; no separate subwoofer cabinets are included. The adjustable LR4 filter is a separate teaching experiment and is not connected to either W13 feed. This plausible teaching installation is not a record of your wiring.The 8 Ω amplifier load, 1 V preamp source, PCM sampler, quantizer, LR4 filter, copper conductor, generic moving-coil driver, and ideal room are mathematical models. No undisclosed circuit, coil winding, speaker cavity or SE+ treatment is claimed to be reproduced.SourcesOriginal W13 construction — manufacturer brochureOriginal W13 SE+ — image hifi 2021, manufacturer-hostedOrtofon — moving-coil operationOrtofon — stereo groove geometryBoenicke W13 — manufacturer construction & photographsW13 bass amplifier — input and presetsBoenicke SwingBase — steel-rope suspension principleNagra HD PREAMP — original modelHD PREAMP owner manual — input/output selection & supplyNagra HD DAC X — documented conversion architectureHD DAC X owner manual — interfaces & output referenceNagra HD mechanical drawing — 2021Nagra Reference AMP — specifications & photographyOpenStax — model of conduction in metalsTexas Instruments — transmission-line propagationTDK — power-line EMC filter principlesAnalog Devices MT-002 — sampling and aliasingAnalog Devices MT-001 — quantization assumptionsAnalog Devices MT-017 — reconstruction and DAC imagesSiegfried Linkwitz — active filtersOpenStax — sound intensity and pressureOpenStax — sound waves and particle displacementAnalog Devices — precision RIAA equalizationReferences inspected 7 September 2026. All displayed photographs and brochure excerpts remain available offline; external source links require internet. Owner photographs supplied for this study; manufacturer material © its respective owner. Three.js r160, MIT license. This study is independent of all named manufacturers.",
+    "detailSpotCount": 0
+  },
+  "topology": {
+    "categories": 9,
+    "noSubs": true,
+    "branches": [
+      "amps",
+      "speakers",
+      "ampR",
+      "speakerR"
+    ],
+    "acoustic": {
+      "p": 0.2,
+      "u": 0.00048429433472487246,
+      "x": 0.0000010900452284381342,
+      "lambda": 3.43
+    },
+    "alias": -2000
+  },
+  "errors": [],
+  "external": []
+}

@@ -1,0 +1,16 @@
+{
+  "errors": [],
+  "requests": [
+    "file:///[project-directory]/The%20Listening%20Room.html"
+  ],
+  "info": {
+    "webgl": "WebGL 2.0 (OpenGL ES 3.0 Chromium)",
+    "triangles": 243104,
+    "calls": 296,
+    "loaded": true,
+    "canvas": [
+      1600,
+      1000
+    ]
+  }
+}

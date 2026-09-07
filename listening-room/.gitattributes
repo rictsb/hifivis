@@ -1,0 +1,3 @@
+# Preserve the reviewed HTML bytes and original CIE dataset checksum.
+"The Listening Room.html" -text
+research/CIE_xyz_1931_2deg.csv -text whitespace=cr-at-eol

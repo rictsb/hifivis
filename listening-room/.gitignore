@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
+# Uncompressed working images and scratch reference downloads.
+research/user-photos/*.png
+research/materials/*.png
+research/brochure/*.png
+research/brochure-v2/
+research/references/*.html
+research/references/*.pdf
